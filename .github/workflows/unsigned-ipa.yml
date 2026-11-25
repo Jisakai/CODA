@@ -73,7 +73,8 @@ jobs:
           clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I CodaDSP/include CodaDSP/src/coda_dsp.cpp CodaDSP/tests/dsp_tests.cpp \
             -o build/generated/dsp/dsp_tests_sanitized
-          ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 \
+          # Apple's runtime rejects LeakSanitizer; retain address/UB checks.
+          ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             build/generated/dsp/dsp_tests_sanitized
 
       - name: Run iPad simulator launch smoke test
