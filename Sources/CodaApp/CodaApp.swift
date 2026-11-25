@@ -51,4 +51,33 @@ private final class CodaHostingController<Content: View>: UIHostingController<Co
     // The scene queries its root controller; UIRequiresFullScreen no longer locks rotation.
     // https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key
     override var prefersInterfaceOrientationLocked: Bool { true }
+
+#if DEBUG
+    // Read actual scene/window/host geometry in UI tests, independently of
+    // XCUIDevice.orientation and AX's screen-coordinate orientation.
+    private var geometryReadout: UILabel?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        guard ProcessInfo.processInfo.arguments.contains("--coda-ui-geometry") else { return }
+        let readout = UILabel(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        readout.text = "Scene geometry"
+        readout.alpha = 0.01
+        readout.isUserInteractionEnabled = false
+        readout.isAccessibilityElement = true
+        readout.accessibilityIdentifier = "editor.sceneGeometry"
+        view.addSubview(readout)
+        geometryReadout = readout
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard let readout = geometryReadout, let window = view.window,
+              let scene = window.windowScene else { return }
+        let sizes = [scene.coordinateSpace.bounds.size, window.bounds.size, view.bounds.size]
+        readout.accessibilityValue = ([scene.interfaceOrientation.isLandscape ? "landscape" : "portrait"]
+            + sizes.flatMap { [String(Double($0.width)), String(Double($0.height))] })
+            .joined(separator: "|")
+    }
+#endif
 }

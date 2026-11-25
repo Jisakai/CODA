@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class CodaLaunchTests: XCTestCase {
     @MainActor
@@ -17,10 +18,18 @@ final class CodaLaunchTests: XCTestCase {
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        assertLandscapeContentFrame(in: app)
         device.orientation = .portrait
         XCTAssertTrue(app.buttons["top.play"].exists)
-        XCTAssertGreaterThan(window.frame.width, window.frame.height,
-                             "The editor must remain landscape after a portrait rotation attempt")
+        // AX frames use screen coordinates, which may now be portrait even
+        // though the scene remains landscape. Query UIKit's actual geometry.
+        assertLandscapeSceneGeometry(in: app)
+
+        app.terminate()
+        launchAndDescribe(app, orientation: .portrait)
+        assertLandscapeSceneGeometry(in: app)
+        device.orientation = .landscapeLeft
+        assertLandscapeContentFrame(in: app)
     }
 
     @MainActor
@@ -79,6 +88,11 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
         app.buttons["top.drawer"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["editor.synthDrawer"].waitForExistence(timeout: 5))
+        let drawer = app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.frame
+        let window = app.windows.firstMatch.frame
+        XCTAssertEqual(drawer.minY, window.minY + 52 + 20 + 104, accuracy: 1)
+        XCTAssertEqual(drawer.maxX, window.maxX, accuracy: 1)
+        XCTAssertEqual(drawer.maxY, window.maxY, accuracy: 1)
         for index in 0...2 {
             let preset = app.buttons["drawer.preset.\(index)"]
             XCTAssertTrue(preset.exists)
@@ -165,9 +179,59 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
-    private func launchAndDescribe(_ app: XCUIApplication) {
+    private func launchAndDescribe(_ app: XCUIApplication,
+                                   orientation: UIDeviceOrientation = .landscapeLeft) {
+        // Each test owns its initial state. Otherwise the portrait rotation in
+        // the lock test (or a cold simulator) can contaminate review captures.
+        XCUIDevice.shared.orientation = orientation
+        if !app.launchArguments.contains("--coda-ui-geometry") {
+            app.launchArguments.append("--coda-ui-geometry")
+        }
         app.launch()
+        assertLandscapeSceneGeometry(in: app)
+        if orientation.isLandscape { assertLandscapeContentFrame(in: app) }
         print("M1 initial launch AX tree (\(name)); app state: \(app.state.rawValue)\n\(app.debugDescription)")
+    }
+
+    @MainActor
+    private func assertLandscapeSceneGeometry(in app: XCUIApplication,
+                                              file: StaticString = #filePath, line: UInt = #line) {
+        let readout = app.staticTexts["editor.sceneGeometry"]
+        let validGeometry = NSPredicate { _, _ in
+            guard readout.exists, let value = readout.value as? String else { return false }
+            let fields = value.split(separator: "|")
+            guard fields.count == 7, fields[0] == "landscape" else { return false }
+            let sizes = fields.dropFirst().compactMap { Double($0) }
+            guard sizes.count == 6, sizes[0] > sizes[1], sizes[1] > 0 else { return false }
+            // Scene, window and hosting view must agree: no portrait window
+            // underneath a landscape host, or stale host size after rotation.
+            return stride(from: 2, to: 6, by: 2).allSatisfy {
+                abs(sizes[$0] - sizes[0]) <= 1 && abs(sizes[$0 + 1] - sizes[1]) <= 1
+            }
+        }
+        let ready = XCTNSPredicateExpectation(predicate: validGeometry, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed,
+                       "Expected matching landscape scene/window/host sizes; got \(readout.value ?? "nil")",
+                       file: file, line: line)
+    }
+
+    @MainActor
+    private func assertLandscapeContentFrame(in app: XCUIApplication,
+                                             file: StaticString = #filePath, line: UInt = #line) {
+        let topBar = app.descendants(matching: .any)["editor.topBar"].firstMatch
+        let window = app.windows.firstMatch
+        let landscapeFrame = NSPredicate { _, _ in
+            guard topBar.exists, window.exists else { return false }
+            let bar = topBar.frame
+            let bounds = window.frame
+            return bounds.width > bounds.height && bar.width > bar.height
+                && abs(bar.height - 52) <= 1 && abs(bar.width - bounds.width) <= 1
+                && abs(bar.minX - bounds.minX) <= 1 && abs(bar.minY - bounds.minY) <= 1
+        }
+        let ready = XCTNSPredicateExpectation(predicate: landscapeFrame, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed,
+                       "Top bar must span the landscape window horizontally: \(topBar.frame), window: \(window.frame)",
+                       file: file, line: line)
     }
 
     @MainActor
@@ -185,7 +249,15 @@ final class CodaLaunchTests: XCTestCase {
 
     @MainActor
     private func attachScreenshot(named name: String, from app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        assertLandscapeSceneGeometry(in: app)
+        assertLandscapeContentFrame(in: app)
+        let screenshot = app.screenshot()
+        let screen = XCUIScreen.main.screenshot()
+        XCTAssertGreaterThan(screen.image.size.width, screen.image.size.height,
+                             "Review capture must start from a landscape screen bitmap")
+        XCTAssertEqual(screenshot.image.size, screen.image.size,
+                       "App and screen capture extents must agree; avoid portrait cropping/black padding")
+        let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = "\(name).png"
         attachment.lifetime = .keepAlways
         add(attachment)
