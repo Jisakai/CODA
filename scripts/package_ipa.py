@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and verify the unsigned, iPad-only M0 IPA on the macOS CI runner."""
+"""Create and verify the unsigned, iPad-only coda IPA on the macOS CI runner."""
 
 import argparse
 import hashlib
@@ -134,7 +134,7 @@ def main() -> None:
     verify_ipa(ipa_path, info, executable_name)
     digest = hashlib.sha256(ipa_path.read_bytes()).hexdigest()
     report = [
-        "coda M0 unsigned iPad IPA verification",
+        "coda unsigned iPad IPA verification",
         f"Xcode: {args.xcode_version}",
         f"iOS SDK: {args.ios_sdk_version}",
         f"XcodeGen: {args.xcodegen_version}",

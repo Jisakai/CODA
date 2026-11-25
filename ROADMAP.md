@@ -22,8 +22,9 @@ Source: `SPEC.md` §18. Behavior follows `SPEC.md`; visuals follow `docs/DESIGN.
 - [ ] **M1 — Synth + chord track.** Voice engine, 3 presets, Wobble/Warmth + five knobs, FX chain, shared delay + reverb and per-layer EQ/volume (§13.7), ear-safety master, glide. Top bar (settings, key/scale, BPM, loop, play), thin timeline, chord strip, Pencil add/resize/delete and audition, plain block-chord playback, rule-based two-ring radial, undo/redo, right drawer (synth half only).
   - **Exit criterion (§18):** Build a 4-bar progression and hear a convincing loop that stays pleasant for long listening.
   - Scope clarification from §13.7: Chords EQ/volume in M1; Bass/Melody EQ/volume with those layers in M3.
-  - Foundation slice: implemented; Hermes and independent static review found no blocking defects. Existing Python checks pass (13); 23 native XCTest methods await Mac CI. No new UI/audio yet. Defaults: C natural minor, 124 BPM, 8-bar canvas, whole-bar loops, centralized MIDI 36–84 voicing/cost configuration; details in `docs/M1-phase1.md` and `DECISIONS_LOG.md`.
-  - Build/artifact: native CI verification pending before DSP/audio integration and UI. Listening/hand acceptance: pending. Owner approval: pending.
+  - Foundation slice: reviewed and native-verified in [CI run 45596058488](https://github.com/Jisakai/CODA/actions/runs/45596058488), commit `e6b82e522fa60ed9a406a40f5ce8e9f33b2f4afd`: 23 music XCTest methods, 1 launch test, 13 Python checks pass. Downloaded IPA independently verified unsigned arm64, metadata/fonts/vocabulary intact; SHA-256 `7fcfc7bf0eee05c51a502f739daa36de7113d35b2268d7a22080e26ee6f46b19`. No new UI/audio in this slice.
+  - Defaults: C natural minor, 124 BPM, 8-bar canvas, whole-bar loops, centralized MIDI 36–84 voicing/cost configuration; details in `docs/M1-phase1.md` and `DECISIONS_LOG.md`.
+  - Build/artifact: foundation green; progressing to separately reviewable synth/DSP before app transport/UI integration. Full M1 listening/hand acceptance: pending. Owner approval: pending.
 - [ ] **M1b — Strum engine on top of the synth.** Pattern overlay with 8 eighth slots, arrow strokes, chuck, tap-to-remove, swing, humanize, spread.
   - **Exit criterion (§18):** A pattern changes how the same chords play.
   - Build/artifact: not started. Listening/hand acceptance: pending. Owner approval: pending.
