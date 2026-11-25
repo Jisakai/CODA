@@ -141,13 +141,13 @@ jobs:
           xcrun xcresulttool export attachments \
             --path build/generated/coda-m1-tests.xcresult \
             --output-path build/generated/ui-attachments
-          export_options=()
+          set --
           if [[ "$M1_TEST_OUTCOME" != "success" ]]; then
-            export_options+=(--allow-missing-review)
+            set -- --allow-missing-review
           fi
           python3 scripts/export_ui_screenshots.py \
             --source build/generated/ui-attachments \
-            --destination build/artifacts/ui-screenshots "${export_options[@]}"
+            --destination build/artifacts/ui-screenshots "$@"
 
       - name: Upload named M1 UI diagnostics even after test failure
         if: ${{ !cancelled() && steps.m1-tests.outcome != 'skipped' }}
