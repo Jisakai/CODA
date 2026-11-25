@@ -1,0 +1,492 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Chord Mode Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+    @layer base {
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #000000;
+        color: #e2e2ec;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        overscroll-behavior: none;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+    }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {darkMode: "class", theme: {extend: {colors: {oled: "#000000", "coal-scale": "#151619", "coal-gutter": "#18191d", "slate-mist": "#849BB5", "pewter-lilac": "#978EB0", "bass-sage": "#82A792", "melody-lavender": "#9E92B8", "dark-glass": "rgba(22, 22, 24, 0.85)", "subtle-card": "rgba(255, 255, 255, 0.04)", "on-surface": "#e1e2eb", "on-primary-fixed-variant": "#6900b3", surface: "#111319", "on-primary-container": "#400071", secondary: "#44e2cd", "secondary-fixed-dim": "#3cddc7", error: "#ffb4ab", "inverse-surface": "#e1e2eb", "surface-container": "#1d1f26", "on-tertiary-fixed-variant": "#653e00", "surface-container-low": "#191b22", "on-secondary-fixed": "#00201c", "surface-container-high": "#282a30", "on-tertiary-fixed": "#2a1700", "surface-dim": "#111319", "surface-tint": "#ddb7ff", "primary-container": "#b76dff", "primary-fixed-dim": "#ddb7ff", "primary-fixed": "#f0dbff", "on-error": "#690005", "on-secondary-container": "#004d44", "error-container": "#93000a", "outline-variant": "#4d4354", primary: "#ddb7ff", tertiary: "#ffb95f", "inverse-on-surface": "#2e3037", "surface-container-highest": "#32353b", "secondary-fixed": "#62fae3", "surface-variant": "#32353b", "on-primary-fixed": "#2c0051", "tertiary-fixed": "#ffddb8", "on-error-container": "#ffdad6", "secondary-container": "#03c6b2", "on-background": "#e1e2eb", "on-tertiary": "#472a00", "on-tertiary-container": "#3e2400", "on-primary": "#490080", "tertiary-fixed-dim": "#ffb95f", "tertiary-container": "#ca8100", "on-surface-variant": "#cfc2d6", background: "#111319", outline: "#988d9f", "inverse-primary": "#842bd2", "surface-bright": "#373940", "on-secondary-fixed-variant": "#005047", "on-secondary": "#003731", "surface-container-lowest": "#0c0e14"}, fontFamily: {sans: ["\"Plus Jakarta Sans\"", "sans-serif"], headline: ["Space Grotesk"], display: ["Space Grotesk"], body: ["Geist"], label: ["Geist"]}, fontSize: {}, borderRadius: {DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px"}}}};
+  </script>
+</head>
+<body class="bg-black text-[#e2e2ec] font-sans h-screen w-screen flex flex-col overflow-hidden">
+<!-- PROCREATE-INSPIRED TOP BAR (approx. 48px height, borderless deep translucent glass) -->
+<header class="h-[48px] w-full shrink-0 bg-[#161618]/90 backdrop-blur-2xl px-5 flex items-center justify-between z-50 shadow-none border-none">
+<!-- Left Cluster: Settings (solid gear, no text), Scale/Key capsule, BPM pill, Time Sig -->
+<div class="flex items-center gap-2.5">
+<!-- Tactile Solid Filled Gear Icon (Subtle refined rounded-md) -->
+<button class="w-8 h-8 rounded-md bg-white/[0.06] hover:bg-white/[0.12] active:scale-95 flex items-center justify-center text-[#c4c7d4] hover:text-white transition-all shadow-none border-none" title="Settings" type="button">
+<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+<path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"></path>
+</svg>
+</button>
+<div class="h-3.5 w-px bg-white/10 mx-0.5"></div>
+<!-- Scale / Key capsule (refined rounded-md) -->
+<button class="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.05] hover:bg-white/[0.09] text-xs font-semibold tracking-wide transition-colors border-none" type="button">
+<svg class="w-3.5 h-3.5 text-[#849BB5]" fill="currentColor" viewBox="0 0 24 24">
+<path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"></path>
+</svg>
+<span class="text-white font-medium">C Min</span>
+<span class="text-[#727685] text-[10px] font-semibold tracking-wider">NAT</span>
+</button>
+<!-- BPM capsule (refined rounded-md) -->
+<button class="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.05] hover:bg-white/[0.09] text-xs font-semibold tracking-wide transition-colors border-none" type="button">
+<svg class="w-3.5 h-3.5 text-[#82A792]" fill="currentColor" viewBox="0 0 24 24">
+<path d="M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.28-10.43zM10.59 15.41a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z"></path>
+</svg>
+<span class="text-white font-medium">124</span>
+<span class="text-[#727685] text-[10px] font-semibold">BPM</span>
+</button>
+<!-- Time Signature -->
+<div class="flex items-center px-2.5 py-1.5 rounded-md bg-white/[0.05] text-xs font-medium text-white/90">
+        4/4
+      </div>
+</div>
+<!-- Center Cluster: Transport Controls -->
+<div class="flex items-center gap-2">
+<!-- Loop Toggle (subtle rounded-md) -->
+<button class="w-8 h-8 rounded-md bg-white/[0.05] hover:bg-white/[0.1] text-white/70 hover:text-white flex items-center justify-center transition-colors border-none" title="Loop" type="button">
+<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+<path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"></path>
+</svg>
+</button>
+<!-- Solid Filled Play Triangle Button (refined rounded-md) -->
+<button class="h-8 px-4 rounded-md bg-white text-black flex items-center justify-center gap-1.5 hover:bg-white/90 active:scale-95 transition-all shadow-[0_0_14px_rgba(255,255,255,0.18)] border-none" title="Play / Pause" type="button">
+<svg class="w-4 h-4 fill-black translate-x-0.5" viewBox="0 0 24 24">
+<path d="M8 5v14l11-7z"></path>
+</svg>
+</button>
+</div>
+<!-- Right Cluster: Track Selector with refined rounded-md styling -->
+<div class="flex items-center gap-1 bg-white/[0.04] p-1 rounded-md border-none">
+<!-- Bass -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium text-[#828695] hover:text-white hover:bg-white/[0.05] transition-all border-none" title="Bass Track" type="button">
+<svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+<path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"></path>
+</svg>
+<span class="text-[11px] font-semibold tracking-wide">Bass</span>
+</button>
+<!-- Chord (Active Mode) -->
+<button class="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-white/[0.12] text-white shadow-none transition-all border-none" title="Chord Mode (Active)" type="button">
+<span class="w-1.5 h-1.5 rounded-full bg-[#849BB5] shadow-[0_0_8px_#849BB5]"></span>
+<svg class="w-3.5 h-3.5 text-[#849BB5] fill-current" viewBox="0 0 24 24">
+<path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 11h-1.5V5H14v9zm-3 0H9.5V5H11v9zM5 5h3v9H6.5v5H5V5zm14 14h-1.5v-5H16V5h3v14z"></path>
+</svg>
+<span class="text-[11px] font-bold tracking-wide text-white">Chord</span>
+</button>
+<!-- Melody -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-medium text-[#828695] hover:text-white hover:bg-white/[0.05] transition-all border-none" title="Melody Track" type="button">
+<svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM13 13.5V17h-2v-3.5H9.5l3.5-3.5 3.5 3.5H13z"></path>
+</svg>
+<span class="text-[11px] font-semibold tracking-wide">Melody</span>
+</button>
+</div>
+</header>
+<!-- CHORD PROGRESSION HEADER STRIP (Subtle rounded-md blocks, crisp Procreate feel) -->
+<div class="w-full h-[88px] shrink-0 bg-black flex items-center px-4 border-b border-[#1b1c20]">
+<!-- Left key spacer to align with piano roll -->
+<div class="w-14 shrink-0 flex flex-col justify-center pr-1.5">
+<span class="text-[11px] font-bold uppercase tracking-wider text-[#849BB5]">Chords</span>
+<span class="text-[9px] text-[#555866] font-medium">Poly 8</span>
+</div>
+<!-- Active Chord Progression Blocks across 8-measure width with increased vertical height -->
+<div class="flex-1 h-[72px] grid grid-cols-8 gap-2.5">
+<!-- Chord 1: Cm7 -->
+<div class="col-span-1 h-full rounded-md bg-[#16171b] px-3.5 py-2 flex flex-col justify-between border border-[#22242b] transition-all hover:bg-[#1a1c22]">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-1.5">
+<span class="text-[15px] font-bold text-white tracking-tight">Cm</span>
+<span class="text-[13px] font-bold text-[#849BB5]">7</span>
+</div>
+<span class="text-[9.5px] font-semibold text-[#849BB5]/70 uppercase tracking-wider">i · Ton</span>
+</div>
+<div class="flex items-center justify-between text-[10.5px] text-[#8e92a2]">
+<span>C · Eb · G · Bb</span>
+<span class="text-[9.5px] text-[#849BB5] font-semibold">Root</span>
+</div>
+</div>
+<!-- Chord 2: Abmaj7 (Playing Under Playhead) -->
+<div class="col-span-1 h-full rounded-md bg-[#181a20] px-3.5 py-2 flex flex-col justify-between border border-[#849BB5]/40 relative overflow-hidden shadow-[0_0_12px_rgba(132,155,181,0.12)]">
+<div class="absolute top-0 left-0 right-0 h-[3px] bg-[#849BB5]"></div>
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-1.5">
+<span class="text-[15px] font-bold text-[#849BB5] tracking-tight">Ab</span>
+<span class="text-[13px] font-bold text-[#849BB5]">maj7</span>
+</div>
+<span class="text-[9.5px] font-semibold text-[#849BB5] uppercase tracking-wider">VI · Sub</span>
+</div>
+<div class="flex items-center justify-between text-[10.5px]">
+<span class="text-white/90 font-medium">Eb · Ab · C · G</span>
+<span class="text-[9.5px] text-[#82A792] font-semibold">Drop 2</span>
+</div>
+</div>
+<!-- Chord 3: Fm9 -->
+<div class="col-span-1 h-full rounded-md bg-[#16171b] px-3.5 py-2 flex flex-col justify-between border border-[#22242b] transition-all hover:bg-[#1a1c22]">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-1.5">
+<span class="text-[15px] font-bold text-white tracking-tight">Fm</span>
+<span class="text-[13px] font-bold text-[#978EB0]">9</span>
+</div>
+<span class="text-[9.5px] font-semibold text-[#978EB0]/70 uppercase tracking-wider">iv · Sub</span>
+</div>
+<div class="flex items-center justify-between text-[10.5px] text-[#8e92a2]">
+<span>F · Ab · C · Eb · G</span>
+<span class="text-[9.5px] text-[#978EB0] font-semibold">Spread</span>
+</div>
+</div>
+<!-- Chord 4: G7alt -->
+<div class="col-span-1 h-full rounded-md bg-[#16171b] px-3.5 py-2 flex flex-col justify-between border border-[#22242b] transition-all hover:bg-[#1a1c22]">
+<div class="flex items-baseline justify-between">
+<div class="flex items-baseline gap-1.5">
+<span class="text-[15px] font-bold text-white tracking-tight">G</span>
+<span class="text-[13px] font-bold text-[#bfa0ba]">7alt</span>
+</div>
+<span class="text-[9.5px] font-semibold text-[#bfa0ba] uppercase tracking-wider">V7 · Dom</span>
+</div>
+<div class="flex items-center justify-between text-[10.5px] text-[#8e92a2]">
+<span>G · B · F · Bb · Eb</span>
+<span class="text-[9.5px] text-[#bfa0ba] font-semibold">#9 b13</span>
+</div>
+</div>
+<!-- Measures 5 to 8 subtle repetition preview -->
+<div class="col-span-1 h-full rounded-md bg-[#0d0e11] px-3.5 py-2 flex flex-col justify-between border border-[#18191d]/60 opacity-60 hover:opacity-90 transition-all"><div class="flex items-baseline justify-between"><span class="text-[14px] font-bold text-white/50 tracking-tight">Cm</span><span class="text-[9px] font-medium text-[#849BB5]/50 uppercase">i</span></div><span class="text-[10px] text-[#555866]">C · Eb · G · Bb</span></div><div class="col-span-1 h-full rounded-md bg-[#0d0e11] px-3.5 py-2 flex flex-col justify-between border border-[#18191d]/60 opacity-60 hover:opacity-90 transition-all"><div class="flex items-baseline justify-between"><span class="text-[14px] font-bold text-white/50 tracking-tight">Ab</span><span class="text-[9px] font-medium text-[#849BB5]/50 uppercase">VI</span></div><span class="text-[10px] text-[#555866]">Eb · Ab · C · G</span></div><div class="col-span-1 h-full rounded-md bg-[#0d0e11] px-3.5 py-2 flex flex-col justify-between border border-[#18191d]/60 opacity-60 hover:opacity-90 transition-all"><div class="flex items-baseline justify-between"><span class="text-[14px] font-bold text-white/50 tracking-tight">Fm</span><span class="text-[9px] font-medium text-[#978EB0]/50 uppercase">iv</span></div><span class="text-[10px] text-[#555866]">F · Ab · C · Eb</span></div><div class="col-span-1 h-full rounded-md bg-[#0d0e11] px-3.5 py-2 flex flex-col justify-between border border-[#18191d]/60 opacity-60 hover:opacity-90 transition-all"><div class="flex items-baseline justify-between"><span class="text-[14px] font-bold text-white/50 tracking-tight">G</span><span class="text-[9px] font-medium text-[#bfa0ba]/50 uppercase">V7</span></div><span class="text-[10px] text-[#555866]">G · B · F · Bb</span></div>
+</div>
+</div>
+<!-- TIMELINE RULER & MEASURE MARKERS -->
+<div class="relative w-full h-6 bg-black shrink-0 flex items-center border-b border-[#1b1c20]">
+<!-- Left key gutter spacer (92px) -->
+<div class="w-14 shrink-0 h-full flex items-center justify-between px-1.5 text-[9px] font-medium text-white/30 uppercase tracking-wider border-r border-white/[0.04]">
+<span>1/16</span>
+<span class="text-white/25 text-[8px]">SNAP</span>
+</div>
+<!-- 8 Measure Rulers -->
+<div class="relative flex-1 h-full grid grid-cols-8 text-[11px] font-medium text-[#555866]">
+<!-- 4-Bar Active Loop Highlight Overlay -->
+<div class="absolute left-0 top-0 bottom-0 w-1/2 bg-[#849BB5]/[0.02] pointer-events-none">
+<div class="absolute top-0 left-0 right-0 h-[1px] bg-[#849BB5]/60"></div>
+</div>
+<!-- Playhead Needle passing through Measure 2 (~19.5%) -->
+<div class="absolute left-[19.5%] top-0 bottom-0 z-40 flex flex-col items-center pointer-events-none">
+<div class="w-2.5 h-2.5 bg-[#849BB5] rotate-45 -mt-1 shadow-[0_0_8px_#849BB5]"></div>
+</div>
+<!-- Measures 1 to 8 -->
+<div class="px-2 flex items-center justify-between text-[#849BB5] font-semibold border-r border-[#1a1b20]">
+<span>1</span>
+<span class="text-[9px] text-[#3c3e4b] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#849BB5] font-semibold border-r border-[#1a1b20]">
+<span>2</span>
+<span class="text-[9px] text-[#3c3e4b] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#849BB5] font-semibold border-r border-[#1a1b20]">
+<span>3</span>
+<span class="text-[9px] text-[#3c3e4b] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#849BB5] font-semibold border-r border-[#1a1b20]">
+<span>4</span>
+<span class="text-[9px] text-[#3c3e4b] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#444654] border-r border-[#1a1b20]">
+<span>5</span>
+<span class="text-[9px] text-[#2c2e3a] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#444654] border-r border-[#1a1b20]">
+<span>6</span>
+<span class="text-[9px] text-[#2c2e3a] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#444654] border-r border-[#1a1b20]">
+<span>7</span>
+<span class="text-[9px] text-[#2c2e3a] font-normal">.2 .3 .4</span>
+</div>
+<div class="px-2 flex items-center justify-between text-[#444654]">
+<span>8</span>
+<span class="text-[9px] text-[#2c2e3a] font-normal">.2 .3 .4</span>
+</div>
+</div>
+</div>
+<!-- PIANO ROLL & CHORD VOICING CANVAS (Seamless, fills entire remaining height to bottom) -->
+<div class="relative w-full flex-1 flex bg-black overflow-hidden border-none">
+<!-- Left Pitch Ruler (C5 down to C2) with Clear Dividers & Scale Note Tinting (92px width) -->
+<div class="shrink-0 h-full bg-[#08080a]/90 flex flex-col z-20 select-none border-r border-white/[0.04] w-14">
+<!-- C5 (Scale Tonic) -->
+<div class="flex-1 bg-[#0d0e12]/60 hover:bg-white/[0.04] flex items-center justify-between px-2.5 text-[10px] font-medium text-white/50 cursor-pointer border-b border-white/[0.02] border-l-2 border-l-[#849BB5]/50">
+<span class="flex items-center gap-1.5 text-white/70"><span class="w-1.5 h-1.5 rounded-full bg-[#849BB5]/60"></span>C5</span>
+<span class="text-[8px] text-white/20">72</span>
+</div>
+<!-- B4 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>B4</span>
+</div>
+<!-- Bb4 (Scale: Bb) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Bb4</span>
+</div>
+</div>
+<!-- A4 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>A4</span>
+</div>
+<!-- Ab4 (Scale: Ab) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Ab4</span>
+</div>
+</div>
+<!-- G4 (Scale: G) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>G4</span>
+</div>
+<!-- F#4 (Non-scale) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.01]">
+<div class="w-14 h-full bg-white/[0.015] rounded-r-sm flex items-center px-1.5">
+<span class="text-[9px] font-normal text-white/20">F#4</span>
+</div>
+</div>
+<!-- F4 (Scale: F) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>F4</span>
+</div>
+<!-- E4 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>E4</span>
+</div>
+<!-- Eb4 (Scale: Eb) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Eb4</span>
+</div>
+</div>
+<!-- D4 (Scale: D) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>D4</span>
+</div>
+<!-- Db4 (Non-scale) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.01]">
+<div class="w-14 h-full bg-white/[0.015] rounded-r-sm flex items-center px-1.5">
+<span class="text-[9px] font-normal text-white/20">Db4</span>
+</div>
+</div>
+<!-- C4 (Middle C - Scale Tonic) -->
+<div class="flex-1 bg-[#0d0e12]/60 hover:bg-white/[0.04] flex items-center justify-between px-2.5 text-[10px] font-medium text-white/50 cursor-pointer border-b border-white/[0.02] border-l-2 border-l-[#849BB5]/50">
+<span class="flex items-center gap-1.5 text-white/70">
+<span class="w-1.5 h-1.5 rounded-full bg-[#849BB5]/60"></span>
+C4
+</span>
+<span class="text-[8px] text-white/20">60</span>
+</div>
+<!-- B3 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>B3</span>
+</div>
+<!-- Bb3 (Scale: Bb) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Bb3</span>
+</div>
+</div>
+<!-- A3 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>A3</span>
+</div>
+<!-- Ab3 (Scale: Ab) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Ab3</span>
+</div>
+</div>
+<!-- G3 (Scale: G) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>G3</span>
+</div>
+<!-- F#3 (Non-scale) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.01]">
+<div class="w-14 h-full bg-white/[0.015] rounded-r-sm flex items-center px-1.5">
+<span class="text-[9px] font-normal text-white/20">F#3</span>
+</div>
+</div>
+<!-- F3 (Scale: F) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>F3</span>
+</div>
+<!-- E3 (Non-scale) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.02] flex items-center px-2.5 text-[10px] font-normal text-white/20 cursor-pointer border-b border-white/[0.01]">
+<span>E3</span>
+</div>
+<!-- Eb3 (Scale: Eb) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.015]">
+<div class="w-14 h-full bg-white/[0.03] rounded-r-sm flex items-center px-1.5 border-r border-y border-white/[0.03]">
+<span class="text-[9px] font-medium text-white/30">Eb3</span>
+</div>
+</div>
+<!-- D3 (Scale: D) -->
+<div class="flex-1 bg-[#0b0c10]/40 hover:bg-white/[0.03] flex items-center px-2.5 text-[10px] font-medium text-white/30 cursor-pointer border-b border-white/[0.015]">
+<span>D3</span>
+</div>
+<!-- Db3 (Non-scale) -->
+<div class="flex-1 bg-transparent flex items-center px-1 cursor-pointer border-b border-white/[0.01]">
+<div class="w-14 h-full bg-white/[0.015] rounded-r-sm flex items-center px-1.5">
+<span class="text-[9px] font-normal text-white/20">Db3</span>
+</div>
+</div>
+<!-- C3 (Scale Tonic) -->
+<div class="flex-1 bg-[#0d0e12]/60 hover:bg-white/[0.04] flex items-center justify-between px-2.5 text-[10px] font-medium text-white/50 cursor-pointer border-b border-white/[0.02] border-l-2 border-l-[#849BB5]/50">
+<span class="flex items-center gap-1.5 text-white/70">
+<span class="w-1.5 h-1.5 rounded-full bg-[#849BB5]/60"></span>
+C3
+</span>
+<span class="text-[8px] text-white/20">48</span>
+</div>
+<!-- C2 (Bass Anchor) -->
+<div class="flex-1 bg-transparent hover:bg-white/[0.03] flex items-center justify-between px-2.5 text-[10px] font-medium text-[#82A792]/50 cursor-pointer">
+<span>C2</span>
+<span class="text-[8px] text-white/20">36</span>
+</div>
+</div>
+<!-- Main Piano Roll Grid & Note Canvas -->
+<div class="relative flex-1 h-full bg-black overflow-hidden select-none"><!-- Coal-Colored Scale Rows vs Pitch Black Non-Scale Rows -->
+<div class="absolute inset-0 flex flex-col pointer-events-none"><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#090b10] border-b border-[#849BB5]/20"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#08080a] border-b border-white/[0.02]"></div><div class="flex-1 bg-[#000000] border-b border-white/[0.01]"></div><div class="flex-1 bg-[#090b10] border-b border-[#849BB5]/20"></div><div class="flex-1 bg-[#08080a]"></div></div>
+<!-- Vertical 8-Measure Beat Grid with Hairline Dividers -->
+<div class="absolute inset-0 grid grid-cols-8 pointer-events-none"><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.04] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="border-r border-white/[0.03] grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div><div class="grid grid-cols-4"><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div class="border-r border-white/[0.015]"></div><div></div></div></div>
+<!-- Playhead Needle Vertical Glowing Line in Measure 2 -->
+<div class="absolute left-[19.5%] top-0 bottom-0 z-30 w-px bg-[#849BB5] shadow-[0_0_10px_#849BB5] pointer-events-none"></div>
+<!-- ================= BASS FOUNDATION NOTES (Taller vertical span: 3.5%) ================= -->
+<div class="absolute left-[0.3%] bottom-[1.8%] w-[11.8%] h-[3.5%] rounded-md bg-[#82A792]/25 border border-[#82A792]/40 backdrop-blur-sm flex items-center px-2 text-[9.5px] font-bold text-[#82A792] pointer-events-none">
+<span>BASS: C2</span>
+</div>
+<div class="absolute left-[12.8%] bottom-[4.9%] w-[11.8%] h-[3.5%] rounded-md bg-[#82A792]/25 border border-[#82A792]/40 backdrop-blur-sm flex items-center px-2 text-[9.5px] font-bold text-[#82A792] pointer-events-none">
+<span>BASS: Ab2</span>
+</div>
+<div class="absolute left-[25.3%] bottom-[3.4%] w-[11.8%] h-[3.5%] rounded-md bg-[#82A792]/25 border border-[#82A792]/40 backdrop-blur-sm flex items-center px-2 text-[9.5px] font-bold text-[#82A792] pointer-events-none">
+<span>BASS: F2</span>
+</div>
+<div class="absolute left-[37.8%] bottom-[3.9%] w-[11.8%] h-[3.5%] rounded-md bg-[#82A792]/25 border border-[#82A792]/40 backdrop-blur-sm flex items-center px-2 text-[9.5px] font-bold text-[#82A792] pointer-events-none">
+<span>BASS: G2</span>
+</div>
+<!-- ================= GHOSTED MELODY NOTES ================= -->
+<div class="absolute left-[3.2%] top-[19.0%] w-[3.2%] h-[3.2%] rounded-sm bg-[#9E92B8]/25 border border-[#9E92B8]/40 text-[8.5px] font-bold text-[#9E92B8] flex items-center justify-center pointer-events-none">G4</div>
+<div class="absolute left-[7.2%] top-[7.5%] w-[4.2%] h-[3.2%] rounded-sm bg-[#9E92B8]/25 border border-[#9E92B8]/40 text-[8.5px] font-bold text-[#9E92B8] flex items-center justify-center pointer-events-none">Bb4</div>
+<div class="absolute left-[15.2%] top-[0.5%] w-[5.2%] h-[3.2%] rounded-sm bg-[#9E92B8]/25 border border-[#9E92B8]/40 text-[8.5px] font-bold text-[#9E92B8] flex items-center justify-center pointer-events-none">C5</div>
+<div class="absolute left-[28.2%] top-[15.0%] w-[4.2%] h-[3.2%] rounded-sm bg-[#9E92B8]/25 border border-[#9E92B8]/40 text-[8.5px] font-bold text-[#9E92B8] flex items-center justify-center pointer-events-none">Ab4</div>
+<!-- ================= REFINED CHORD BLOCKS (Substantially taller vertical height 3.6% for prominent spacious chord voicing) ================= -->
+<!-- BAR 1: Cm7 Voicing -->
+<!-- C3 Root -->
+<div class="absolute left-[0.3%] top-[88.1%] w-[11.7%] h-[3.6%] rounded-md bg-[#849BB5]/95 text-black border border-white/20 shadow-[0_0_10px_rgba(132,155,181,0.25)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer hover:brightness-110 transition-all">
+<span>C3</span>
+<span class="text-[9px] font-medium opacity-80">v108</span>
+</div>
+<!-- Eb3 m3 -->
+<div class="absolute left-[0.4%] top-[77.0%] w-[11.5%] h-[3.6%] rounded-md bg-[#849BB5]/85 text-black border border-white/15 shadow-[0_0_8px_rgba(132,155,181,0.2)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer hover:brightness-110 transition-all">
+<span>Eb3 (m3)</span>
+<span class="text-[9px] font-medium opacity-80">v96</span>
+</div>
+<!-- G3 5th -->
+<div class="absolute left-[0.5%] top-[65.5%] w-[11.4%] h-[3.6%] rounded-md bg-[#849BB5]/80 text-black border border-white/15 shadow-[0_0_8px_rgba(132,155,181,0.2)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer hover:brightness-110 transition-all">
+<span>G3 (5th)</span>
+<span class="text-[9px] font-medium opacity-80">v92</span>
+</div>
+<!-- Bb3 m7 -->
+<div class="absolute left-[0.6%] top-[54.0%] w-[11.3%] h-[3.6%] rounded-md bg-[#978EB0]/90 text-black border border-white/20 shadow-[0_0_10px_rgba(151,142,176,0.3)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer hover:brightness-110 transition-all">
+<span>Bb3 (m7)</span>
+<span class="text-[9px] font-medium opacity-80">v88</span>
+</div>
+<!-- C4 Root Reinforcement -->
+<div class="absolute left-[0.7%] top-[46.2%] w-[11.2%] h-[3.6%] rounded-md bg-[#849BB5] text-black border border-white/25 shadow-[0_0_12px_rgba(132,155,181,0.45)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>C4 (Root)</span>
+<span class="text-[9px] font-medium">v112</span>
+</div>
+<!-- Arpeggio flourish -->
+<div class="absolute left-[9.6%] top-[34.6%] w-[2.4%] h-[3.5%] rounded-md bg-[#978EB0]/80 text-black border border-white/15 flex items-center justify-center text-[9px] font-bold">
+        Eb4
+      </div>
+<!-- BAR 2: Abmaj7 Drop-2 Inversion (Auditioning under Playhead) -->
+<!-- Eb3 5th -->
+<div class="absolute left-[12.8%] top-[77.0%] w-[11.5%] h-[3.6%] rounded-md bg-[#849BB5]/85 text-black border border-white/20 shadow-[0_0_10px_rgba(132,155,181,0.3)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>Eb3 (5th)</span>
+<span class="text-[9px] font-medium opacity-80">v102</span>
+</div>
+<!-- Ab3 Root -->
+<div class="absolute left-[12.9%] top-[61.6%] w-[11.4%] h-[3.6%] rounded-md bg-[#849BB5]/90 text-black border border-white/20 shadow-[0_0_12px_rgba(132,155,181,0.35)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>Ab3 (Root)</span>
+<span class="text-[9px] font-medium opacity-80">v106</span>
+</div>
+<!-- C4 3rd -->
+<div class="absolute left-[13.0%] top-[46.2%] w-[11.3%] h-[3.6%] rounded-md bg-[#849BB5]/85 text-black border border-white/20 shadow-[0_0_10px_rgba(132,155,181,0.3)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>C4 (3rd)</span>
+<span class="text-[9px] font-medium opacity-80">v98</span>
+</div>
+<!-- G4 maj7 Sparkle -->
+<div class="absolute left-[13.1%] top-[19.2%] w-[11.2%] h-[3.6%] rounded-md bg-[#978EB0] text-black border border-white/30 shadow-[0_0_14px_rgba(151,142,176,0.5)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>G4 (maj7)</span>
+<span class="text-[9px] font-semibold">v115</span>
+</div>
+<!-- BAR 3: Fm9 Lush Voicing -->
+<!-- F3 Root -->
+<div class="absolute left-[25.3%] top-[73.0%] w-[11.7%] h-[3.6%] rounded-md bg-[#849BB5]/90 text-black border border-white/20 shadow-[0_0_10px_rgba(132,155,181,0.25)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>F3 (Root)</span>
+<span class="text-[9px] font-medium opacity-80">v104</span>
+</div>
+<!-- Ab3 m3 -->
+<div class="absolute left-[25.4%] top-[61.6%] w-[11.5%] h-[3.6%] rounded-md bg-[#849BB5]/80 text-black border border-white/15 shadow-[0_0_8px_rgba(132,155,181,0.2)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>Ab3 (m3)</span>
+<span class="text-[9px] font-medium opacity-80">v94</span>
+</div>
+<!-- C4 5th -->
+<div class="absolute left-[25.5%] top-[46.2%] w-[11.4%] h-[3.6%] rounded-md bg-[#849BB5]/75 text-black border border-white/15 shadow-[0_0_8px_rgba(132,155,181,0.2)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>C4 (5th)</span>
+<span class="text-[9px] font-medium opacity-80">v90</span>
+</div>
+<!-- Eb4 m7 -->
+<div class="absolute left-[25.6%] top-[34.6%] w-[11.3%] h-[3.6%] rounded-md bg-[#978EB0]/85 text-black border border-white/20 shadow-[0_0_10px_rgba(151,142,176,0.25)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>Eb4 (m7)</span>
+<span class="text-[9px] font-medium opacity-80">v92</span>
+</div>
+<!-- G4 9th Extension -->
+<div class="absolute left-[25.7%] top-[19.2%] w-[11.2%] h-[3.6%] rounded-md bg-[#978EB0] text-black border border-white/30 shadow-[0_0_12px_rgba(151,142,176,0.45)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>G4 (9th)</span>
+<span class="text-[9px] font-medium opacity-80">v100</span>
+</div>
+<!-- BAR 4: G7alt Altered Dominant -->
+<!-- G3 Root -->
+<div class="absolute left-[37.8%] top-[65.5%] w-[11.7%] h-[3.6%] rounded-md bg-[#849BB5]/90 text-black border border-white/20 shadow-[0_0_10px_rgba(132,155,181,0.25)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>G3 (Root)</span>
+<span class="text-[9px] font-medium opacity-80">v110</span>
+</div>
+<!-- B3 3rd Leading Tone -->
+<div class="absolute left-[37.9%] top-[50.0%] w-[11.5%] h-[3.6%] rounded-md bg-[#849BB5]/80 text-black border border-white/15 shadow-[0_0_8px_rgba(132,155,181,0.2)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>B3 (3rd)</span>
+<span class="text-[9px] font-medium opacity-80">v102</span>
+</div>
+<!-- F4 dom7 -->
+<div class="absolute left-[38.0%] top-[26.9%] w-[11.4%] h-[3.6%] rounded-md bg-[#978EB0]/85 text-black border border-white/20 shadow-[0_0_10px_rgba(151,142,176,0.25)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>F4 (dom7)</span>
+<span class="text-[9px] font-medium opacity-80">v98</span>
+</div>
+<!-- Bb4 (#9 Alteration) -->
+<div class="absolute left-[38.1%] top-[7.7%] w-[11.3%] h-[3.6%] rounded-md bg-[#bfa0ba] text-black border border-white/30 shadow-[0_0_14px_rgba(191,160,186,0.5)] flex items-center justify-between px-2.5 text-[10.5px] font-bold cursor-pointer">
+<span>Bb4 (#9)</span>
+<span class="text-[9px] font-semibold">v108</span>
+</div>
+<!-- Measures 5 to 8 Ghost Repeat Area --></div>
+</div>
+
+
+
+
+</body></html>
