@@ -752,10 +752,9 @@ final class CodaEditorStore {
             let roots = Self.pitchNames
             return [(.roots, roots, 84, 42)]
         case .all:
-            let families: [(ChordFamily, RadialRing)] = [.major, .minor, .odd].map { family in
-                let ring: RadialRing = family == .major ? .major : family == .minor ? .minor : .odd
-                return (family, ring)
-            }
+            let families: [(ChordFamily, RadialRing)] = [
+                (.major, .major), (.minor, .minor), (.odd, .odd)
+            ]
             let currentFamily = quality.flatMap { try? session.vocabulary.quality($0.qualityID).family }
             let ordered = families.sorted { lhs, rhs in
                 if lhs.0 == rhs.0 { return false }
