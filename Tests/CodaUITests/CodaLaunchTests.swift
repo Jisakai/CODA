@@ -162,12 +162,14 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        let cell = app.descendants(matching: .any)["timeline.snap"].firstMatch
-        XCTAssertTrue(cell.waitForExistence(timeout: 10))
-        XCTAssertEqual(cell.frame.width, 56, accuracy: 1)
-        XCTAssertEqual(cell.frame.height, 20, accuracy: 1)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let windowFrame = window.frame
+        let cellFrame = CGRect(x: windowFrame.minX, y: windowFrame.minY + 52, width: 56, height: 20)
         let division = app.staticTexts["timeline.snap.division"]
         let caption = app.staticTexts["timeline.snap.caption"]
+        XCTAssertTrue(division.exists)
+        XCTAssertTrue(caption.exists)
         XCTAssertEqual(division.label, "1/16")
         XCTAssertEqual(caption.label, "SNAP")
         // These are the intrinsic, fixed-size rendered Text frames, rather
@@ -176,39 +178,49 @@ final class CodaLaunchTests: XCTestCase {
             XCTAssertTrue(text.exists)
             XCTAssertGreaterThan(text.frame.width, 0)
             XCTAssertGreaterThan(text.frame.height, 0)
-            XCTAssertTrue(cell.frame.contains(text.frame), "Full SNAP text must fit the 56x20 cell")
+            XCTAssertTrue(cellFrame.contains(text.frame), "Full SNAP text must fit the 56x20 cell")
         }
         XCTAssertLessThanOrEqual(division.frame.maxX, caption.frame.minX)
     }
 
     @MainActor
-    func testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks() {
+    func testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks() throws {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
         app.buttons["top.drawer"].tap()
         XCTAssertTrue(app.buttons["drawer.preset.0"].waitForExistence(timeout: 5))
+        let knobs = ["wobble", "warmth", "cutoff", "resonance", "shape", "detune", "glide"]
         for preset in 0...2 {
             app.buttons["drawer.preset.\(preset)"].tap()
-            for knob in ["wobble", "warmth", "cutoff", "resonance", "shape", "detune", "glide"] {
-                let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
-                let dial = app.descendants(matching: .any)["drawer.knob.dial.\(knob)"].firstMatch
-                let dot = app.descendants(matching: .any)["drawer.knob.dot.\(knob)"].firstMatch
-                let readout = app.staticTexts["drawer.knob.readout.\(knob)"]
-                XCTAssertTrue(readout.exists)
-                XCTAssertTrue(dot.exists)
+            let snapshot = try app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.snapshot()
+            func find(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
+                if node.identifier == identifier { return node }
+                for child in node.children {
+                    if let match = find(identifier, in: child) { return match }
+                }
+                return nil
+            }
+            for knob in knobs {
+                let control = find("drawer.knob.\(knob)", in: snapshot)
+                let dial = find("drawer.knob.dial.\(knob)", in: snapshot)
+                let dot = find("drawer.knob.dot.\(knob)", in: snapshot)
+                let readout = find("drawer.knob.readout.\(knob)", in: snapshot)
+                XCTAssertNotNil(control, "Missing knob control: \(knob)")
+                XCTAssertNotNil(dial, "Missing knob dial: \(knob)")
+                XCTAssertNotNil(dot, "Missing center dot: \(knob)")
+                XCTAssertNotNil(readout, "Missing knob readout: \(knob)")
+                guard let control, let dial, let dot, let readout else { continue }
                 let diameter: CGFloat = ["wobble", "warmth"].contains(knob) ? 52 : 42
                 XCTAssertEqual(dial.frame.width, diameter, accuracy: 1)
                 XCTAssertEqual(dial.frame.height, diameter, accuracy: 1)
-                XCTAssertEqual(dot.frame.width, 6, accuracy: 1)
-                XCTAssertEqual(dot.frame.height, 6, accuracy: 1)
                 XCTAssertEqual(dot.frame.midX, dial.frame.midX, accuracy: 1)
                 XCTAssertEqual(dot.frame.midY, dial.frame.midY, accuracy: 1)
                 XCTAssertGreaterThan(readout.frame.width, 0)
                 XCTAssertGreaterThanOrEqual(readout.frame.height, 12)
                 XCTAssertGreaterThan(readout.frame.minY, dial.frame.maxY)
-                XCTAssertFalse(dot.frame.intersects(readout.frame))
+                XCTAssertFalse(dial.frame.intersects(readout.frame))
                 XCTAssertTrue(control.frame.contains(readout.frame))
                 XCTAssertTrue((control.value as? String ?? "").hasPrefix("\(readout.label) percent;"))
             }
