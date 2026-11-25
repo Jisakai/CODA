@@ -285,10 +285,18 @@ private struct TimelineStripView: View {
             ZStack(alignment: .topLeading) {
                 CodaDesignTokens.Colors.darkGlass
                 HStack(spacing: 0) {
-                    Text("1/16\nSNAP")
-                        .font(CodaDesignTokens.Typography.font(size: 8, weight: .semibold))
+                    HStack(spacing: 2) {
+                        Text("1/16")
+                            .accessibilityIdentifier("timeline.snap.division")
+                        Text("SNAP")
+                            .accessibilityIdentifier("timeline.snap.caption")
+                    }
+                        .font(CodaDesignTokens.Typography.font(size: CodaDesignTokens.Typography.noteAndLabelSize,
+                                                               weight: .semibold))
                         .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                        .fixedSize()
                         .frame(width: CodaDesignTokens.Geometry.timelineHeaderWidth, height: geometry.size.height)
+                        .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("timeline.snap")
                     GeometryReader { ruler in
                         ZStack(alignment: .topLeading) {
@@ -680,9 +688,8 @@ private struct KnobControl: View {
                     .rotationEffect(.degrees(90))
                 Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.75))
                     .frame(width: 6, height: 6)
-                Text("\(Int((value * 100).rounded()))")
-                    .font(CodaDesignTokens.Typography.font(size: 9, weight: .semibold))
-                    .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                    .accessibilityLabel("Center dot")
+                    .accessibilityIdentifier("drawer.knob.dot.\(knob.rawValue)")
             }
             .frame(width: diameter, height: diameter)
             .background {
@@ -697,17 +704,29 @@ private struct KnobControl: View {
                 guard let dragStart else { return }
                 store.setValue(dragStart - Double(gesture.translation.height) / 140, for: knob)
             }.onEnded { _ in dragStart = nil })
-            Text(knob.title)
-                .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
-                .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                .lineLimit(1).minimumScaleFactor(0.75)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("drawer.knob.dial.\(knob.rawValue)")
+            HStack(spacing: 4) {
+                Text(knob.title)
+                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
+                    .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Text("\(Int((value * 100).rounded()))")
+                    .font(CodaDesignTokens.Typography.font(size: CodaDesignTokens.Typography.chipAndReadoutSize,
+                                                           weight: .semibold))
+                    .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                    .fixedSize()
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(.white.opacity(0.08), in: Capsule())
+                    .accessibilityIdentifier("drawer.knob.readout.\(knob.rawValue)")
+            }
             Text("Default \(Int((store.presetDefault(for: knob) * 100).rounded()))")
                 .font(CodaDesignTokens.Typography.font(size: 8))
                 .foregroundStyle(CodaDesignTokens.Colors.mutedInkAlternate)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(knob.title)
         .accessibilityValue("\(Int((value * 100).rounded())) percent; preset default \(Int((store.presetDefault(for: knob) * 100).rounded())) percent")
         .accessibilityIdentifier("drawer.knob.\(knob.rawValue)")
