@@ -36,6 +36,53 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    func testCaptureNormalizationAppliesOrientationWithoutForcingLandscape() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.preferredRange = .standard
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 3), format: format).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1.5))
+            UIColor.green.setFill()
+            context.fill(CGRect(x: 1, y: 0, width: 1, height: 1.5))
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 1.5, width: 1, height: 1.5))
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 1, y: 1.5, width: 1, height: 1.5))
+        }
+        let raw = try XCTUnwrap(source.cgImage)
+        let tagged = UIImage(cgImage: raw, scale: 2, orientation: .left) // EXIF 8, not UIImage rawValue 8.
+        let upright = try uprightCaptureImage(tagged)
+        XCTAssertEqual(upright.imageOrientation, .up)
+        XCTAssertEqual(upright.scale, 2)
+        XCTAssertEqual(upright.size, CGSize(width: 3, height: 2))
+        let png = try XCTUnwrap(upright.pngData())
+        let decoded = try XCTUnwrap(UIImage(data: png))
+        XCTAssertEqual(decoded.imageOrientation, .up)
+        let bitmap = try XCTUnwrap(decoded.cgImage)
+        XCTAssertEqual(bitmap.width, 6)
+        XCTAssertEqual(bitmap.height, 4)
+        // CCW rotation must move actual pixels, not just strip the EXIF tag.
+        let corners = [(0, 0), (5, 0), (0, 3), (5, 3)]
+        let expected: [[UInt8]] = [[0, 255, 0], [255, 255, 255], [255, 0, 0], [0, 0, 255]]
+        for (index, point) in corners.enumerated() {
+            let pixel = try XCTUnwrap(bitmap.cropping(to: CGRect(x: CGFloat(point.0), y: CGFloat(point.1), width: 1, height: 1)))
+            var rgba = [UInt8](repeating: 0, count: 4)
+            try rgba.withUnsafeMutableBytes { bytes in
+                let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+                context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            XCTAssertEqual(Array(rgba.prefix(3)), expected[index])
+        }
+        let portrait = try uprightCaptureImage(source)
+        XCTAssertEqual(portrait.size, CGSize(width: 2, height: 3))
+        XCTAssertEqual(portrait.cgImage?.width, 4)
+        XCTAssertEqual(portrait.cgImage?.height, 6) // A genuinely portrait capture must stay portrait and fail review validation.
+    }
+
+    @MainActor
     func testEmptyEditorScreenshotAttachment() {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
@@ -219,22 +266,37 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    @discardableResult
     private func assertLandscapeContentFrame(in app: XCUIApplication,
-                                             file: StaticString = #filePath, line: UInt = #line) {
-        let topBar = app.descendants(matching: .any)["editor.topBar"].firstMatch
+                                             file: StaticString = #filePath, line: UInt = #line) -> CGRect {
+        let topBar = app.otherElements["editor.topBar"].firstMatch
         let window = app.windows.firstMatch
+        var bar = CGRect.zero
+        var bounds = CGRect.zero
+        var snapshotError = "none"
         let landscapeFrame = NSPredicate { _, _ in
-            guard topBar.exists, window.exists else { return false }
-            let bar = topBar.frame
-            let bounds = window.frame
+            do {
+                // Read each element once per poll, rather than separate exists
+                // and frame queries against all AX element types.
+                bar = try topBar.snapshot().frame
+                bounds = try window.snapshot().frame
+                snapshotError = "none"
+            } catch {
+                snapshotError = String(describing: error)
+                return false
+            }
             return bounds.width > bounds.height && bar.width > bar.height
                 && abs(bar.height - 52) <= 1 && abs(bar.width - bounds.width) <= 1
                 && abs(bar.minX - bounds.minX) <= 1 && abs(bar.minY - bounds.minY) <= 1
         }
         let ready = XCTNSPredicateExpectation(predicate: landscapeFrame, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed,
-                       "Top bar must span the landscape window horizontally: \(topBar.frame), window: \(window.frame)",
+        let result = XCTWaiter.wait(for: [ready], timeout: 10)
+        // Never issue fresh AX frame queries while building a failure message:
+        // those retries outlived the waiter and the test allowance on CI.
+        XCTAssertEqual(result, .completed,
+                       "Top bar must span the landscape window horizontally: \(bar), window: \(bounds), snapshot error: \(snapshotError)",
                        file: file, line: line)
+        return bounds
     }
 
     @MainActor
@@ -251,18 +313,58 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    private func uprightCaptureImage(_ image: UIImage) throws -> UIImage {
+        let raw = try XCTUnwrap(image.cgImage)
+        let swapsAxes: Bool
+        switch image.imageOrientation {
+        case .left, .right, .leftMirrored, .rightMirrored: swapsAxes = true
+        default: swapsAxes = false
+        }
+        let size = CGSize(width: CGFloat(swapsAxes ? raw.height : raw.width) / image.scale,
+                          height: CGFloat(swapsAxes ? raw.width : raw.height) / image.scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale // Preserve source resolution, not the test runner's screen scale.
+        format.preferredRange = .standard
+        // UIImage.draw applies metadata, unlike drawing the raw CGImage. Never
+        // rotate merely because width < height: an incorrect portrait must fail.
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    @MainActor
     private func attachScreenshot(named name: String, from app: XCUIApplication) {
         assertLandscapeSceneGeometry(in: app)
-        assertLandscapeContentFrame(in: app)
-        let screen = XCUIScreen.main.screenshot()
-        XCTAssertGreaterThan(screen.image.size.width, screen.image.size.height,
-                             "Review capture must start from a landscape screen bitmap")
-        XCTAssertGreaterThan(screen.image.cgImage?.width ?? 0,
-                             screen.image.cgImage?.height ?? 0,
-                             "Review capture pixels must span the full landscape screen")
-        let attachment = XCTAttachment(screenshot: screen)
-        attachment.name = "\(name).png"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        let window = assertLandscapeContentFrame(in: app)
+        do {
+            // app.screenshot() previously cropped/padded already-oriented pixels
+            // while retaining EXIF 8. Capture the full display, then bake its
+            // orientation into pixels once; do not normalize the app crop.
+            let source = XCUIScreen.main.screenshot().image
+            let upright = try uprightCaptureImage(source)
+            XCTAssertEqual(upright.imageOrientation, .up)
+            XCTAssertGreaterThan(upright.size.width, upright.size.height,
+                                 "Review capture must be landscape after applying source metadata")
+            let png = try XCTUnwrap(upright.pngData())
+            let decoded = try XCTUnwrap(UIImage(data: png))
+            let bitmap = try XCTUnwrap(decoded.cgImage)
+            XCTAssertEqual(decoded.imageOrientation, .up, "Exported PNG must not need an EXIF rotation")
+            XCTAssertGreaterThan(bitmap.width, bitmap.height,
+                                 "Exported pixels must span the full landscape screen")
+            XCTAssertEqual(CGFloat(bitmap.width), source.size.width * source.scale, accuracy: 1,
+                           "Capture must retain the full oriented source pixel extent")
+            XCTAssertEqual(CGFloat(bitmap.height), source.size.height * source.scale, accuracy: 1)
+            // UIImage.scale belongs to the capture, not necessarily the app's
+            // point-to-screen scale. Compare window shape without conflating them.
+            XCTAssertEqual(CGFloat(bitmap.width) / CGFloat(bitmap.height),
+                           window.width / window.height, accuracy: 0.001,
+                           "Capture and actual landscape window must have matching aspect ratios")
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "\(name).png"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        } catch {
+            XCTFail("Unable to normalize full-screen capture: \(error)")
+        }
     }
 }
