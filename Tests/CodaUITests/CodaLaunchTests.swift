@@ -8,7 +8,8 @@ final class CodaLaunchTests: XCTestCase {
         device.orientation = .landscapeLeft
 
         let app = XCUIApplication()
-        app.launch()
+        defer { attachDiagnostics(from: app) }
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "0 chords")
         XCTAssertEqual(app.staticTexts["font.registration"].value as? String, "font-registered")
@@ -25,7 +26,8 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testEmptyEditorScreenshotAttachment() {
         let app = XCUIApplication()
-        app.launch()
+        defer { attachDiagnostics(from: app) }
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "0 chords")
         attachScreenshot(named: "M1-empty-editor", from: app)
@@ -34,8 +36,9 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testFourBarSeededFixtureScreenshotAttachment() {
         let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
         app.launchArguments = ["--coda-ui-fixture-four-bar"]
-        app.launch()
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
         attachScreenshot(named: "M1-four-bar-fixture", from: app)
@@ -44,8 +47,9 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testFingerMusicRegionTapDoesNotEditOrCreateHistory() {
         let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
         app.launchArguments = ["--coda-ui-fixture-four-bar"]
-        app.launch()
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         let emptyBar = app.descendants(matching: .any)["music.empty.5"].firstMatch
         XCTAssertTrue(emptyBar.waitForExistence(timeout: 5))
@@ -70,7 +74,8 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testDrawerAndAllThreeProductionPresetsAreReachable() {
         let app = XCUIApplication()
-        app.launch()
+        defer { attachDiagnostics(from: app) }
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
         app.buttons["top.drawer"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["editor.synthDrawer"].waitForExistence(timeout: 5))
@@ -91,8 +96,9 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testActualSessionPlayPauseAndChordMuteControls() {
         let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
         app.launchArguments = ["--coda-ui-fixture-four-bar"]
-        app.launch()
+        launchAndDescribe(app)
         let play = app.buttons["top.play"]
         XCTAssertTrue(play.waitForExistence(timeout: 10))
         let mute = app.buttons["top.chordMute"]
@@ -117,11 +123,31 @@ final class CodaLaunchTests: XCTestCase {
     @MainActor
     func testEdgePositionedAllQualityRadialScreenshotFixture() {
         let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
         app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-radial-edge"]
-        app.launch()
+        launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["radial.menu.all"].waitForExistence(timeout: 5))
         attachScreenshot(named: "M1-radial-edge-fixture", from: app)
+    }
+
+    @MainActor
+    private func launchAndDescribe(_ app: XCUIApplication) {
+        app.launch()
+        print("M1 initial launch AX tree (\(name)); app state: \(app.state.rawValue)\n\(app.debugDescription)")
+    }
+
+    @MainActor
+    private func attachDiagnostics(from app: XCUIApplication) {
+        // Registered with defer before launch in every test: capture even when
+        // a later assertion or element lookup prevents the review screenshot.
+        let testName = name.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .first(where: { $0.hasPrefix("test") }) ?? "unknown"
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "M1-diagnostic-\(testName).png"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("M1 final AX tree (\(name)); app state: \(app.state.rawValue)\n\(app.debugDescription)")
     }
 
     @MainActor

@@ -97,6 +97,7 @@ jobs:
             build/generated/transport/transport_tests_sanitized
 
       - name: Run combined M1 music, audio, input and UI suite
+        id: m1-tests
         run: >-
           xcodebuild test
           -project coda.xcodeproj
@@ -109,16 +110,37 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
 
       - name: Export only named M1 review screenshots
+        if: ${{ !cancelled() && steps.m1-tests.outcome != 'skipped' }}
         shell: bash
+        env:
+          M1_TEST_OUTCOME: ${{ steps.m1-tests.outcome }}
         run: |
           set -euo pipefail
           mkdir -p build/generated/ui-attachments
           xcrun xcresulttool export attachments \
             --path build/generated/coda-m1-tests.xcresult \
             --output-path build/generated/ui-attachments
+          export_options=()
+          if [[ "$M1_TEST_OUTCOME" != "success" ]]; then
+            export_options+=(--allow-missing-review)
+          fi
           python3 scripts/export_ui_screenshots.py \
             --source build/generated/ui-attachments \
-            --destination build/artifacts/ui-screenshots
+            --destination build/artifacts/ui-screenshots "${export_options[@]}"
+
+      - name: Upload named M1 UI diagnostics even after test failure
+        if: ${{ !cancelled() && steps.m1-tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coda-m1-ui-diagnostics
+          path: |
+            build/artifacts/ui-screenshots/M1-empty-editor.png
+            build/artifacts/ui-screenshots/M1-four-bar-fixture.png
+            build/artifacts/ui-screenshots/M1-synth-drawer.png
+            build/artifacts/ui-screenshots/M1-radial-edge-fixture.png
+            build/artifacts/ui-screenshots/M1-diagnostic-*.png
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Archive unsigned device app
         run: >-

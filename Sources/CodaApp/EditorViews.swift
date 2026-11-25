@@ -266,6 +266,9 @@ private struct EditorTopBar: View {
             EditorSettingsPopover(store: store, popup: popup)
                 .presentationCompactAdaptation(.popover)
         }
+        // Give the container its own AX node so its identifier does not
+        // propagate to (and replace the identifiers of) the controls inside.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.topBar")
     }
 }
@@ -331,6 +334,7 @@ private struct TimelineStripView: View {
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("editor.timeline")
         }
         .frame(height: CodaDesignTokens.Geometry.timelineHeight)
@@ -389,6 +393,7 @@ private struct ChordStripView: View {
                     }
                     .clipped()
                     .background(CodaDesignTokens.Colors.oled)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("editor.chordStrip")
                 }
             }
@@ -469,6 +474,7 @@ private struct PianoRollView: View {
                     .background(CodaDesignTokens.Colors.oled)
                     .contentShape(Rectangle())
                     .onTapGesture { if store.drawerOpen { store.openDrawer(false) } }
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("editor.pianoRoll")
                 }
             }
@@ -609,6 +615,7 @@ private struct SynthDrawer: View {
                 })
                 .accessibilityIdentifier("drawer.pullTab")
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.synthDrawer")
         .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
             if value.translation.width > 60 && abs(value.translation.width) > abs(value.translation.height) {
