@@ -6,6 +6,15 @@ options:
     iOS: "27.2"
   createIntermediateGroups: true
 
+settingGroups:
+  CodaNativeHeaders:
+    # Static-library dependencies do not propagate Clang module search paths.
+    # Discover module.modulemap in-place, plus coda_transport.h's DSP dependency.
+    HEADER_SEARCH_PATHS:
+      - "$(inherited)"
+      - "$(SRCROOT)/Sources/CodaTransport/include"
+      - "$(SRCROOT)/CodaDSP/include"
+
 targets:
   coda:
     type: application
@@ -35,6 +44,7 @@ targets:
       - target: CodaSession
       - target: CodaNative
     settings:
+      groups: [CodaNativeHeaders]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.coda.sketchpad
         PRODUCT_NAME: coda
@@ -168,11 +178,11 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: libc++.tbd
     settings:
+      groups: [CodaNativeHeaders]
       base:
         PRODUCT_MODULE_NAME: CodaNative
         DEFINES_MODULE: YES
         MODULEMAP_FILE: $(SRCROOT)/Sources/CodaTransport/include/module.modulemap
-        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Sources/CodaTransport/include", "$(SRCROOT)/CodaDSP/include"]
         CLANG_CXX_LANGUAGE_STANDARD: c++20
         CLANG_ENABLE_OBJC_ARC: YES
         SKIP_INSTALL: YES
@@ -189,6 +199,7 @@ targets:
       - target: CodaMusic
       - target: CodaNative
     settings:
+      groups: [CodaNativeHeaders]
       base:
         PRODUCT_MODULE_NAME: CodaSession
         DEFINES_MODULE: YES
@@ -215,12 +226,12 @@ targets:
       - target: CodaMusic
       - target: CodaInteraction
     settings:
+      groups: [CodaNativeHeaders]
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.coda.audio.tests
         SWIFT_VERSION: "6.0"
         CLANG_CXX_LANGUAGE_STANDARD: c++20
         CLANG_ENABLE_OBJC_ARC: YES
-        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Sources/CodaTransport/include", "$(SRCROOT)/CodaDSP/include"]
         TARGETED_DEVICE_FAMILY: "2"
         SUPPORTS_MACCATALYST: NO
     info:
