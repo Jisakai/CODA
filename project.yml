@@ -43,6 +43,7 @@ targets:
       - target: CodaInteraction
       - target: CodaSession
       - target: CodaNative
+      - sdk: libc++.tbd
     settings:
       groups: [CodaNativeHeaders]
       base:
@@ -225,6 +226,7 @@ targets:
       - target: CodaSession
       - target: CodaMusic
       - target: CodaInteraction
+      - sdk: libc++.tbd
     settings:
       groups: [CodaNativeHeaders]
       base:
