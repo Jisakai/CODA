@@ -214,3 +214,28 @@ Stop for Hermes review; native
 compile/test failures or unresolved DSP/listening concerns escalate rather
 than starting another automatic corrective pass. No UI/adapter or next
 milestone work, staging, commit, push, installation or CI trigger occurred.
+
+## Subsequent Hermes native CI verification
+
+GitHub Actions run 45618129186 succeeded at commit
+`62cc900928e219a0be8ae3551c38ad1f19e92374` using Xcode/SDK 27.2:
+the production C++ DSP suite (including public Hall reprepare regressions),
+AddressSanitizer/UndefinedBehaviorSanitizer run, 13 scaffold/package checks,
+23 music XCTest methods, one simulator launch test, unsigned archive and
+IPA packaging all passed. The compiler reports a nonblocking misleading-
+indentation warning at `pass2_tests.h:196`; no warning-free build is claimed.
+
+The first attempt, run 45617610096, passed normal DSP tests but aborted before
+sanitizer test execution because Apple's runtime rejects `detect_leaks=1`.
+The workflow now explicitly uses `detect_leaks=0:halt_on_error=1` with
+`UBSAN_OPTIONS=halt_on_error=1`. This verifies address/undefined-behavior
+checks, NOT LeakSanitizer or freedom from all leaks/data races.
+
+Hermes downloaded the successful artifact and independently checked its SHA-256,
+ZIP integrity, unsigned arm64 Mach-O, iPad/device/deployment/orientation metadata,
+and exact bundled font/vocabulary bytes against the repository.
+IPA SHA-256: `427688fdef9b6c64bda61940167a5504945a0324ebd91769cb10207a3803cdd9`.
+The app is still the foundation UI at this commit; this standalone DSP slice
+does not yet provide integrated app audio. No physical installation/listening
+test or full M1 acceptance is claimed. Owner has explicitly deferred those
+device checks until complete M1 delivery; automated CI continues between slices.

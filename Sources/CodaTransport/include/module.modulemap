@@ -1,0 +1,5 @@
+module CodaNative {
+    header "coda_transport.h"
+    header "CodaAudioAdapter.h"
+    export *
+}

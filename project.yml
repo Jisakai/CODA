@@ -31,6 +31,9 @@ targets:
         buildPhase: resources
     dependencies:
       - target: CodaMusic
+      - target: CodaInteraction
+      - target: CodaSession
+      - target: CodaNative
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.coda.sketchpad
@@ -106,6 +109,123 @@ targets:
     info:
       path: build/generated/CodaMusicTests-Info.plist
 
+  CodaInteraction:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaInteraction
+    settings:
+      base:
+        PRODUCT_NAME: CodaInteraction
+        PRODUCT_MODULE_NAME: CodaInteraction
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+
+  CodaInteractionTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Tests/CodaInteractionTests
+      - path: Sources/CodaMusic/Resources/vocab.json
+        buildPhase: resources
+    dependencies:
+      - target: CodaInteraction
+      - target: CodaMusic
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.interaction.tests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: build/generated/CodaInteractionTests-Info.plist
+
+  CodaNative:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaTransport
+        excludes:
+          - include
+      - path: Sources/CodaTransport/include/coda_transport.h
+        headerVisibility: public
+      - path: Sources/CodaTransport/include/CodaAudioAdapter.h
+        headerVisibility: public
+      - path: CodaDSP/src
+      - path: CodaDSP/include/coda_dsp.h
+        headerVisibility: public
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: libc++.tbd
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: CodaNative
+        DEFINES_MODULE: YES
+        MODULEMAP_FILE: $(SRCROOT)/Sources/CodaTransport/include/module.modulemap
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Sources/CodaTransport/include", "$(SRCROOT)/CodaDSP/include"]
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        CLANG_ENABLE_OBJC_ARC: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+
+  CodaSession:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaSession
+    dependencies:
+      - target: CodaMusic
+      - target: CodaNative
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: CodaSession
+        DEFINES_MODULE: YES
+        SWIFT_VERSION: "6.0"
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+
+  CodaAudioTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Tests/CodaAudioTests
+      # Compile the actual editor model into the offline integration-test target.
+      - path: Sources/CodaApp/CodaEditorStore.swift
+      - path: Sources/CodaApp/CodaDesignTokens.swift
+      - path: Sources/CodaApp/PencilInputBridge.swift
+      - path: Sources/CodaMusic/Resources/vocab.json
+        buildPhase: resources
+    dependencies:
+      - target: CodaNative
+      - target: CodaSession
+      - target: CodaMusic
+      - target: CodaInteraction
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.audio.tests
+        SWIFT_VERSION: "6.0"
+        CLANG_CXX_LANGUAGE_STANDARD: c++20
+        CLANG_ENABLE_OBJC_ARC: YES
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Sources/CodaTransport/include", "$(SRCROOT)/CodaDSP/include"]
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: build/generated/CodaAudioTests-Info.plist
+
   codaUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -133,6 +253,8 @@ schemes:
       targets:
         - codaUITests
         - CodaMusicTests
+        - CodaInteractionTests
+        - CodaAudioTests
   CodaMusic:
     build:
       targets:

@@ -2,29 +2,133 @@ import XCTest
 
 final class CodaLaunchTests: XCTestCase {
     @MainActor
-    func testLaunchDisplaysWordmarkWithFontAndLocksLandscape() {
+    func testLaunchShowsEmptyEditorAndLocksLandscape() {
         let device = XCUIDevice.shared
         defer { device.orientation = .landscapeLeft }
         device.orientation = .landscapeLeft
 
         let app = XCUIApplication()
         app.launch()
-
-        let wordmark = app.staticTexts["coda.wordmark"]
-        XCTAssertTrue(wordmark.waitForExistence(timeout: 5))
-        XCTAssertEqual(wordmark.value as? String, "font-registered")
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "0 chords")
+        XCTAssertEqual(app.staticTexts["font.registration"].value as? String, "font-registered")
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(window.frame.width, window.frame.height, "App should launch in landscape")
-
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
         device.orientation = .portrait
-        XCTAssertEqual(device.orientation, .portrait, "Portrait rotation should be attempted")
-        Thread.sleep(forTimeInterval: 1)
-        XCTAssertGreaterThan(
-            window.frame.width,
-            window.frame.height,
-            "App should remain in landscape after a portrait rotation attempt"
-        )
+        XCTAssertTrue(app.buttons["top.play"].exists)
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "The editor must remain landscape after a portrait rotation attempt")
+    }
+
+    @MainActor
+    func testEmptyEditorScreenshotAttachment() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "0 chords")
+        attachScreenshot(named: "M1-empty-editor", from: app)
+    }
+
+    @MainActor
+    func testFourBarSeededFixtureScreenshotAttachment() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--coda-ui-fixture-four-bar"]
+        app.launch()
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
+        attachScreenshot(named: "M1-four-bar-fixture", from: app)
+    }
+
+    @MainActor
+    func testFingerMusicRegionTapDoesNotEditOrCreateHistory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--coda-ui-fixture-four-bar"]
+        app.launch()
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        let emptyBar = app.descendants(matching: .any)["music.empty.5"].firstMatch
+        XCTAssertTrue(emptyBar.waitForExistence(timeout: 5))
+        let before = app.staticTexts["editor.regionCount"].label
+        let historyBefore = app.staticTexts["editor.undoState"].label
+        let audioBefore = app.staticTexts["editor.audioAvailability"].label
+        emptyBar.tap()
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, before)
+        XCTAssertEqual(app.staticTexts["editor.undoState"].label, historyBefore)
+        XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, audioBefore)
+
+        let chord = app.descendants(matching: .any).matching(identifier: "music.chord.fixture-0").firstMatch
+        XCTAssertTrue(chord.exists)
+        let selectionBefore = chord.value as? String
+        chord.tap()
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, before)
+        XCTAssertEqual(app.staticTexts["editor.undoState"].label, historyBefore)
+        XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, audioBefore)
+        XCTAssertEqual(chord.value as? String, selectionBefore)
+    }
+
+    @MainActor
+    func testDrawerAndAllThreeProductionPresetsAreReachable() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
+        app.buttons["top.drawer"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["editor.synthDrawer"].waitForExistence(timeout: 5))
+        for index in 0...2 {
+            let preset = app.buttons["drawer.preset.\(index)"]
+            XCTAssertTrue(preset.exists)
+            preset.tap()
+            XCTAssertEqual(preset.value as? String, "selected")
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.cutoff"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.resonance"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.shape"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.detune"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.glide"].exists)
+        attachScreenshot(named: "M1-synth-drawer", from: app)
+    }
+
+    @MainActor
+    func testActualSessionPlayPauseAndChordMuteControls() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--coda-ui-fixture-four-bar"]
+        app.launch()
+        let play = app.buttons["top.play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10))
+        let mute = app.buttons["top.chordMute"]
+        let initialMute = mute.value as? String
+        mute.tap()
+        XCTAssertNotEqual(mute.value as? String, initialMute)
+        mute.tap()
+        XCTAssertEqual(mute.value as? String, initialMute)
+
+        for index in 0...2 {
+            app.buttons["top.drawer"].tap()
+            app.buttons["drawer.preset.\(index)"].tap()
+            app.buttons["drawer.close"].tap()
+            play.tap()
+            XCTAssertEqual(play.value as? String, "playing")
+            XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, "available")
+            play.tap()
+            XCTAssertEqual(play.value as? String, "paused")
+        }
+    }
+
+    @MainActor
+    func testEdgePositionedAllQualityRadialScreenshotFixture() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-radial-edge"]
+        app.launch()
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["radial.menu.all"].waitForExistence(timeout: 5))
+        attachScreenshot(named: "M1-radial-edge-fixture", from: app)
+    }
+
+    @MainActor
+    private func attachScreenshot(named name: String, from app: XCUIApplication) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "\(name).png"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

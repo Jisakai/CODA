@@ -77,13 +77,48 @@ jobs:
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             build/generated/dsp/dsp_tests_sanitized
 
-      - name: Run iPad simulator launch smoke test
+      - name: Test production transport and sanitizers
+        shell: bash
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          mkdir -p build/generated/transport
+          clang++ -std=c++20 -O2 -Wall -Wextra -pthread \
+            -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
+            CodaDSP/src/coda_dsp.cpp Sources/CodaTransport/coda_transport.cpp \
+            Tests/CodaTransportTests/transport_tests.cpp -o build/generated/transport/transport_tests
+          build/generated/transport/transport_tests
+          clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
+            CodaDSP/src/coda_dsp.cpp Sources/CodaTransport/coda_transport.cpp \
+            Tests/CodaTransportTests/transport_tests.cpp -o build/generated/transport/transport_tests_sanitized
+          ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+            build/generated/transport/transport_tests_sanitized
+
+      - name: Run combined M1 music, audio, input and UI suite
         run: >-
           xcodebuild test
           -project coda.xcodeproj
           -scheme coda
+          -test-timeouts-enabled YES
+          -default-test-execution-time-allowance 60
+          -maximum-test-execution-time-allowance 120
           -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.2'
+          -resultBundlePath build/generated/coda-m1-tests.xcresult
           CODE_SIGNING_ALLOWED=NO
+
+      - name: Export only named M1 review screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/generated/ui-attachments
+          xcrun xcresulttool export attachments \
+            --path build/generated/coda-m1-tests.xcresult \
+            --output-path build/generated/ui-attachments
+          python3 scripts/export_ui_screenshots.py \
+            --source build/generated/ui-attachments \
+            --destination build/artifacts/ui-screenshots
 
       - name: Archive unsigned device app
         run: >-
@@ -116,5 +151,9 @@ jobs:
             build/artifacts/App.ipa
             build/artifacts/App-verification.txt
             build/generated/dsp/DSP-verification.txt
+            build/artifacts/ui-screenshots/M1-empty-editor.png
+            build/artifacts/ui-screenshots/M1-four-bar-fixture.png
+            build/artifacts/ui-screenshots/M1-synth-drawer.png
+            build/artifacts/ui-screenshots/M1-radial-edge-fixture.png
           if-no-files-found: error
           retention-days: 7

@@ -61,6 +61,12 @@ class ProjectScaffoldTests(unittest.TestCase):
         cls.app = (ROOT / "Sources" / "CodaApp" / "CodaApp.swift").read_text(
             encoding="utf-8"
         )
+        cls.views = (ROOT / "Sources" / "CodaApp" / "EditorViews.swift").read_text(
+            encoding="utf-8"
+        )
+        cls.input_bridge = (ROOT / "Sources" / "CodaApp" / "PencilInputBridge.swift").read_text(
+            encoding="utf-8"
+        )
 
     def test_bundled_font_files_and_postscript_names(self):
         for filename, expected_name in FONT_FILES.items():
@@ -117,7 +123,9 @@ class ProjectScaffoldTests(unittest.TestCase):
             "card: CGFloat = 8",
             'lightFontPostScriptName = "PlusJakartaSans-Light"',
             'extraBoldFontPostScriptName = "PlusJakartaSans-ExtraBold"',
-            "wordmarkOpacity: Double = 0.72",
+            "drawerFraction: CGFloat = 0.30",
+            "holdDuration: Double = 0.4",
+            "barrelDeadZoneDegrees: Double = 12",
         )
         for token in expected_tokens:
             with self.subTest(token=token):
@@ -136,16 +144,20 @@ class ProjectScaffoldTests(unittest.TestCase):
                 self.assertIn(color, self.tokens)
         self.assertNotRegex(self.tokens, r"(?i)#[fF](?:fF)?(?:cC00|59b0b)(?:[fF]{0,2})")
 
-    def test_app_launches_into_the_black_fonted_canvas(self):
-        self.assertIn("rootView: CodaCanvas().preferredColorScheme(.dark)", self.app)
-        self.assertIn("CodaDesignTokens.Colors.oled", self.app)
-        self.assertIn("lightFontPostScriptName", self.app)
-        self.assertIn("UIFont(", self.app)
-        self.assertIn("font-registered", self.app)
-        self.assertIn("wordmarkOpacity", self.app)
-        self.assertIn('accessibilityIdentifier("coda.wordmark")', self.app)
-        self.assertIn(".ignoresSafeArea()", self.app)
-        self.assertIn(".statusBarHidden(true)", self.app)
+    def test_app_launches_the_empty_native_editor_and_registers_the_font(self):
+        self.assertIn("CodaCanvas(store: editorStore).preferredColorScheme(.dark)", self.app)
+        self.assertIn("EditorTopBar(store: store)", self.views)
+        self.assertIn("TimelineStripView(store: store)", self.views)
+        self.assertIn("ChordStripView(store: store)", self.views)
+        self.assertIn("PianoRollView(store: store)", self.views)
+        self.assertIn('accessibilityIdentifier("font.registration")', self.views)
+        self.assertIn("font-registered", self.views)
+        self.assertIn("CodaDesignTokens.Colors.oled", self.views)
+        self.assertIn(".ignoresSafeArea()", self.views)
+        self.assertIn(".statusBarHidden(true)", self.views)
+        self.assertIn("touch.type == .pencil", self.input_bridge)
+        self.assertIn("UITouch.TouchType.direct.rawValue", self.input_bridge)
+        self.assertIn("recognizer.rollAngle", self.input_bridge)
 
     def test_scene_root_hosts_swiftui_and_requests_landscape_lock(self):
         self.assertRegex(
@@ -161,7 +173,7 @@ class ProjectScaffoldTests(unittest.TestCase):
             self.app, r"@main\s+final class CodaApp: UIResponder, UIApplicationDelegate"
         )
         scene_delegate = re.search(
-            r"(?ms)^final class CodaSceneDelegate: UIResponder, UIWindowSceneDelegate \{"
+            r"(?ms)^@MainActor\nfinal class CodaSceneDelegate: UIResponder, UIWindowSceneDelegate \{"
             r"\n(.*?)^\}", self.app
         )
         self.assertIsNotNone(scene_delegate)
@@ -170,7 +182,7 @@ class ProjectScaffoldTests(unittest.TestCase):
             "willConnectTo session: UISceneSession",
             "UIWindow(windowScene: windowScene)",
             "window.rootViewController = CodaHostingController(",
-            "rootView: CodaCanvas().preferredColorScheme(.dark)",
+            "rootView: CodaCanvas(store: editorStore).preferredColorScheme(.dark)",
             "self.window = window",
             "window.makeKeyAndVisible()",
         ):
@@ -194,6 +206,27 @@ class ProjectScaffoldTests(unittest.TestCase):
     def test_runtime_has_no_external_package_declarations(self):
         self.assertNotIn("packages:", self.project)
         self.assertNotIn("package:", self.project)
+
+    def test_combined_m1_scheme_and_screenshot_artifacts_are_narrowly_wired(self):
+        workflow = (ROOT / ".github" / "workflows" / "unsigned-ipa.yml").read_text(
+            encoding="utf-8"
+        )
+        for target in ("codaUITests", "CodaMusicTests", "CodaInteractionTests", "CodaAudioTests"):
+            with self.subTest(target=target):
+                self.assertIn(f"        - {target}", self.project)
+        self.assertIn("CodaInteractionTests:", self.project)
+        self.assertIn("-resultBundlePath build/generated/coda-m1-tests.xcresult", workflow)
+        self.assertIn("xcrun xcresulttool export attachments", workflow)
+        for name in (
+            "M1-empty-editor.png",
+            "M1-four-bar-fixture.png",
+            "M1-synth-drawer.png",
+            "M1-radial-edge-fixture.png",
+        ):
+            with self.subTest(attachment=name):
+                self.assertIn(name, workflow)
+                self.assertIn(name, (ROOT / "scripts" / "export_ui_screenshots.py").read_text(encoding="utf-8"))
+        self.assertNotIn("coda-m1-tests.xcresult", workflow.split("path: |", 1)[-1])
 
 
 if __name__ == "__main__":

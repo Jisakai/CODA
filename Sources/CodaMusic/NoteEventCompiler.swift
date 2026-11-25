@@ -6,6 +6,8 @@ public enum NoteEventKind: Int, Sendable { case noteOff = 0, noteOn = 1 }
 /// noteOff means release the envelope, never hard-cut a DSP voice.
 public struct NoteEvent: Equatable, Sendable {
     public let sampleOffset: Int64
+    /// Exact grid boundary retained for cycle-indexed native scheduling.
+    public let stepOffset: Int
     public let kind: NoteEventKind
     public let pitch: UInt8
     public let voiceIndex: Int
@@ -56,8 +58,8 @@ public enum NoteEventCompiler {
             let off = try offset(end - loop.start)
             guard off > on else { throw MusicError.timingOverflow }
             for (voice, pitch) in region.pitches.enumerated() {
-                events.append(NoteEvent(sampleOffset: on, kind: .noteOn, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
-                events.append(NoteEvent(sampleOffset: off, kind: .noteOff, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
+                events.append(NoteEvent(sampleOffset: on, stepOffset: start - loop.start, kind: .noteOn, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
+                events.append(NoteEvent(sampleOffset: off, stepOffset: end - loop.start, kind: .noteOff, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
             }
         }
         events.sort {

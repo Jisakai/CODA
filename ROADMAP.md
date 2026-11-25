@@ -10,6 +10,7 @@ Source: `SPEC.md` §18. Behavior follows `SPEC.md`; visuals follow `docs/DESIGN.
 - Use the requested Codex command with a PTY. Never silently change DECIDED behavior, add finger music editing, or relax audio render-thread constraints.
 - On CI failure, return the actual error to Codex; allow at most three corrective retries, then stop and report.
 - M1 and M1b delivery must include the listening checklist from `docs/sound-brief.md`, hand-testing instructions, and chosen defaults.
+- Owner update: continue through M1 implementation without intermediate physical iPad installation/listening checks; perform those at full M1 delivery. Automated native CI remains required, and M1b still waits for final M1 approval.
 - Before M4, verify network access to `ailsntua/Chordonomicon` and sufficient training compute. Stop and ask the owner if either is insufficient.
 - Log each adopted PROPOSED/OPEN default in `DECISIONS_LOG.md`; summarize it here at the relevant milestone. OPEN defaults belong behind a single named constant/flag. Questions with no stated default remain unresolved until needed.
 
@@ -24,7 +25,8 @@ Source: `SPEC.md` §18. Behavior follows `SPEC.md`; visuals follow `docs/DESIGN.
   - Scope clarification from §13.7: Chords EQ/volume in M1; Bass/Melody EQ/volume with those layers in M3.
   - Foundation slice: reviewed and native-verified in [CI run 45596058488](https://github.com/Jisakai/CODA/actions/runs/45596058488), commit `e6b82e522fa60ed9a406a40f5ce8e9f33b2f4afd`: 23 music XCTest methods, 1 launch test, 13 Python checks pass. Downloaded IPA independently verified unsigned arm64, metadata/fonts/vocabulary intact; SHA-256 `7fcfc7bf0eee05c51a502f739daa36de7113d35b2268d7a22080e26ee6f46b19`. No new UI/audio in this slice.
   - Defaults: C natural minor, 124 BPM, 8-bar canvas, whole-bar loops, centralized MIDI 36–84 voicing/cost configuration; details in `docs/M1-phase1.md` and `DECISIONS_LOG.md`.
-  - Build/artifact: foundation green; progressing to separately reviewable synth/DSP before app transport/UI integration. Full M1 listening/hand acceptance: pending. Owner approval: pending.
+  - DSP slice: production tests including Hall reprepare plus ASan/UBSan passed in CI run 45618129186 at `62cc900928e219a0be8ae3551c38ad1f19e92374`; 23 music XCTest methods, one launch test, 13 Python checks and unsigned archive/package also passed. Downloaded IPA independently verified, SHA-256 `427688fdef9b6c64bda61940167a5504945a0324ebd91769cb10207a3803cdd9`. Apple LeakSanitizer unsupported; not claimed. See `docs/M1-phase2.md`.
+  - Build/artifact: foundation and standalone DSP green; audio adapter/transport integration is the next reviewed slice (`docs/briefs/M1-phase3.md`), then chord-track UI. Full M1 listening/hand acceptance and owner approval: pending, deferred to full M1 delivery at owner's request.
 - [ ] **M1b — Strum engine on top of the synth.** Pattern overlay with 8 eighth slots, arrow strokes, chuck, tap-to-remove, swing, humanize, spread.
   - **Exit criterion (§18):** A pattern changes how the same chords play.
   - Build/artifact: not started. Listening/hand acceptance: pending. Owner approval: pending.

@@ -29,6 +29,7 @@ final class NoteEventCompilerTests: MusicTestCase {
                 let result = try NoteEventCompiler.compile(p, tempo: tempo, sampleRate: rate, loop: loop)
                 for event in result.events {
                     let step = event.regionIndex + (event.kind == .noteOff ? 1 : 0)
+                    XCTAssertEqual(event.stepOffset, step)
                     let expected = Int64((Double(step) * (rate * 60 / tempo / 4)).rounded(.toNearestOrAwayFromZero))
                     XCTAssertEqual(event.sampleOffset, expected)
                 }
