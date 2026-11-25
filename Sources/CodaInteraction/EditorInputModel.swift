@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public enum EditorInputDevice: Equatable, Sendable {
     case finger
