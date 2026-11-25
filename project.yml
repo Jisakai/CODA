@@ -1,0 +1,82 @@
+name: coda
+
+options:
+  bundleIdPrefix: com.coda
+  deploymentTarget:
+    iOS: "27.2"
+  createIntermediateGroups: true
+
+targets:
+  coda:
+    type: application
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaApp
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Light.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Regular.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Medium.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-SemiBold.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Bold.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-ExtraBold.ttf
+        buildPhase: resources
+      - path: Fonts/Plus_Jakarta_Sans/OFL.txt
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.sketchpad
+        PRODUCT_NAME: coda
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: build/generated/coda-Info.plist
+      properties:
+        CFBundleDisplayName: coda
+        UIRequiresFullScreen: true
+        UIUserInterfaceStyle: Dark
+        UILaunchScreen: {}
+        UIAppFonts:
+          - PlusJakartaSans-Light.ttf
+          - PlusJakartaSans-Regular.ttf
+          - PlusJakartaSans-Medium.ttf
+          - PlusJakartaSans-SemiBold.ttf
+          - PlusJakartaSans-Bold.ttf
+          - PlusJakartaSans-ExtraBold.ttf
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  codaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Tests/CodaUITests
+    dependencies:
+      - target: coda
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.sketchpad.UITests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+
+schemes:
+  coda:
+    build:
+      targets:
+        coda: all
+    test:
+      config: Debug
+      targets:
+        - codaUITests
