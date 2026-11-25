@@ -37,7 +37,7 @@ def exported_name(value: str) -> str:
 def matches_expected_label(label: str, expected: str) -> bool:
     if exported_name(label) == expected:
         return True
-    if expected not in DIAGNOSTICS:
+    if expected not in (*EXPECTED, *DIAGNOSTICS):
         return False
     stem = re.escape(expected.removesuffix(".png"))
     return re.fullmatch(rf"{stem}_[0-9]+_[0-9A-Fa-f]{{8}}(?:-[0-9A-Fa-f]{{4}}){{3}}-[0-9A-Fa-f]{{12}}\.png",
