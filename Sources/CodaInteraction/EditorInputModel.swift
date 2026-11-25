@@ -173,6 +173,16 @@ public struct HoldMenuLayout: Equatable, Sendable {
                        width: width, height: height)
     }
 
+    public static func == (lhs: HoldMenuLayout, rhs: HoldMenuLayout) -> Bool {
+        lhs.frame.origin.x == rhs.frame.origin.x &&
+        lhs.frame.origin.y == rhs.frame.origin.y &&
+        lhs.frame.size.width == rhs.frame.size.width &&
+        lhs.frame.size.height == rhs.frame.size.height &&
+        lhs.rowHeight == rhs.rowHeight &&
+        lhs.dividerHeight == rhs.dividerHeight &&
+        lhs.rowCount == rhs.rowCount
+    }
+
     public func row(at point: CGPoint) -> Int? {
         guard frame.contains(point) else { return nil }
         let localY = point.y - frame.minY
