@@ -137,7 +137,7 @@ class ProjectScaffoldTests(unittest.TestCase):
         self.assertNotRegex(self.tokens, r"(?i)#[fF](?:fF)?(?:cC00|59b0b)(?:[fF]{0,2})")
 
     def test_app_launches_into_the_black_fonted_canvas(self):
-        self.assertIn("WindowGroup", self.app)
+        self.assertIn("rootView: CodaCanvas().preferredColorScheme(.dark)", self.app)
         self.assertIn("CodaDesignTokens.Colors.oled", self.app)
         self.assertIn("lightFontPostScriptName", self.app)
         self.assertIn("UIFont(", self.app)
@@ -146,6 +146,50 @@ class ProjectScaffoldTests(unittest.TestCase):
         self.assertIn('accessibilityIdentifier("coda.wordmark")', self.app)
         self.assertIn(".ignoresSafeArea()", self.app)
         self.assertIn(".statusBarHidden(true)", self.app)
+
+    def test_scene_root_hosts_swiftui_and_requests_landscape_lock(self):
+        self.assertRegex(
+            self.project,
+            r"(?m)^        UIApplicationSceneManifest:\n"
+            r"          UIApplicationSupportsMultipleScenes: false\n"
+            r"          UISceneConfigurations:\n"
+            r"            UIWindowSceneSessionRoleApplication:\n"
+            r"              - UISceneConfigurationName: Coda\n"
+            r"                UISceneDelegateClassName: \$\(PRODUCT_MODULE_NAME\)\.CodaSceneDelegate\n",
+        )
+        self.assertRegex(
+            self.app, r"@main\s+final class CodaApp: UIResponder, UIApplicationDelegate"
+        )
+        scene_delegate = re.search(
+            r"(?ms)^final class CodaSceneDelegate: UIResponder, UIWindowSceneDelegate \{"
+            r"\n(.*?)^\}", self.app
+        )
+        self.assertIsNotNone(scene_delegate)
+        for connection in (
+            "var window: UIWindow?",
+            "willConnectTo session: UISceneSession",
+            "UIWindow(windowScene: windowScene)",
+            "window.rootViewController = CodaHostingController(",
+            "rootView: CodaCanvas().preferredColorScheme(.dark)",
+            "self.window = window",
+            "window.makeKeyAndVisible()",
+        ):
+            with self.subTest(connection=connection):
+                self.assertIn(connection, scene_delegate.group(1))
+        hosting_controller = re.search(
+            r"(?ms)^private final class CodaHostingController<Content: View>: "
+            r"UIHostingController<Content> \{\n(.*?)^\}", self.app
+        )
+        self.assertIsNotNone(hosting_controller)
+        self.assertRegex(
+            hosting_controller.group(1),
+            r"override var supportedInterfaceOrientations: UIInterfaceOrientationMask"
+            r"\s*\{\s*\.landscape\s*\}",
+        )
+        self.assertRegex(
+            hosting_controller.group(1),
+            r"override var prefersInterfaceOrientationLocked: Bool\s*\{\s*true\s*\}",
+        )
 
     def test_runtime_has_no_external_package_declarations(self):
         self.assertNotIn("packages:", self.project)

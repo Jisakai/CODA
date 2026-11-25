@@ -2,13 +2,32 @@ import SwiftUI
 import UIKit
 
 @main
-struct CodaApp: App {
-    var body: some Scene {
-        WindowGroup {
-            CodaCanvas()
-                .preferredColorScheme(.dark)
-        }
+final class CodaApp: UIResponder, UIApplicationDelegate {}
+
+final class CodaSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = CodaHostingController(
+            rootView: CodaCanvas().preferredColorScheme(.dark)
+        )
+        self.window = window
+        window.makeKeyAndVisible()
     }
+}
+
+private final class CodaHostingController<Content: View>: UIHostingController<Content> {
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+
+    // The scene queries its root controller; UIRequiresFullScreen no longer locks rotation.
+    // https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key
+    override var prefersInterfaceOrientationLocked: Bool { true }
 }
 
 private struct CodaCanvas: View {

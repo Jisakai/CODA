@@ -43,6 +43,12 @@ targets:
         UIRequiresFullScreen: true
         UIUserInterfaceStyle: Dark
         UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Coda
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CodaSceneDelegate
         UIAppFonts:
           - PlusJakartaSans-Light.ttf
           - PlusJakartaSans-Regular.ttf
