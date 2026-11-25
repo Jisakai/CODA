@@ -45,6 +45,38 @@ class ScreenshotExportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual({p.name for p in destination.iterdir()}, set(names[:-1]))
 
+    def test_real_xctest_index_uuid_diagnostic_alias_is_allowlisted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = pathlib.Path(temporary)
+            destination = source / "output"
+            expected = exporter.DIAGNOSTICS[5]
+            exported = "E29D079D-F7E6-436D-A234-9C15578A1439.png"
+            (source / exported).write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            entry = [{
+                "testIdentifier": "CodaLaunchTests/testActualSessionPlayPauseAndChordMuteControls()",
+                "attachments": [{
+                    "exportedFileName": exported,
+                    "suggestedHumanReadableName": (
+                        "M1-diagnostic-testActualSessionPlayPauseAndChordMuteControls_0_"
+                        "F3DE2D3F-B8E9-4A33-B110-DB53FA165B58.png"
+                    ),
+                }],
+            }]
+            (source / "manifest.json").write_text(json.dumps(entry))
+            result = self.run_export(source, destination, "--allow-missing-review")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual([path.name for path in destination.iterdir()], [expected])
+
+    def test_diagnostic_alias_rejects_non_uuid_suffix(self):
+        expected = exporter.DIAGNOSTICS[5]
+        self.assertFalse(exporter.matches_expected_label(
+            "M1-diagnostic-testActualSessionPlayPauseAndChordMuteControls_0_latest.png", expected
+        ))
+        self.assertFalse(exporter.matches_expected_label(
+            "prefix-M1-diagnostic-testActualSessionPlayPauseAndChordMuteControls_0_"
+            "F3DE2D3F-B8E9-4A33-B110-DB53FA165B58.png", expected
+        ))
+
     def test_failed_run_exports_diagnostics_without_all_review_fixtures(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = pathlib.Path(temporary)

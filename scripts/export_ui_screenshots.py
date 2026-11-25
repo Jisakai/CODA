@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -31,6 +32,16 @@ DIAGNOSTICS = tuple(
 
 def exported_name(value: str) -> str:
     return Path(value.replace("\\", "/")).name
+
+
+def matches_expected_label(label: str, expected: str) -> bool:
+    if exported_name(label) == expected:
+        return True
+    if expected not in DIAGNOSTICS:
+        return False
+    stem = re.escape(expected.removesuffix(".png"))
+    return re.fullmatch(rf"{stem}_[0-9]+_[0-9A-Fa-f]{{8}}(?:-[0-9A-Fa-f]{{4}}){{3}}-[0-9A-Fa-f]{{12}}\.png",
+                        exported_name(label)) is not None
 
 
 def manifest_candidates(source: Path) -> dict[str, set[str]]:
@@ -63,7 +74,7 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
                     if isinstance(values.get(key), str)
                 ]
                 for expected in matches:
-                    if any(exported_name(label) == expected for label in labels):
+                    if any(matches_expected_label(label, expected) for label in labels):
                         for filename in exported:
                             matches[expected].add(exported_name(filename))
                 for child in node.values():

@@ -106,7 +106,9 @@ final class CodaLaunchTests: XCTestCase {
         mute.tap()
         XCTAssertNotEqual(mute.value as? String, initialMute)
         mute.tap()
-        XCTAssertEqual(mute.value as? String, initialMute)
+        let restoredMute = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", initialMute ?? ""), object: mute)
+        XCTAssertEqual(XCTWaiter.wait(for: [restoredMute], timeout: 2), .completed)
 
         for index in 0...2 {
             app.buttons["top.drawer"].tap()
