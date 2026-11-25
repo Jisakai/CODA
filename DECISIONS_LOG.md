@@ -1,6 +1,6 @@
 # Decisions log
 
-Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisions supersede earlier OPEN/PROPOSED text. Record adopted defaults per milestone with their source, named tuning constant/flag, and owner-review status. No implementation defaults have been adopted yet.
+Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisions supersede earlier OPEN/PROPOSED text. Record adopted defaults per milestone with their source, named tuning constant/flag, and owner-review status.
 
 ## Owner-confirmed decisions
 
@@ -10,6 +10,13 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 - **Qwen co-producer name:** coda.
 - coda must have its own visible, recognizable personality, not generic assistant presentation. Owner-confirmed traits: she is chill, open-minded and candid; see the critique decision below.
 - **Source:** Owner conversation; reflected in `SPEC.md` title, §14.1 and §22 item 8.
+
+### Sidekick model — Qwen3 4B, 4-bit quantized
+- **Status:** DECIDED by the owner; supersedes Qwen2.5 3B.
+- Use **Qwen3 4B, 4-bit quantized** for coda's conversational sidekick. Retain the `mlx-swift-lm` integration plan and existing directive/personality responsibilities.
+- Exact compatible artifact/revision, download size and real on-device memory usage (including context/KV cache) must be verified at M5. Do not reuse the previous model's size/RAM estimates as facts for Qwen3.
+- This is an M5 model decision, not authorization to add ML to current M1 work.
+- **Source:** Owner: “we go with Qwen3 4B 4 bit quantized not qwen2.5 3b”. Reflected in SPEC §14.3, §20 item 4 and §21.1.
 
 ### Deterministic identification versus learned prediction
 - **Status:** DECIDED; existing spec behavior explicitly reaffirmed by the owner.
@@ -31,7 +38,7 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 - Minimize interruptions: handle routine development permissions autonomously within the coda project and authorized build/push workflow. Stop for destructive, unrelated, security-sensitive, or unexpectedly costly operations rather than treating this as unlimited authorization.
 - Do not disable or bypass host-enforced approvals or security controls. Unattended execution is a goal, not a guarantee that the host will never require user approval.
 - Preserve one-milestone scope, Hermes review of actual diffs, audio-thread constraints, verified unsigned IPA delivery, and the owner's explicit approval gate before the next milestone.
-- Hermes still does not write app code directly. The owner has authorized M0 implementation; all later milestone approval gates remain intact.
+- Hermes still does not write app code directly. The owner approved M0 after installation/launch; M1 is authorized. All later milestone approval gates remain intact.
 
 ### No original blueprint exists
 - **Status:** Owner-confirmed clarification.
@@ -50,10 +57,21 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 ## PROPOSED and OPEN defaults adopted
 
 ### M0 — Scope and provisional toolchain
-- **Scope:** M0 only; no audio, editing, AI, networking or model download. Its on-device exit criterion and owner approval remain pending until delivery/testing.
+- **Scope:** M0 only; no audio, editing, AI, networking or model download. Completed with green CI and owner-confirmed installation/launch followed by explicit **M0 approved**. Rotation was not separately described by the owner.
 - **Latest SDK interpretation:** latest stable release, not a beta. Primary-source preflight lists Xcode 27.2 with iOS/iPadOS SDK 27.2; minimum deployment will match 27.2, with no compatibility branches. Actual CI must assert the installed toolchain before the build.
 - **Runner:** standard `xcode-27` arm64 label with `/Applications/Xcode_27.2.app/Contents/Developer`; not the larger/paid `xcode-27-xlarge` label. Pinning is required because the inspected `macos-latest` image lists an older SDK. This is an implementation choice under SPEC §1/§20, not a change to the latest-SDK rule.
 - **Primary sources inspected:** Apple `https://developer.apple.com/support/xcode/`; official `actions/runner-images` README and `images/macos/xcode-27-arm64-Readme.md`. Source lookup is not proof of a successful CI execution; record actual build results separately.
 - **PROPOSED defaults:** represent the existing DESIGN.md type scale (10/12/13/15 pt, label weight 600, chord-name weight 700) in tokens. Only a restrained wordmark is visible in M0 to demonstrate the bundled font. Other components are not rendered yet.
 - **OPEN defaults:** none needed for M0. Future design decisions remain deferred.
-- Record final implemented token values, tooling dependencies, and build evidence after review.
+- **Implemented tokens:** `CodaDesignTokens.swift`; 52 pt top bar, 20 pt timeline, 104 pt chord strip, 56 pt gutter; existing palette/radii/type scale. Visible wordmark uses Plus Jakarta Sans Light, 20 pt, tracking 0.2, opacity 0.72.
+- **Tooling:** XcodeGen 2.46.0 recorded by CI; dependency-free Python scaffold/package checks and XCTest launch smoke check; no third-party runtime dependency.
+- **Build evidence:** [CI run 45589404244](https://github.com/Jisakai/CODA/actions/runs/45589404244) succeeded for commit `2ac995fc142a2b780ffab1fd136362d56c142e2c`. Independently verified unsigned arm64 executable, iPad-only landscape metadata, SDK/deployment 27.2, bundled fonts/license, ZIP integrity and checksum. IPA SHA-256: `32aa7ea75b86957f986dbce201dea94e6ebdf915e6f3e89987d737e21c8d065c`.
+
+### M1 — Foundation slice defaults (provisional until owner M1 review)
+- **Source:** SPEC §4, §7.1, §7.4, §16 and §20; DESIGN examples. Full rationale/contracts are in `docs/M1-phase1.md`.
+- `MusicDefaults`: empty eight-bar canvas, fixed 4/4, 16 steps/bar, C natural minor, 124 BPM. `LoopSpan` currently restricts loops to whole-bar spans of one to eight bars.
+- `VoicingConfiguration`: MIDI 36–84, center 60, maximum span 36 semitones; movement weight 10, register weight 1, voice-count penalty 6. Viterbi optimizes a linear path, not cyclic last-to-first motion; explicit neighboring voicings are preserved on a single-region swap.
+- `vocab.json`: ordered 27-quality vocabulary and alternatives; `7alt` explicitly includes root, third, minor seventh, b9, #9 and b13 without the perfect fifth. Rule-based suggestions remain deterministic key/function rules, not learned predictions.
+- `NoteEventCompiler`: simultaneous block chords, nearest-rounded absolute sample boundaries, cycle-indexed fractional carry, terminal note-offs before next-cycle note-ons. Loop-crossing sustains release/retrigger at boundaries; actual envelope tails belong to the later DSP implementation. No allocation-heavy Swift compiler work belongs on the render thread.
+- No OPEN design choice was required; barrel double-tap, patterns/arp and cross-layer clipboard remain deferred. No new third-party dependency.
+- **Verification:** Hermes reran 13 existing Python checks successfully; independent static review reported no blocking logic/security defects. Native Swift compilation, 23 XCTest methods, XcodeGen, archive and audio/device behavior remain pending.

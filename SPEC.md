@@ -423,9 +423,9 @@ Finger drags a knob; **Pencil barrel roll turns it** (with haptics, §3.4); hove
 ### 14.3 LLM
 | Item | Value | Status |
 |---|---|---|
-| Model | `mlx-community/Qwen2.5-3B-Instruct-4bit` via `mlx-swift-lm` | DECIDED (spec) |
-| Delivery | ~1.8 GB, downloaded once on first launch into Application Support | DECIDED (spec) |
-| Memory | ~2.3–2.8 GB active RAM ceiling to stay under per-process limits | DECIDED (spec) / VERIFY |
+| Model | **Qwen3 4B, 4-bit quantized**, via `mlx-swift-lm`. Replaces Qwen2.5 3B by owner decision; exact compatible MLX artifact/revision must be verified before M5 integration. | DECIDED (owner) / VERIFY (artifact) |
+| Delivery | Downloaded once on first launch into Application Support; verify the chosen Qwen3 artifact's download size. The former ~1.8 GB estimate was for Qwen2.5 3B and is not a verified Qwen3 size. | DECIDED (delivery) / VERIFY (size) |
+| Memory | Measure Qwen3 4B 4-bit active RAM, including context/KV cache and concurrent audio/Core ML, against actual device per-process limits. The former ~2.3–2.8 GB estimate is not verified for this model. | VERIFY |
 | Alternative | Apple on-device Foundation Models (iPadOS 26) with guided JSON output — no download. Evaluate before committing. | PROPOSED / VERIFY |
 
 ### 14.4 `<directive>` channel
@@ -547,7 +547,7 @@ A/B snapshot compare · global transpose (now also in the Key/Scale hold menu) �
 | 1 | Chord detection ambiguity (inversions, partial voicings, rare shapes like `G7alt`) | Use bass note + beat weight; map to `vocab.json`; unknown → keep name + `?`. |
 | 2 | Auto-rename flicker | Commit on Pencil lift (§7.3). |
 | 3 | Bass follow when a chord's root changes mid-pattern | Apply §9 rules per chord span; rhythm untouched. |
-| 4 | Memory on a sideloaded app: LLM 2.3–2.8 GB + audio + Core ML | Check available memory at runtime; unload the LLM when idle; app must fully work without the LLM. VERIFY the real per-app limit on the device. |
+| 4 | Memory on a sideloaded app: Qwen3 4B 4-bit + context/KV cache + audio + Core ML; footprint unverified | Check available memory at runtime; unload the LLM when idle; app must fully work without the LLM. VERIFY the actual model footprint and real per-app limit on the device. |
 | 5 | First-launch model download fails/offline | Sidekick shows a quiet unavailable state; everything else works. |
 | 6 | Partial `<directive>` across streamed tokens | Buffer and strip in real time; validate JSON; ignore if invalid. |
 | 7 | Ghost vs user edit conflict | Ghosts never overwrite; edits dismiss/rebase ghosts; accepting is one undo step. |
@@ -580,7 +580,7 @@ A/B snapshot compare · global transpose (now also in the Key/Scale hold menu) �
 | Simplified bass roll | Full piano roll with chord-following rules |
 | Undo via single two-finger tap | Two-finger **double** tap undo, three-finger double tap redo |
 | Trained symbolic MIDI model idea | Small chord predictor you train yourself (§17) + steered by LLM |
-| Original sidekick LLM sketch | Qwen2.5-3B 4-bit via `mlx-swift-lm`, directive channel (§14) |
+| Original sidekick LLM sketch | Qwen3 4B, 4-bit quantized via `mlx-swift-lm`, directive channel (§14); supersedes Qwen2.5 3B by owner decision |
 | Bidirectional chord/notes sync | Kept **only in the chord roll** (auto-naming); bass is a follower |
 
 ### 21.2 Versus the Stitch prototype

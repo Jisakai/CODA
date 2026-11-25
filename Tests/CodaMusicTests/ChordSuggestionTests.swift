@@ -1,0 +1,43 @@
+import XCTest
+@testable import CodaMusic
+
+final class ChordSuggestionTests: MusicTestCase {
+    func testExistingSuggestionsUseVocabularyPreserveRootAndSlashAndExcludeCurrent() throws {
+        let v = try vocabulary()
+        let provider: any ChordSuggestionProvider = RuleBasedChordSuggestions()
+        for quality in v.qualities {
+            let current = try chord(8, quality.id, slash: 3)
+            let options = try provider.suggestions(existing: current, previous: nil, key: MusicDefaults.key, vocabulary: v)
+            XCTAssertEqual(options.count, 3)
+            XCTAssertEqual(options.map(\.chord.qualityID), Array(quality.suggestions.prefix(3)))
+            XCTAssertEqual(Set(options.map(\.chord)).count, 3)
+            for option in options {
+                XCTAssertEqual(option.chord.root, 8)
+                XCTAssertEqual(option.chord.slashBass, 3)
+                XCTAssertNotEqual(option.chord, current)
+            }
+            XCTAssertEqual(options, try provider.suggestions(existing: current, previous: nil, key: MusicDefaults.key, vocabulary: v))
+        }
+    }
+
+    func testNextChordsFollowKeyAndFunctionWithExtendedQualities() throws {
+        let v = try vocabulary()
+        let provider = RuleBasedChordSuggestions()
+        let key = MusicDefaults.key
+        let fromTonic = try provider.suggestions(existing: nil, previous: chord(), key: key, vocabulary: v)
+        XCTAssertEqual(fromTonic.map(\.chord.root), [5, 7, 0])
+        XCTAssertEqual(fromTonic.map(\.chord.qualityID), ["minor7", "dominant7", "minor7"])
+        let fromDominant = try provider.suggestions(existing: nil, previous: chord(7, "dominant7"), key: key, vocabulary: v)
+        XCTAssertEqual(fromDominant[0].chord, try chord())
+        XCTAssertEqual(fromDominant[0].function, .tonic)
+        let fromSub = try provider.suggestions(existing: nil, previous: chord(5), key: key, vocabulary: v)
+        XCTAssertEqual(fromSub[0].chord, try chord(7, "dominant7"))
+        let dMajor = MusicalKey(tonic: 2, mode: .major)
+        let empty = try provider.suggestions(existing: nil, previous: nil, key: dMajor, vocabulary: v)
+        XCTAssertEqual(empty.map(\.chord.root), [7, 9, 2])
+        XCTAssertEqual(empty.map(\.chord.qualityID), ["major7", "dominant7", "major7"])
+        XCTAssertEqual(empty, try provider.suggestions(existing: nil, previous: nil, key: dMajor, vocabulary: v))
+        XCTAssertThrowsError(try provider.suggestions(existing: chord(0, "missing"), previous: nil, key: key, vocabulary: v))
+        XCTAssertThrowsError(try provider.suggestions(existing: nil, previous: chord(0, "missing"), key: key, vocabulary: v))
+    }
+}

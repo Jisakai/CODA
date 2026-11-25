@@ -13,6 +13,8 @@ targets:
     deploymentTarget: "27.2"
     sources:
       - path: Sources/CodaApp
+      - path: Sources/CodaMusic/Resources/vocab.json
+        buildPhase: resources
       - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Light.ttf
         buildPhase: resources
       - path: Fonts/Plus_Jakarta_Sans/static/PlusJakartaSans-Regular.ttf
@@ -27,6 +29,8 @@ targets:
         buildPhase: resources
       - path: Fonts/Plus_Jakarta_Sans/OFL.txt
         buildPhase: resources
+    dependencies:
+      - target: CodaMusic
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.coda.sketchpad
@@ -60,6 +64,48 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
 
+  CodaMusic:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaMusic
+        excludes:
+          - Resources
+    settings:
+      base:
+        PRODUCT_NAME: CodaMusic
+        PRODUCT_MODULE_NAME: CodaMusic
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+
+  CodaMusicTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Tests/CodaMusicTests
+      - path: Sources/CodaMusic/Resources/vocab.json
+        buildPhase: resources
+    dependencies:
+      - target: CodaMusic
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.music.tests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+
+    info:
+      path: build/generated/CodaMusicTests-Info.plist
+
   codaUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -86,3 +132,12 @@ schemes:
       config: Debug
       targets:
         - codaUITests
+        - CodaMusicTests
+  CodaMusic:
+    build:
+      targets:
+        CodaMusic: all
+    test:
+      config: Debug
+      targets:
+        - CodaMusicTests
