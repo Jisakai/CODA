@@ -94,6 +94,37 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    func testChordMuteCenterAndPaddingRemainTappableInBothStates() {
+        let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
+        app.launchArguments = ["--coda-ui-fixture-four-bar"]
+        launchAndDescribe(app)
+        let mute = app.buttons["top.chordMute"]
+        XCTAssertTrue(mute.waitForExistence(timeout: 10))
+        XCTAssertEqual(mute.value as? String, "sounding")
+        XCTAssertEqual(mute.frame.width, 32, accuracy: 1)
+        XCTAssertEqual(mute.frame.height, 32, accuracy: 1)
+
+        // Coordinate taps exercise SwiftUI hit testing and the installed
+        // UIKit recognizers. AX activation or direct store calls bypass this seam.
+        // Padding points are inside the 32pt target but outside the 14pt glyph.
+        for point in [CGVector(dx: 0.5, dy: 0.5),
+                      CGVector(dx: 0.125, dy: 0.5),
+                      CGVector(dx: 0.5, dy: 0.875)] {
+            for expected in ["muted", "sounding"] {
+                let frame = mute.frame
+                let location = CGPoint(x: frame.minX + frame.width * point.dx,
+                                       y: frame.minY + frame.height * point.dy)
+                print("M1 mute tap before: value=\(mute.value ?? "nil") frame=\(frame) hittable=\(mute.isHittable) point=\(location)")
+                XCTAssertTrue(mute.isHittable)
+                mute.coordinate(withNormalizedOffset: point).tap()
+                print("M1 mute tap after: \(mute.debugDescription)")
+                XCTAssertEqual(mute.value as? String, expected)
+            }
+        }
+    }
+
+    @MainActor
     func testActualSessionPlayPauseAndChordMuteControls() {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }

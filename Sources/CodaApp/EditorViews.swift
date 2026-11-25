@@ -207,6 +207,8 @@ private struct EditorTopBar: View {
                     .overlay(Circle().stroke(CodaDesignTokens.Colors.chord.opacity(0.55), lineWidth: 1.5))
                     .frame(width: 14, height: 14)
                     .frame(width: 32, height: 32)
+                    // Keep the full target live when the muted ring has a clear center.
+                    .contentShape(Rectangle())
             }
             .accessibilityIdentifier("top.chordMute")
             .accessibilityValue(store.controls.muted == 0 ? "sounding" : "muted")
