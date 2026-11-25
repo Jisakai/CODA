@@ -96,15 +96,36 @@ jobs:
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             build/generated/transport/transport_tests_sanitized
 
+      - name: Prepare exact iPadOS 27.2 simulator destination
+        shell: bash
+        run: |
+          set -euo pipefail
+          device_name='iPad Pro 13-inch (M5)'
+          runtime='com.apple.CoreSimulator.SimRuntime.iOS-27-2'
+          devices="$(xcrun simctl list devices --json)"
+          matches="$(python3 -c 'import json,sys; data=json.load(sys.stdin); runtime=sys.argv[1]; name=sys.argv[2]; found=[d for r,ds in data["devices"].items() if r == runtime for d in ds if d["name"] == name]; print("\n".join(d["udid"]+"\t"+d["state"] for d in found))' "$runtime" "$device_name" <<<"$devices")"
+          count="$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [[ "$count" != 1 ]]; then
+            echo "Expected exactly one $device_name on $runtime; found $count." >&2
+            exit 1
+          fi
+          IFS=$'\t' read -r udid state <<<"$matches"
+          if [[ "$state" != 'Booted' ]]; then
+            xcrun simctl boot "$udid"
+          fi
+          xcrun simctl bootstatus "$udid" -b
+
       - name: Run combined M1 music, audio, input and UI suite
         id: m1-tests
+        shell: bash
+        # Cold simulator app launch exceeded 60s; keep per-test timeouts bounded.
         run: >-
           xcodebuild test
           -project coda.xcodeproj
           -scheme coda
           -test-timeouts-enabled YES
-          -default-test-execution-time-allowance 60
-          -maximum-test-execution-time-allowance 120
+          -default-test-execution-time-allowance 180
+          -maximum-test-execution-time-allowance 240
           -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.2'
           -resultBundlePath build/generated/coda-m1-tests.xcresult
           CODE_SIGNING_ALLOWED=NO
@@ -134,6 +155,7 @@ jobs:
         with:
           name: coda-m1-ui-diagnostics
           path: |
+            build/generated/ui-attachments/manifest.json
             build/artifacts/ui-screenshots/M1-empty-editor.png
             build/artifacts/ui-screenshots/M1-four-bar-fixture.png
             build/artifacts/ui-screenshots/M1-synth-drawer.png

@@ -23,9 +23,16 @@ class ScreenshotExportTests(unittest.TestCase):
 
     def make_attachment(self, source, name, index):
         # xcresulttool exports hashed filenames, identified by manifest entries.
-        filename = f"attachment-{index}.png"
+        filename = f"attachments/attachment-{index}.png"
+        (source / "attachments").mkdir(exist_ok=True)
         (source / filename).write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-        return {"suggestedHumanReadableName": name, "exportedFileName": filename}
+        return {
+            "testIdentifier": "CodaUITests/CodaLaunchTests",
+            "attachments": [{
+                "payloadRef": {"id": str(index), "name": name},
+                "exportedFileName": filename,
+            }],
+        }
 
     def test_success_resolves_manifest_names_and_exports_only_allowlisted_images(self):
         with tempfile.TemporaryDirectory() as temporary:

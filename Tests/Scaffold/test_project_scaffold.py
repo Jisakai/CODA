@@ -217,6 +217,11 @@ class ProjectScaffoldTests(unittest.TestCase):
         self.assertIn("CodaInteractionTests:", self.project)
         self.assertIn("-resultBundlePath build/generated/coda-m1-tests.xcresult", workflow)
         self.assertIn("xcrun xcresulttool export attachments", workflow)
+        self.assertIn("-default-test-execution-time-allowance 180", workflow)
+        self.assertIn("-maximum-test-execution-time-allowance 240", workflow)
+        self.assertIn("Prepare exact iPadOS 27.2 simulator destination", workflow)
+        self.assertIn("xcrun simctl bootstatus \"$udid\" -b", workflow)
+        self.assertIn("build/generated/ui-attachments/manifest.json", workflow)
         for name in (
             "M1-empty-editor.png",
             "M1-four-bar-fixture.png",

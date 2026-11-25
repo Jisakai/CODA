@@ -41,7 +41,7 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
         except (OSError, json.JSONDecodeError):
             continue
 
-        def visit(node: object) -> None:
+        def visit(node: object, inherited_labels: tuple[str, ...] = ()) -> None:
             if isinstance(node, dict):
                 values = {str(key).lower(): value for key, value in node.items()}
                 labels = [
@@ -49,6 +49,14 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
                     for key in ("suggestedhumanreadablename", "originalfilename", "attachmentname", "name")
                     if isinstance(values.get(key), str)
                 ]
+                payload = values.get("payloadref")
+                if isinstance(payload, dict):
+                    labels.extend(
+                        str(payload[key])
+                        for key in ("name", "suggestedhumanreadablename", "originalfilename")
+                        if isinstance(payload.get(key), str)
+                    )
+                labels = [*inherited_labels, *labels]
                 exported = [
                     str(values[key])
                     for key in ("exportedfilename", "exportedfile", "filename", "path")
@@ -59,10 +67,10 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
                         for filename in exported:
                             matches[expected].add(exported_name(filename))
                 for child in node.values():
-                    visit(child)
+                    visit(child, tuple(labels))
             elif isinstance(node, list):
                 for child in node:
-                    visit(child)
+                    visit(child, inherited_labels)
 
         visit(data)
     return matches
@@ -91,6 +99,18 @@ def main() -> int:
         parser.error(f"xcresult attachment export is missing: {args.source}")
 
     aliases = manifest_candidates(args.source)
+    manifests = sorted(args.source.rglob("manifest.json"))
+    exported_files = sorted(path.name for path in args.source.rglob("*") if path.is_file())
+    print(f"xcresult manifests: {len(manifests)}; exported files: {len(exported_files)}")
+    for manifest in manifests:
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            entries = data.get("attachments", data) if isinstance(data, dict) else data
+            count = len(entries) if isinstance(entries, list) else 0
+        except (OSError, json.JSONDecodeError):
+            count = 0
+        print(f"manifest {manifest.relative_to(args.source)}: {count} attachment entries")
+    print("exported filenames: " + (", ".join(exported_files) if exported_files else "(none)"))
     args.destination.mkdir(parents=True, exist_ok=True)
     missing = []
     for expected in (*EXPECTED, *DIAGNOSTICS):
