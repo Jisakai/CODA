@@ -160,6 +160,7 @@ jobs:
             build/artifacts/ui-screenshots/M1-four-bar-fixture.png
             build/artifacts/ui-screenshots/M1-synth-drawer.png
             build/artifacts/ui-screenshots/M1-radial-edge-fixture.png
+            build/artifacts/ui-screenshots/M1-radial-primary-fixture.png
             build/artifacts/ui-screenshots/M1-diagnostic-*.png
             build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-center-before-assertion.png
             build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-center-AX-before-assertion.txt
@@ -221,5 +222,6 @@ jobs:
             build/artifacts/ui-screenshots/M1-four-bar-fixture.png
             build/artifacts/ui-screenshots/M1-synth-drawer.png
             build/artifacts/ui-screenshots/M1-radial-edge-fixture.png
+            build/artifacts/ui-screenshots/M1-radial-primary-fixture.png
           if-no-files-found: error
           retention-days: 7

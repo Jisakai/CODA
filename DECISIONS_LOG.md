@@ -65,6 +65,21 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 
 ## PROPOSED and OPEN defaults adopted
 
+### M1b arrow length and base velocity — owner decision November 26, 2026
+- **Status:** DECIDED by the owner; supersedes the approximate 90%-height arrow maximum in earlier visual guidance.
+- **Exact owner quote:** "arrow lengths should be snapped to 10th grid of the height meaning 10 long is full velocity 1 long is %10 velocity".
+- Arrow lengths use exactly ten discrete increments of pattern editing area height. Levels 1...10 mean 10%...100% base velocity; a full-height arrow is 100%. The rendered arrow, live readout and stored/base playback velocity share the same quantized value, never independent continuous mappings.
+- Zero means no stroke, not an eleventh audible level. Preserve top/bottom direction gestures and Pencil tap-to-remove. Do not extend this quantization to chuck-circle size without owner instruction. Humanize remains a separate playback variation around the quantized base value.
+- Require regressions covering all ten levels, endpoints, clamping and edit/render/playback consistency. Carry this requirement into every M1b implementation slice and handoff.
+- Source: latest operator-delivered owner requirement on task `t_257ae4a6`; active brief `docs/briefs/M1b.md`.
+
+### M1 progression authorization and radial visual correction — November 26, 2026
+- **Status:** DECIDED by the owner; supersedes earlier M1b prohibitions and the pending M1 progression gate, not hardware-testing evidence.
+- **Exact owner quote:** "I believe M1 is final I havent tested myself but it looks pretty much fixed. Just One thing radial menu start and end should be rounded and have a whole thing with overlayed pills following the curve. Aside from that looks fine we can go on to M1b".
+- M1 is accepted for progression, with radial visual polish outstanding; physical iPad/Pencil/listening remain unverified. Each radial ring should have a continuous curved backing with round start/end caps and overlaid pills following the arc. Preserve existing behavior, placement and the owner-confirmed reserved upper drawer half.
+- M1b strum implementation, normal scoped release commits/pushes, native verification and unsigned IPA delivery are authorized. Stop after M1b delivery for explicit approval before M2. No AI implementation.
+- Source: owner authorization recorded on Kanban task `t_257ae4a6`; current bounded brief `docs/briefs/M1-radial-rounded-polish.md`.
+
 ### M0 — Scope and provisional toolchain
 - **Scope:** M0 only; no audio, editing, AI, networking or model download. Completed with green CI and owner-confirmed installation/launch followed by explicit **M0 approved**. Rotation was not separately described by the owner.
 - **Latest SDK interpretation:** latest stable release, not a beta. Primary-source preflight lists Xcode 27.2 with iOS/iPadOS SDK 27.2; minimum deployment will match 27.2, with no compatibility branches. Actual CI must assert the installed toolchain before the build.

@@ -321,6 +321,19 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryRadialScreenshotFixture() {
+        let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
+        app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-radial-primary"]
+        launchAndDescribe(app)
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["radial.menu.primary"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["radial.option.inner.0"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["radial.option.outer.3"].exists)
+        attachScreenshot(named: "M1-radial-primary-fixture", from: app)
+    }
+
+    @MainActor
     func testEdgePositionedAllQualityRadialScreenshotFixture() {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }

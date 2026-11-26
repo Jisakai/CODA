@@ -913,10 +913,13 @@ final class CodaEditorStore {
             do { try session.edit([.add(region)]) } catch { setError(error) }
         }
         if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-drawer") { drawerOpen = true }
-        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-edge") {
+        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-edge")
+            || ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-primary") {
             let at = CGPoint(x: 60, y: stripTop + 28)
             selectedRegionID = regions.first?.id
             openSqueeze(at: at)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-edge") {
             radial = radial.map { state in
                 var moved = state
                 moved.anchor = CGPoint(x: 12, y: stripTop + 16)
@@ -1111,15 +1114,20 @@ final class CodaEditorStore {
     }
 
     private func menuPlacement(_ requested: CGPoint, mode: RadialMode = .primary) -> RadialPlacement? {
+        let outerBand: Double = switch mode {
+        case .primary: CodaDesignTokens.EditorSurface.radialOuterBand
+        case .roots: CodaDesignTokens.EditorSurface.radialInnerBand
+        case .all: CodaDesignTokens.EditorSurface.radialFamilyBand
+        }
         let outerRadius: Double = switch mode {
-        case .primary: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialOuterBand / 2
-        case .roots: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialInnerBand / 2
+        case .primary, .roots: CodaDesignTokens.EditorSurface.radialOuterRadius + outerBand / 2
         case .all: CodaDesignTokens.EditorSurface.radialFamilyRadius + 2 * CodaDesignTokens.EditorSurface.radialFamilySpacing
-            + CodaDesignTokens.EditorSurface.radialFamilyBand / 2
+            + outerBand / 2
         }
         return RadialGeometry.placement(tip: requested, viewport: rootSize,
             outerRadius: outerRadius, margin: CodaDesignTokens.EditorSurface.radialMargin,
-            minimumY: chromeHidden ? 0 : Double(stripTop))
+            minimumY: chromeHidden ? 0 : Double(stripTop),
+            capRadius: outerBand / 2)
     }
 
     private func setRadialMode(_ mode: RadialMode) {
@@ -1242,16 +1250,15 @@ final class CodaEditorStore {
     }
 
     private func radialHit(at point: CGPoint, state: RadialMenuState) -> (RadialRing, Int)? {
-        let dx = Double(point.x - state.center.x)
-        let dy = Double(point.y - state.center.y)
-        let radius = hypot(dx, dy) / state.placement.scale
-        let angle = atan2(dy, dx)
-        let layout = radialRings()
-        let bands = layout.map { ($0.0, $0.2 - $0.3 / 2, $0.2 + $0.3 / 2) }
-        guard let ring = RadialGeometry.ring(forRadius: radius, rings: bands),
-              let count = layout.first(where: { $0.0 == ring })?.1.count, count > 0 else { return nil }
-        guard let slot = RadialGeometry.slot(atAngle: angle, count: count, direction: state.placement.direction) else { return nil }
-        return (ring, slot)
+        let local = CGPoint(x: (point.x - state.center.x) / state.placement.scale,
+                            y: (point.y - state.center.y) / state.placement.scale)
+        for (ring, labels, radius, thickness) in radialRings() {
+            if let slot = RadialGeometry.slot(at: local, count: labels.count, radius: radius,
+                                             thickness: thickness, direction: state.placement.direction) {
+                return (ring, slot)
+            }
+        }
+        return nil
     }
 
     private func radialIntent(for hit: (RadialRing, Int), state: RadialMenuState) -> RadialIntent? {

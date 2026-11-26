@@ -227,6 +227,7 @@ class ProjectScaffoldTests(unittest.TestCase):
             "M1-four-bar-fixture.png",
             "M1-synth-drawer.png",
             "M1-radial-edge-fixture.png",
+            "M1-radial-primary-fixture.png",
         ):
             with self.subTest(attachment=name):
                 self.assertIn(name, workflow)

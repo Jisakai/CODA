@@ -14,6 +14,7 @@ EXPECTED = (
     "M1-four-bar-fixture.png",
     "M1-synth-drawer.png",
     "M1-radial-edge-fixture.png",
+    "M1-radial-primary-fixture.png",
 )
 MAX_BYTES = 2 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
@@ -27,6 +28,7 @@ DIAGNOSTICS = tuple(
         "testDrawerAndAllThreeProductionPresetsAreReachable",
         "testActualSessionPlayPauseAndChordMuteControls",
         "testEdgePositionedAllQualityRadialScreenshotFixture",
+        "testPrimaryRadialScreenshotFixture",
         "testSettingsIconCenterAndPaddingPresentProductionPopups",
         "testEverySettingsPopupStaysNearItsOwnInvokingControl",
     )

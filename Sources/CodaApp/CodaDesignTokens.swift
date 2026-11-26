@@ -128,6 +128,9 @@ enum CodaDesignTokens {
         static let radialFamilySpacing = 64.0
         static let radialFamilyBand = 48.0
         static let radialMargin = 8.0
+        static let radialPillOpacity = 0.05
+        static let radialSelectedPillOpacity = 0.13
+        static let radialDisabledPillOpacity = 0.015
         static let drawerReservedFraction: CGFloat = 0.5
         static let drawerPadding: CGFloat = 20
         static let drawerSectionGap: CGFloat = 24

@@ -306,11 +306,28 @@ public struct RadialPlacement: Equatable, Sendable {
     }
 }
 
+/// A curved capsule: one centerline arc with semicircular end caps. Rendering
+/// and Pencil selection consume this same filled path (never a wedge envelope).
+public struct RadialArc: Equatable, Sendable {
+    public let radius: Double
+    public let thickness: Double
+    public let start: Double
+    public let end: Double
+
+    public func path(center: CGPoint = .zero) -> CGPath {
+        let line = CGMutablePath()
+        guard radius > 0, thickness > 0, end > start else { return line }
+        line.addArc(center: center, radius: radius, startAngle: start, endAngle: end, clockwise: false)
+        return line.copy(strokingWithWidth: thickness, lineCap: .round, lineJoin: .round, miterLimit: 1)
+    }
+}
+
 public enum RadialGeometry {
     public static let sweep = 2 * Double.pi / 3
     public static let defaultDirection = -2 * Double.pi / 3 // 30 degrees CCW from up
     private static let downwardDirection = Double.pi / 3 // 30 degrees CCW from down
     public static let slotGap = 0.015
+    public static let pillInset = 4.0 // exposed glass around each curved choice
     public static let minimumScale = 0.8
     private static let fittingScales = [1.0, 0.9, minimumScale]
 
@@ -318,8 +335,34 @@ public enum RadialGeometry {
         direction - sweep / 2 + Double(slot) * sweep / Double(max(1, count))
     }
 
-    /// The same angular interval and gaps used by RingSlotShape. A point in
-    /// the remaining 240 degrees always cancels, including wrapped angles.
+    public static func backing(radius: Double, thickness: Double,
+                               direction: Double = defaultDirection) -> RadialArc {
+        RadialArc(radius: radius, thickness: thickness,
+                  start: direction - sweep / 2, end: direction + sweep / 2)
+    }
+
+    public static func pill(slot: Int, count: Int, radius: Double, thickness: Double,
+                            direction: Double = defaultDirection) -> RadialArc {
+        let width = max(0, thickness - 2 * pillInset)
+        // Keep round caps inside their original angular slot, retaining the
+        // existing angular gap. Simply rounding a wedge would overlap neighbors.
+        let inset = asin(min(1, width / 2 / max(1, radius))) + slotGap
+        let start = angle(forSlot: slot, count: count, direction: direction)
+        return RadialArc(radius: radius, thickness: width, start: start + inset,
+                         end: start + sweep / Double(max(1, count)) - inset)
+    }
+
+    public static func slot(at point: CGPoint, count: Int, radius: Double, thickness: Double,
+                            direction: Double = defaultDirection) -> Int? {
+        guard count > 0, point.x.isFinite, point.y.isFinite else { return nil }
+        return (0..<count).first {
+            pill(slot: $0, count: count, radius: radius, thickness: thickness,
+                 direction: direction).path().contains(point)
+        }
+    }
+
+    /// Angular slot partition retained for sector-envelope callers. Curved pill
+    /// selection must use slot(at:count:radius:thickness:direction:) instead.
     public static func slot(atAngle angle: Double, count: Int,
                             direction: Double = defaultDirection) -> Int? {
         guard angle.isFinite, count > 0 else { return nil }
@@ -335,8 +378,10 @@ public enum RadialGeometry {
         return index
     }
 
-    /// Exact occupied sector bounds: tip, endpoints, and enclosed cardinal extrema.
-    public static func bounds(direction: Double, radius: Double) -> CGRect {
+    /// Conservative painted envelope including rounded backing caps. The sector
+    /// hull includes the center so this also encloses all smaller concentric rings.
+    public static func bounds(direction: Double, radius: Double, capRadius: Double = 0) -> CGRect {
+        let radius = max(0, radius - capRadius)
         let start = direction - sweep / 2
         let end = direction + sweep / 2
         var points = [CGPoint.zero,
@@ -350,10 +395,12 @@ public enum RadialGeometry {
         }
         let xs = points.map(\.x), ys = points.map(\.y)
         return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+            .insetBy(dx: -capRadius, dy: -capRadius)
     }
 
     public static func placement(tip: CGPoint, viewport: CGSize, outerRadius: Double,
-                                 margin: Double = 8, minimumY: Double = 0) -> RadialPlacement? {
+                                 margin: Double = 8, minimumY: Double = 0,
+                                 capRadius: Double = 0) -> RadialPlacement? {
         // Chrome is an exclusion, not an edge margin that anchoring may relax.
         guard viewport.width > 2 * margin, viewport.height > minimumY + 2 * margin else { return nil }
         let available = CGRect(x: margin, y: minimumY + margin,
@@ -366,7 +413,7 @@ public enum RadialGeometry {
             x: anchoredMinX, y: anchoredMinY,
             width: min(viewport.width, max(available.maxX, tip.x)) - anchoredMinX,
             height: min(viewport.height, max(available.maxY, tip.y)) - anchoredMinY)
-        let upwardBounds = bounds(direction: defaultDirection, radius: outerRadius)
+        let upwardBounds = bounds(direction: defaultDirection, radius: outerRadius, capRadius: capRadius)
             .offsetBy(dx: tip.x, dy: tip.y)
         let preferred = upwardBounds.minY < anchoredAvailable.minY ? downwardDirection : defaultDirection
         func distance(_ angle: Double) -> Double { abs(atan2(sin(angle - preferred), cos(angle - preferred))) }
@@ -378,7 +425,7 @@ public enum RadialGeometry {
         }.map { preferred + Double($0) * .pi / 180 }
         for scale in fittingScales {
             for direction in directions {
-                let box = bounds(direction: direction, radius: outerRadius * scale)
+                let box = bounds(direction: direction, radius: outerRadius * scale, capRadius: capRadius * scale)
                     .offsetBy(dx: tip.x, dy: tip.y)
                 if anchoredAvailable.contains(box) {
                     return RadialPlacement(origin: tip, direction: direction, scale: scale)
@@ -392,7 +439,7 @@ public enum RadialGeometry {
         var bestCost = Double.infinity
         for scale in fittingScales {
             for direction in directions {
-                let box = bounds(direction: direction, radius: outerRadius * scale)
+                let box = bounds(direction: direction, radius: outerRadius * scale, capRadius: capRadius * scale)
                 guard box.width <= available.width, box.height <= available.height else { continue }
                 let x = min(available.maxX - box.maxX, max(available.minX - box.minX, tip.x))
                 let y = min(available.maxY - box.maxY, max(available.minY - box.minY, tip.y))

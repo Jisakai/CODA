@@ -175,6 +175,90 @@ final class EditorInputModelTests: XCTestCase {
         }
     }
 
+    func testCurvedBackingIsContinuousAndPillsHaveRoundCapsWithNonselectableGlassGaps() {
+        for direction in [-Double.pi, RadialGeometry.defaultDirection, .pi / 3, 2 * .pi] {
+            for (radius, thickness) in [(84.0, 40.0), (136, 48), (132, 48), (196, 48), (260, 48)] {
+                let backing = RadialGeometry.backing(radius: radius, thickness: thickness, direction: direction)
+                for count in 1...4 {
+                    for slot in 0..<count {
+                        let start = RadialGeometry.angle(forSlot: slot, count: count, direction: direction)
+                        let middle = start + RadialGeometry.sweep / Double(count) / 2
+                        let center = CGPoint(x: cos(middle) * radius, y: sin(middle) * radius)
+                        XCTAssertEqual(RadialGeometry.slot(at: center, count: count, radius: radius,
+                            thickness: thickness, direction: direction), slot)
+                        let seam = CGPoint(x: cos(start) * radius, y: sin(start) * radius)
+                        XCTAssertTrue(backing.path().contains(seam), "Glass must bridge every choice gap")
+                        XCTAssertNil(RadialGeometry.slot(at: seam, count: count, radius: radius,
+                            thickness: thickness, direction: direction))
+                        let rim = CGPoint(x: cos(middle) * (radius + thickness / 2 - 1),
+                                          y: sin(middle) * (radius + thickness / 2 - 1))
+                        XCTAssertTrue(backing.path().contains(rim))
+                        XCTAssertNil(RadialGeometry.slot(at: rim, count: count, radius: radius,
+                            thickness: thickness, direction: direction))
+                        let pill = RadialGeometry.pill(slot: slot, count: count, radius: radius,
+                            thickness: thickness, direction: direction)
+                        for arc in [backing, pill] {
+                            for (angle, sign) in [(arc.start, -1.0), (arc.end, 1.0)] {
+                                let cap = CGPoint(x: cos(angle) * radius, y: sin(angle) * radius)
+                                let half = arc.thickness / 2
+                                func capPoint(outward: Double, radial: Double = 0) -> CGPoint {
+                                    CGPoint(x: cap.x - sin(angle) * sign * half * outward + cos(angle) * half * radial,
+                                            y: cap.y + cos(angle) * sign * half * outward + sin(angle) * half * radial)
+                                }
+                                XCTAssertTrue(arc.path().contains(capPoint(outward: 0.95)))
+                                XCTAssertFalse(arc.path().contains(capPoint(outward: 1.05)))
+                                XCTAssertFalse(arc.path().contains(capPoint(outward: 0.85, radial: 0.85)),
+                                               "A cap must be round, not a squared-off sector")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testRoundedPaintedPerimetersFitEveryEdgeAndChromeAtPrimaryRootAndAllExtents() throws {
+        for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
+                     CGSize(width: 1376, height: 1032)] {
+            let tips = [CGPoint.zero, CGPoint(x: size.width / 2, y: 0), CGPoint(x: size.width, y: 0),
+                CGPoint(x: 12, y: 88), CGPoint(x: 60, y: 100), CGPoint(x: size.width - 10, y: 92),
+                CGPoint(x: 0, y: size.height / 2), CGPoint(x: size.width, y: size.height / 2),
+                CGPoint(x: 0, y: size.height), CGPoint(x: size.width / 2, y: size.height),
+                CGPoint(x: size.width, y: size.height), CGPoint(x: size.width / 2, y: 450)]
+            for bands in [[(84.0, 40.0), (136, 48)], [(136.0, 40.0)], [(132.0, 48.0), (196, 48), (260, 48)]] {
+                let extent = bands.map { $0.0 + $0.1 / 2 }.max()!
+                let cap = bands.map { $0.1 / 2 }.max()!
+                for tip in tips {
+                    let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                        outerRadius: extent, minimumY: 72, capRadius: cap))
+                    XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size,
+                        outerRadius: extent, minimumY: 72, capRadius: cap), placement)
+                    XCTAssertGreaterThanOrEqual(placement.scale, RadialGeometry.minimumScale)
+                    XCTAssertLessThanOrEqual(placement.scale, 1)
+                    XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                    for (radius, thickness) in bands {
+                        let arc = RadialGeometry.backing(radius: radius, thickness: thickness,
+                                                        direction: placement.direction)
+                        // Independent sampling of circles swept along the whole
+                        // centerline includes both full cap circles and band edges.
+                        for degree in 0...120 {
+                            let angle = arc.start + Double(degree) * .pi / 180
+                            for circleDegree in stride(from: 0, to: 360, by: 15) {
+                                let capAngle = Double(circleDegree) * .pi / 180
+                                let x = placement.origin.x + (cos(angle) * radius + cos(capAngle) * thickness / 2) * placement.scale
+                                let y = placement.origin.y + (sin(angle) * radius + sin(capAngle) * thickness / 2) * placement.scale
+                                XCTAssertGreaterThanOrEqual(x, -1e-6)
+                                XCTAssertLessThanOrEqual(x, size.width + 1e-6)
+                                XCTAssertGreaterThanOrEqual(y, 72 - 1e-6)
+                                XCTAssertLessThanOrEqual(y, size.height + 1e-6)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     func testPopupLayoutAnchorsEachSourceAndFitsTheViewport() {
         let viewport = CGSize(width: 1194, height: 834)
         for x in [10.0, 50, 140, 250, 1150] {

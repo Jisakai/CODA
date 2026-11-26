@@ -1031,18 +1031,24 @@ private struct RadialMenuView: View {
                     let placement = store.radial?.placement ?? RadialPlacement(origin: center, direction: RadialGeometry.defaultDirection)
                     let radius = CGFloat(radiusValue * placement.scale)
                     let thickness = CGFloat(thicknessValue * placement.scale)
+                    CodaAcrylic(store: store)
+                        .clipShape(RadialArcShape(arc: RadialGeometry.backing(radius: radiusValue,
+                            thickness: thicknessValue, direction: placement.direction), scale: placement.scale))
+                        .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
+                        .position(center)
                     ForEach(labels.indices, id: \.self) { slot in
                         let count = max(1, labels.count)
                         let enabled = store.radialSlotEnabled(ring, slot: slot)
                         let angle = RadialGeometry.angle(forSlot: slot, count: count, direction: placement.direction)
                             + RadialGeometry.sweep / Double(count) / 2
                         let point = placement.point(radius: radiusValue, angle: angle)
-                        let shape = RingSlotShape(count: count, index: slot, radius: radius,
-                                                  thickness: thickness, direction: placement.direction)
-                        CodaAcrylic(store: store)
-                            .overlay(CodaDesignTokens.Colors.primaryInk.opacity(
-                                enabled && store.radial?.selectedRing == ring && store.radial?.selectedSlot == slot ? 0.13 : 0))
-                            .clipShape(shape)
+                        let shape = RingSlotShape(count: count, index: slot, radius: radiusValue,
+                            thickness: thicknessValue, direction: placement.direction, scale: placement.scale)
+                        shape.fill(CodaDesignTokens.Colors.primaryInk.opacity(!enabled
+                            ? CodaDesignTokens.EditorSurface.radialDisabledPillOpacity
+                            : store.radial?.selectedRing == ring && store.radial?.selectedSlot == slot
+                            ? CodaDesignTokens.EditorSurface.radialSelectedPillOpacity
+                            : CodaDesignTokens.EditorSurface.radialPillOpacity))
                             .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
                             .position(center)
                         Group {
@@ -1107,19 +1113,22 @@ struct RingSlotShape: Shape {
     let radius: CGFloat
     let thickness: CGFloat
     var direction: Double = RadialGeometry.defaultDirection
+    var scale: Double = 1
 
     func path(in rect: CGRect) -> Path {
-        guard count > 0 else { return Path() }
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let start = RadialGeometry.angle(forSlot: index, count: count, direction: direction) + RadialGeometry.slotGap
-        let end = start + RadialGeometry.sweep / Double(count) - 2 * RadialGeometry.slotGap
-        var path = Path()
-        path.addArc(center: center, radius: radius + thickness / 2,
-                    startAngle: .radians(start), endAngle: .radians(end), clockwise: false)
-        path.addArc(center: center, radius: max(0, radius - thickness / 2),
-                    startAngle: .radians(end), endAngle: .radians(start), clockwise: true)
-        path.closeSubpath()
-        return path
+        guard count > 0, index >= 0, index < count else { return Path() }
+        return RadialArcShape(arc: RadialGeometry.pill(slot: index, count: count,
+            radius: radius, thickness: thickness, direction: direction), scale: scale).path(in: rect)
+    }
+}
+
+struct RadialArcShape: Shape {
+    let arc: RadialArc
+    var scale: Double = 1
+
+    func path(in rect: CGRect) -> Path {
+        Path(arc.path()).applying(CGAffineTransform(scaleX: scale, y: scale)
+            .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY)))
     }
 }
 
