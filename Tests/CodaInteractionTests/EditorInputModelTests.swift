@@ -4,6 +4,148 @@ import CodaMusic
 import CodaInteraction
 
 final class EditorInputModelTests: XCTestCase {
+    func testVisibleKeyboardIncludesEverySemitoneAndRejectsOffscreenRows() {
+        var viewport = EditorViewport()
+        XCTAssertEqual(viewport.visiblePitches(in: 66), [84, 83, 82])
+        XCTAssertEqual(viewport.visiblePitches(in: 67), [84, 83, 82, 81])
+        XCTAssertEqual(viewport.visiblePitches(in: 0), [])
+        XCTAssertEqual(viewport.visiblePitches(in: .infinity), [])
+        viewport.pan(horizontalBy: 0, verticalBy: -11, canvasWidth: 1200, canvasHeight: 400)
+        let pitches = viewport.visiblePitches(in: 400)
+        XCTAssertEqual(pitches.first, 84)
+        XCTAssertEqual(viewport.y(forMIDI: 84), -11)
+        for pitch in pitches {
+            let y = viewport.y(forMIDI: pitch)
+            XCTAssertLessThan(y, 400)
+            XCTAssertGreaterThan(y + viewport.semitoneHeight, 0)
+        }
+        viewport.pan(horizontalBy: 0, verticalBy: 100_000, canvasWidth: 1200, canvasHeight: 400)
+        XCTAssertEqual(viewport.visiblePitches(in: 400).first, 127)
+        viewport.pan(horizontalBy: 0, verticalBy: -100_000, canvasWidth: 1200, canvasHeight: 400)
+        XCTAssertEqual(viewport.visiblePitches(in: 400).last, 0)
+    }
+
+    func testFanSweepTiltAdaptivePlacementAndBoundedCornerFallback() {
+        XCTAssertEqual(RadialGeometry.sweep, 2 * .pi / 3, accuracy: 1e-12)
+        XCTAssertEqual(RadialGeometry.defaultDirection, -2 * .pi / 3, accuracy: 1e-12)
+        let size = CGSize(width: 1194, height: 834)
+        for x in [400.0, 800] {
+            let tip = CGPoint(x: x, y: 450)
+            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            XCTAssertEqual(placement.origin, tip)
+            XCTAssertEqual(placement.direction, -2 * .pi / 3, accuracy: 1e-12)
+            XCTAssertEqual(placement.scale, 1)
+            for _ in 0..<20 {
+                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
+            }
+        }
+        for tip in [CGPoint(x: 600, y: 12), CGPoint(x: 600, y: 822),
+                    CGPoint(x: 12, y: 417), CGPoint(x: 1182, y: 417),
+                    .zero, CGPoint(x: 1194, y: 0), CGPoint(x: 0, y: 834), CGPoint(x: 1194, y: 834)] {
+            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            for _ in 0..<20 {
+                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
+            }
+            XCTAssertGreaterThanOrEqual(placement.scale, 0.8)
+            XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 120)
+            let bounds = RadialGeometry.bounds(direction: placement.direction, radius: 284 * placement.scale)
+                .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+            XCTAssertGreaterThanOrEqual(bounds.minX, 8 - 1e-9)
+            XCTAssertGreaterThanOrEqual(bounds.minY, 8 - 1e-9)
+            XCTAssertLessThanOrEqual(bounds.maxX, size.width - 8 + 1e-9)
+            XCTAssertLessThanOrEqual(bounds.maxY, size.height - 8 + 1e-9)
+            if tip.x == 600 && tip.y == 12 { XCTAssertGreaterThan(sin(placement.direction), 0) }
+            if tip.x == 600 && tip.y == 822 { XCTAssertLessThan(sin(placement.direction), 0) }
+            if tip.x == 0 || tip.x == 1194 {
+                XCTAssertGreaterThan(cos(placement.direction) * (tip.x == 0 ? 1 : -1), 0)
+                XCTAssertGreaterThan(sin(placement.direction) * (tip.y == 0 ? 1 : -1), 0)
+            }
+            if tip.x == 12 { XCTAssertGreaterThan(cos(placement.direction), 0) }
+            if tip.x == 1182 { XCTAssertLessThan(cos(placement.direction), 0) }
+        }
+    }
+
+    func testTopCenterFanUsesExactCounterClockwiseDownwardTiltAtTheTip() {
+        let size = CGSize(width: 1194, height: 834)
+        for y in [0.0, 8, 12] {
+            let tip = CGPoint(x: size.width / 2, y: y)
+            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
+            XCTAssertEqual(placement.origin, tip)
+            XCTAssertEqual(placement.scale, 1)
+            let bounds = RadialGeometry.bounds(direction: placement.direction, radius: 284)
+                .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+            XCTAssertGreaterThanOrEqual(bounds.minX, 8 - 1e-9)
+            XCTAssertGreaterThanOrEqual(bounds.minY, y - 1e-9)
+            XCTAssertLessThanOrEqual(bounds.maxX, size.width - 8 + 1e-9)
+            XCTAssertLessThanOrEqual(bounds.maxY, size.height - 8 + 1e-9)
+            for _ in 0..<20 {
+                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
+            }
+        }
+    }
+
+    func testSectorCentersReachableAndOutsideSweepAndRenderedGapsCancel() {
+        for direction in [-Double.pi, RadialGeometry.defaultDirection, .pi / 3, -.pi / 3, .pi / 2, 2 * .pi] {
+            for count in 2...4 {
+                let spacing = RadialGeometry.sweep / Double(count)
+                for index in 0..<count {
+                    let start = RadialGeometry.angle(forSlot: index, count: count, direction: direction)
+                    XCTAssertEqual(RadialGeometry.slot(atAngle: start + spacing / 2, count: count, direction: direction), index)
+                    XCTAssertNil(RadialGeometry.slot(atAngle: start, count: count, direction: direction))
+                }
+                for offset in [RadialGeometry.sweep / 2 + 0.01, .pi, -.pi] {
+                    XCTAssertNil(RadialGeometry.slot(atAngle: direction + offset, count: count, direction: direction))
+                }
+            }
+        }
+    }
+
+    func testPagingReachesEveryOptionExactlyOnceAndWraps() {
+        for total in 1...32 {
+            let pages = RadialPage.count(total: total)
+            let reached = (0..<pages).flatMap { Array(RadialPage.indices(total: total, page: $0)) }
+            XCTAssertEqual(reached, Array(0..<total))
+            XCTAssertEqual(RadialPage.indices(total: total, page: pages), RadialPage.indices(total: total, page: 0))
+            for page in 0..<pages { XCTAssertLessThanOrEqual(RadialPage.indices(total: total, page: page).count, 3) }
+        }
+    }
+
+    func testPopupLayoutAnchorsEachSourceAndFitsTheViewport() {
+        let viewport = CGSize(width: 1194, height: 834)
+        for x in [10.0, 50, 140, 250, 1150] {
+            let anchor = CGRect(x: x, y: 10, width: 32, height: 32)
+            let frame = AnchoredPopupLayout.frame(anchor: anchor, size: CGSize(width: 288, height: 300), viewport: viewport)
+            XCTAssertTrue(CGRect(origin: .zero, size: viewport).contains(frame))
+            XCTAssertEqual(frame.minY, anchor.maxY + 8)
+            XCTAssertGreaterThanOrEqual(anchor.midX, frame.minX)
+            XCTAssertLessThanOrEqual(anchor.midX, frame.maxX)
+        }
+        let above = AnchoredPopupLayout.frame(anchor: CGRect(x: 100, y: 810, width: 32, height: 20),
+            size: CGSize(width: 288, height: 300), viewport: viewport)
+        XCTAssertEqual(above.maxY, 802)
+    }
+
+    func testToolIconsKeepStableAccessibleNames() {
+        XCTAssertEqual(ChordTool.allCases.map(\.title), ["Swap chord", "Duplicate", "Copy", "Delete", "Paste", "Rest"])
+        XCTAssertEqual(Set(ChordTool.allCases.map(\.symbol)).count, ChordTool.allCases.count)
+        for tool in ChordTool.allCases { XCTAssertFalse(tool.symbol.isEmpty) }
+    }
+
+    func testEmptyChordStartsRemainBarConstrainedAndPartialBarsAreUnavailable() {
+        let viewport = EditorViewport()
+        let stepWidth = viewport.stepWidth(in: 1280)
+        for step in 16..<32 {
+            let hit = ChordStripHitTester.hit(x: 56 + (Double(step) + 0.5) * stepWidth,
+                y: 50, width: 1336, height: 104, headerWidth: 56, viewport: viewport, regions: [])
+            XCTAssertEqual(hit?.target, .emptyBar(startStep: 16))
+        }
+        XCTAssertNil(ChordStripHitTester.hit(x: 56 + 20.5 * stepWidth,
+            y: 50, width: 1336, height: 104, headerWidth: 56, viewport: viewport,
+            regions: [(id: "partial", start: 16, end: 18)]),
+            "The unused tail of a partial bar is not a new chord-start target")
+    }
+
     func testEveryMusicMutationIsRejectedForFingerAndAcceptedForPencil() {
         let actions: [MusicEditAction] = [
             .add, .select, .audition, .resize, .duplicate, .copy, .paste, .delete,
@@ -149,13 +291,10 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertNil(RadialGeometry.ring(forRadius: 40, rings: [(.inner, 64, 104)]))
         XCTAssertEqual(RadialGeometry.ring(forRadius: 64, rings: [(.inner, 64, 104)]), .inner)
         XCTAssertEqual(RadialGeometry.ring(forRadius: 104, rings: [(.inner, 64, 104)]), .inner)
-        for count in [4, 7, 12, 13] {
+        for count in 2...4 {
             for slot in 0..<count {
-                let angle = RadialGeometry.angle(forSlot: slot, count: count)
+                let angle = RadialGeometry.angle(forSlot: slot, count: count) + RadialGeometry.sweep / Double(count) / 2
                 XCTAssertEqual(RadialGeometry.slot(atAngle: angle, count: count), slot)
-                XCTAssertEqual(RadialGeometry.slot(atAngle: angle + 1e-9, count: count), slot)
-                XCTAssertEqual(RadialGeometry.slot(atAngle: angle - 1e-9, count: count),
-                               (slot + count - 1) % count)
             }
         }
     }

@@ -1,3 +1,142 @@
+# M1 owner iPad correction pass - review handoff
+
+Date: 2026-11-26. This section records the current corrective pass; the older
+phase4 report below is historical. This is implementation prepared for review,
+not a native build, new IPA, physical Pencil verification, or M1 acceptance.
+
+## Current changes
+
+- The read-only roll renders every visible MIDI semitone with its real pitch
+  and octave label, natural/accidental keyboard surfaces and brighter C anchors.
+  The initial E5 register centers the production voicing range.
+  All MIDI 0-127 rows remain reachable through the existing pan/zoom transform.
+  The gutter and complete roll have explicit clipping boundaries below the
+  unchanged 52pt top bar, 20pt timeline and 104pt strip; the gutter stays 56pt.
+- Four separately identified settings surfaces use measured invoking-control
+  frames and the production AnchoredPopupLayout. Popups sit below/near their
+  own control and clamp to viewport bounds. The modal surface blocks music and
+  navigation ingress. Shared dark surface composition, bold labels and pill
+  controls are retained across the touched panels. Key/scale changes still
+  affect context without transposing existing chords.
+- Chord names and Roman numerals are centered. Hover/detail information is
+  bounded inside its own block and comes from the production chord/voicing.
+  BAR placeholders, the strip header and Project Settings make bar-only starts
+  explicit. Right-edge step resizing remains; body dragging does not move music.
+- There is no top-bar drawer button. A persistent right-edge pull tab opens and
+  closes the overlay, with the existing finger edge swipe and canvas dismissal.
+- The drawer covers the strip and roll from below the shared timeline to the
+  bottom of the viewport. Its upper half is empty structure, with no sidekick
+  interface or placeholder chat. Its lower half scrolls independently: SYNTH,
+  three preset cards, two macros, exactly five sound controls, and the initially
+  collapsed FX & Mix row. Expanded FX exposes shared Delay/Reverb and Chords
+  level only. Existing production parameter/default/preset publishing is reused.
+  Dial frames, visible clipping and the lower-half boundary gate Pencil controls.
+- Radial drawing and hit testing share an intentional 120-degree fan with
+  identical start/end angles, gaps, radii and scale. In open space its direction
+  tilts 30 degrees counter-clockwise from straight up (-2pi/3, top-left), never
+  mirroring by screen half. When top clearance requires opening down, it prefers
+  30 degrees counter-clockwise from straight down (+pi/3, down-right), exactly
+  so at top-center. Further rotation searches exact occupied sector bounds;
+  equal angular offsets prefer counter-clockwise, and equal fallback costs keep
+  the first candidate. Exact edges relax only the margin needed to anchor the
+  Pencil tip; displaced corner fallbacks retain the full margin. Only when no
+  full-size anchored orientation fits does it scale down
+  (bounded to 0.8) or displace the origin. A true 90-degree viewport corner cannot
+  contain a 120-degree fan at the exact tip; minimal displacement handles that.
+  Placement freezes during a Pencil selection, including geometry notifications;
+  mode changes after lift can solve a new extent. Primary retains two concentric
+  tool/suggestion bands; All has up to three ordered family bands. Each large
+  band pages three readable options plus a filled More glyph with page count in
+  its accessible name. All qualities and twelve roots remain reachable. Outside
+  the sector, gaps and the central dead zone cancel. Tool actions use filled
+  icons with stable accessible names. Initial squeeze release remains guarded.
+- Production vocabulary now has 30 qualities: existing add9 plus new add11,
+  minorAdd9 and minorAdd11. Major/minor triads expose both additive choices.
+  Existing suggestions preserve root/slash identity; additive suggestions retain
+  original tones. Additive IDs are no longer suggested from sixth chords when
+  that would discard the sixth. Inner Swap remains root then quality, outer
+  suggestions/All remain quality changes, and empty choices create one chord.
+  The existing rule provider, solver and atomic session edits do the work.
+
+Existing popup/surface work was preserved. The stale full-circle geometry and
+its full-circle-only tests were replaced per the corrected owner direction.
+No render-thread, DSP, transport, lifecycle, device-routing, tap-count or music
+editing algorithm was replaced. No M1b or later feature was implemented.
+
+## Exact scoped file list
+
+- Sources/CodaApp/CodaDesignTokens.swift
+- Sources/CodaApp/CodaEditorStore.swift
+- Sources/CodaApp/EditorViews.swift
+- Sources/CodaInteraction/EditorInputModel.swift
+- Sources/CodaMusic/ChordSuggestions.swift
+- Sources/CodaMusic/Resources/vocab.json
+- Tests/CodaAudioTests/EditorStoreRegressionTests.swift
+- Tests/CodaInteractionTests/EditorInputModelTests.swift
+- Tests/CodaMusicTests/ChordSuggestionTests.swift
+- Tests/CodaUITests/CodaLaunchTests.swift
+- Tests/Scaffold/test_owner_feedback_contract.py (new, concurrent, retained)
+- project.yml (compile actual EditorViews into the existing integration target)
+- docs/M1-phase4.md
+
+The pre-existing .codex_task.md and ROADMAP.md modifications were not edited by
+this pass. AGENTS/SPEC/DESIGN/DECISIONS_LOG and the active brief were not edited.
+Unrelated untracked fonts, IDEA.md and .codex_review.md were left alone.
+
+## Verification actually run on Windows
+
+- Full Python/scaffold suite:
+  `python -m unittest discover -s Tests/Scaffold -p 'test_*.py' -v`:
+  **26 tests passed**. This includes package/export/font/orientation/scaffold
+  regressions plus production vocabulary/additive/surface contract checks.
+  Package outputs are synthetic fixtures, not an archive or IPA from this app.
+- `python -m py_compile` for both scripts and scaffold test files: passed.
+- JSON/YAML/source checks: 30 unique quality IDs, sorted unique legal intervals,
+  valid three-choice references, additive-tone retention, declared source paths,
+  target dependencies, and palette declarations: passed.
+- `git diff --check`: passed, with Git CRLF conversion notices only.
+- Tool discovery found Python, but no swift, xcodebuild, xcodegen, clang++, g++
+  or cmake on PATH. No tooling or dependencies were installed.
+
+Prepared native tests cover popup placement, all visible keyboard rows, complete
+radial sector paths versus actual slot hit testing through a full turn (including
+the rejected 240 degrees), fixed counter-clockwise default tilt on both screen
+halves, exact +pi/3 top-center placement, repeated deterministic edge/corner
+placement, frozen
+gesture orientation, page reachability, every production quality, initial squeeze
+release safety, dead zones, bar-only placement, body-drag nonmovement, atomic
+resize, additive root/slash/tone identity and undo. UI tests retain the existing
+SNAP, font/orientation, mute, real playback and no-finger-music assertions, and
+now open through the tab and scroll every sound/FX control into view. Shared
+surface composition and modal input blocking are also covered. These Swift/
+XCTest tests were **not executed** on this Windows host.
+
+## Remaining M1 gates
+
+1. Review and run the complete native Mac suite with the pinned Xcode/SDK,
+   including DSP/transport sanitizers and the new hosted SwiftUI path tests.
+   Native compilation/type/isolation and actual rendering remain unverified.
+2. Generate and visually review the four existing named simulator captures:
+   empty editor, four-bar fixture, synth drawer and edge All radial. No current
+   simulator screenshot was generated or visually reviewed here.
+3. Produce and verify an unsigned IPA on the Mac after review. No CI was
+   triggered and no new IPA is claimed. No files were staged or committed;
+   nothing was pushed.
+4. On the physical iPad, recheck all pitch labels and clipping after pan/zoom;
+   four relative settings anchors; centered strip/details and honest placement;
+   tab/edge open-close and lower-half drawer scrolling; 120-degree radial fans and paging
+   at every edge; all additive choices; initial squeeze release; hover preview,
+   cancellation and Pencil-only commit. Repeat the passed regression checklist
+   and real playback/loop/scrub/history/lifecycle checks. Simulator results cannot
+   establish Pencil routing, haptic feel or physical acceptance. The earlier
+   report's unresolved stronger-haptic-intensity limitation is not changed by
+   this UI correction.
+
+Stop after this correction pass. M1 acceptance and M1b authorization remain
+with the owner/orchestrator.
+
+---
+
 # M1 phase4 correction pass — Hermes review handoff
 
 Date: 2026-11-25. Scope: `docs/briefs/M1-phase4-review-fixes.md`, on top of
@@ -121,6 +260,30 @@ installed SDK must still compile the bridge, including the existing roll-angle
 properties and the squeeze phase cases. If exact phase-case declarations are
 needed during Mac review, the primary declaration endpoint is
 `https://developer.apple.com/tutorials/data/documentation/uikit/uipencilinteraction/phase.json`.
+
+## Independent review popup blocker correction (2026-11-26)
+
+All App/Project/Key/BPM assignments now pass through the MainActor store's
+`popup.willSet` boundary. Before presenting a non-nil popup it synchronously
+cancels queued/owned chord preview, Pencil contact, pending hold work, hold menu,
+resize draft, radial and knob reset/roll state. Existing settings control call
+sites and non-popup actions retain their routing. Pencil begin/move/hover/end,
+squeeze finish and radial hover/commit also reject events while a popup is open;
+delayed hold and preview callbacks have their own modal checks.
+
+New production-store regressions cover Delete hover followed by each popup and
+stale Pencil/squeeze release in both event orders, with/without active contact.
+They verify the popup stays open, progression is unchanged, and traverse actual
+undo/redo stacks to detect added/lost history. Additional cases cover pending
+preview/hold cancellation, active resize/hold/reset cancellation, settings edits
+and ordinary Pencil Delete after dismissal.
+
+Actually run on Windows: `python -m unittest discover -s Tests/Scaffold -p
+'test_*.py' -v` (26 passed), and `git diff --check` (passed; existing Git CRLF
+conversion warnings only). `Get-Command swift,xcodebuild,xcodegen,python
+-ErrorAction SilentlyContinue` found only Python. The new Swift/XCTest
+regressions have not run here; native Mac execution and physical Pencil
+validation remain required. No CI, archive or IPA was produced in this pass.
 
 ## Prepared production regressions (native execution pending)
 

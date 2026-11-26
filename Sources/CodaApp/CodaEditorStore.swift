@@ -6,7 +6,7 @@ import CodaSession
 import CodaNative
 import CodaInteraction
 
-enum EditorPopup: String, Identifiable {
+enum EditorPopup: String, Identifiable, Hashable {
     case appSettings
     case projectSettings
     case keyScale
@@ -52,11 +52,15 @@ struct RadialMenuState {
     var context: RadialContext
     var regionID: String?
     var emptyStart: Int?
-    var center: CGPoint
+    var anchor: CGPoint
+    var placement: RadialPlacement
+    var center: CGPoint { placement.origin }
     var selectedRing: RadialRing?
     var selectedSlot: Int?
     var draft: RadialSwapDraft?
     var swapping = false
+    var hasNavigated = false
+    var pages: [RadialRing: Int] = [:]
 }
 
 struct ResizeDraft {
@@ -80,7 +84,13 @@ final class CodaEditorStore {
     let session: MusicSession?
     let startupError: String?
 
-    var popup: EditorPopup?
+    var popup: EditorPopup? {
+        willSet {
+            // Every settings control presents through this MainActor boundary.
+            // Retire in-flight Pencil work before the modal becomes visible.
+            if newValue != nil { pencilTouchCancelled() }
+        }
+    }
     var detailsVisible = false
     var drawerOpen = false
     var fxExpanded = false
@@ -89,7 +99,7 @@ final class CodaEditorStore {
     var tempoDraft = "124"
     var key = MusicDefaults.key
     var rootSize = CGSize(width: 1366, height: 1024)
-    var viewport = EditorViewport()
+    var viewport = EditorViewport(topMIDI: CodaDesignTokens.Geometry.pianoRollTopMIDI)
     var selectedRegionID: String?
     var hoveredRegionID: String?
     var hoveredStep: Int?
@@ -155,11 +165,19 @@ final class CodaEditorStore {
         min(CodaDesignTokens.Geometry.drawerMaxWidth,
             max(CodaDesignTokens.Geometry.drawerMinWidth, rootSize.width * CodaDesignTokens.Geometry.drawerFraction))
     }
-    var drawerTop: CGFloat { rollTop }
+    // The side surface covers the strip and roll, below the shared transport.
+    var drawerTop: CGFloat { stripTop }
+    var synthTop: CGFloat {
+        drawerTop + (rootSize.height - drawerTop) * CodaDesignTokens.EditorSurface.drawerReservedFraction
+    }
 
     func setRootSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         rootSize = size
+        if !hasActivePencilTouch, var state = radial {
+            state.placement = menuPlacement(state.anchor, mode: state.mode)
+            radial = state
+        }
     }
 
     func refreshTransportStatus() {
@@ -507,6 +525,7 @@ final class CodaEditorStore {
     }
 
     func pencilTouchBegan(at point: CGPoint) {
+        guard popup == nil else { return }
         lastPencilContactTime = ProcessInfo.processInfo.systemUptime
         lastPencilLocation = point
         touchStart = point
@@ -524,6 +543,7 @@ final class CodaEditorStore {
     }
 
     func pencilTouchMoved(to point: CGPoint) {
+        guard popup == nil else { return }
         lastPencilContactTime = ProcessInfo.processInfo.systemUptime
         lastPencilLocation = point
         touchLast = point
@@ -554,6 +574,7 @@ final class CodaEditorStore {
     }
 
     func pencilTouchEnded(at point: CGPoint) {
+        guard popup == nil else { return }
         lastPencilLocation = point
         touchLast = point
         holdWork?.cancel(); holdWork = nil
@@ -599,10 +620,14 @@ final class CodaEditorStore {
         holdMenu = nil
         radial = nil
         radialPreview = nil
+        knobReset = nil
+        knobResetSelected = false
+        clearRollTracking()
         clearTouch()
     }
 
     func pencilHover(at point: CGPoint, rollAngle: Double?) {
+        guard popup == nil else { return }
         lastPencilLocation = point
         hoveredRegionID = region(at: point)?.id
         hoveredStep = viewport.step(atX: Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth))
@@ -628,33 +653,38 @@ final class CodaEditorStore {
     var hasActivePencilTouch: Bool { touchStart != nil }
 
     func finishSqueeze(at point: CGPoint?) {
-        guard !hasActivePencilTouch, radial != nil || knobReset != nil else { return }
+        guard popup == nil, !hasActivePencilTouch, radial != nil || knobReset != nil else { return }
+        // Edge clamping can put a band beneath the opening tip. The initial
+        // release cannot activate it without deliberate Pencil navigation.
+        if let state = radial, !state.hasNavigated { return }
         pencilTouchEnded(at: point ?? lastPencilLocation ?? .zero)
     }
 
     func acceptsPencilLocation(_ point: CGPoint) -> Bool {
-        pencilTarget(at: point) != nil || radial != nil || holdMenu != nil
+        guard popup == nil else { return false }
+        return pencilTarget(at: point) != nil || radial != nil || holdMenu != nil
     }
 
     func openSqueeze(at location: CGPoint?) {
-        guard let point = location ?? lastPencilLocation else { return }
+        guard popup == nil, let point = location ?? lastPencilLocation else { return }
         cancelRadialPreview()
         lastPencilLocation = point
         if let knob = knob(at: point) {
             openKnobReset(knob, at: point)
             return
         }
+        guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
         guard let stripHit = stripHit(at: point) else { return }
         switch stripHit {
         case .region(let id, _):
             guard let region = regions.first(where: { $0.id == id }) else { return }
             radial = RadialMenuState(mode: .primary, context: .existingChord, regionID: id,
-                                     emptyStart: nil, center: clampedMenuCenter(point),
+                                     emptyStart: nil, anchor: point, placement: menuPlacement(point),
                                      selectedRing: nil, selectedSlot: nil,
                                      draft: RadialSwapDraft(root: region.chord.root, qualityID: region.chord.qualityID))
         case .emptyBar(let start):
             radial = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
-                                     emptyStart: start, center: clampedMenuCenter(point),
+                                     emptyStart: start, anchor: point, placement: menuPlacement(point),
                                      selectedRing: nil, selectedSlot: nil, draft: nil)
         }
         radialPreview = nil
@@ -726,8 +756,10 @@ final class CodaEditorStore {
     }
 
     func beginFingerNavigation(at point: CGPoint) -> Bool {
+        guard popup == nil else { return false }
         fingerPanConsumed = false
-        return point.y >= rollTop && (!(drawerOpen && point.x >= rootSize.width - drawerWidth)
+        let atEdge = point.x >= rootSize.width - CodaDesignTokens.Input.navigationEdgeWidth
+        return point.y >= (atEdge ? drawerTop : rollTop) && (!(drawerOpen && point.x >= rootSize.width - drawerWidth)
             || point.x >= rootSize.width - CodaDesignTokens.Input.navigationEdgeWidth)
     }
 
@@ -746,11 +778,14 @@ final class CodaEditorStore {
         let quality = radial.regionID.flatMap { id in regions.first(where: { $0.id == id })?.chord }
         switch radial.mode {
         case .primary:
-            return [(.inner, radial.context == .existingChord ? ["Swap", "Duplicate", "Copy", "Delete"] : ["Paste", "Rest", "", ""], 84, 40),
-                    (.outer, outerLabels(for: radial), 136, 44)]
+            return [(.inner, radial.context == .existingChord ? ["Swap", "Duplicate", "Copy", "Delete"] : ["Paste", "Rest", "", ""],
+                     CodaDesignTokens.EditorSurface.radialInnerRadius, CodaDesignTokens.EditorSurface.radialInnerBand),
+                    (.outer, outerLabels(for: radial), CodaDesignTokens.EditorSurface.radialOuterRadius,
+                     CodaDesignTokens.EditorSurface.radialOuterBand)]
         case .roots:
-            let roots = Self.pitchNames
-            return [(.roots, roots, 84, 42)]
+            let roots = pageLabels(Self.pitchNames, ring: .roots, state: radial)
+            return [(.roots, roots, CodaDesignTokens.EditorSurface.radialOuterRadius,
+                     CodaDesignTokens.EditorSurface.radialInnerBand)]
         case .all:
             let families: [(ChordFamily, RadialRing)] = [
                 (.major, .major), (.minor, .minor), (.odd, .odd)
@@ -763,9 +798,26 @@ final class CodaEditorStore {
                 return families.firstIndex(where: { $0.0 == lhs.0 })! < families.firstIndex(where: { $0.0 == rhs.0 })!
             }
             return ordered.enumerated().map { index, value in
-                (value.1, session.vocabulary.ring(value.0).map(\.symbol), 84 + Double(index) * 52, 44)
+                (value.1, pageLabels(session.vocabulary.ring(value.0).map { $0.symbol.isEmpty ? "Maj" : $0.symbol },
+                                     ring: value.1, state: radial),
+                 CodaDesignTokens.EditorSurface.radialFamilyRadius + Double(index) * CodaDesignTokens.EditorSurface.radialFamilySpacing,
+                 CodaDesignTokens.EditorSurface.radialFamilyBand)
             }
         }
+    }
+
+    private func pageLabels(_ labels: [String], ring: RadialRing, state: RadialMenuState) -> [String] {
+        let page = state.pages[ring, default: 0] % RadialPage.count(total: labels.count)
+        let visible = RadialPage.indices(total: labels.count, page: page).map { labels[$0] }
+        guard labels.count > RadialPage.capacity else { return visible }
+        return visible + ["More \(page + 1)/\(RadialPage.count(total: labels.count))"]
+    }
+
+    func radialTool(ring: RadialRing, slot: Int) -> ChordTool? {
+        guard ring == .inner, let radial else { return nil }
+        let tools: [ChordTool] = radial.context == .existingChord
+            ? [.swap, .duplicate, .copy, .delete] : [.paste, .rest]
+        return tools.indices.contains(slot) ? tools[slot] : nil
     }
 
     func currentRingIsSelected(_ ring: RadialRing) -> Bool {
@@ -793,7 +845,7 @@ final class CodaEditorStore {
             }
             return ring == .outer && (slot == 3 || suggestions(for: state.regionID).indices.contains(slot))
         case .roots:
-            return ring == .roots && slot < 12
+            return ring == .roots && slot < (radialRings().first?.1.count ?? 0)
         case .all:
             return radialIntent(for: (ring, slot), state: state) != nil
         }
@@ -819,8 +871,9 @@ final class CodaEditorStore {
             openSqueeze(at: at)
             radial = radial.map { state in
                 var moved = state
-                moved.center = clampedMenuCenter(CGPoint(x: 12, y: stripTop + 16))
+                moved.anchor = CGPoint(x: 12, y: stripTop + 16)
                 moved.mode = .all
+                moved.placement = menuPlacement(moved.anchor, mode: .all)
                 return moved
             }
         }
@@ -949,7 +1002,7 @@ final class CodaEditorStore {
 
     private func scheduleHold(for id: String, at point: CGPoint) {
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.touchMoved else { return }
+            guard let self, self.popup == nil, self.hasActivePencilTouch, !self.touchMoved else { return }
             self.holdTriggered = true
             self.holdMenu = HoldMenuState(regionID: id, origin: point, selectedIndex: nil)
         }
@@ -968,6 +1021,7 @@ final class CodaEditorStore {
         if holdMenu != nil { return .holdCommand(0) }
         if radial != nil { return .radial(.inner, slot: 0) }
         if let knob = knob(at: point) { return .knob(knob) }
+        if drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop { return nil }
         if point.y >= stripTop, point.y < rollTop, let hit = stripHit(at: point) {
             switch hit {
             case .region(let id, let edge): return .region(id, resizeEdge: edge)
@@ -997,8 +1051,8 @@ final class CodaEditorStore {
     }
 
     func knob(at point: CGPoint) -> EditorKnob? {
-        guard drawerOpen, point.x >= rootSize.width - drawerWidth,
-              point.y >= drawerTop, point.y <= rootSize.height else { return nil }
+        guard drawerOpen, !chromeHidden, point.x >= rootSize.width - drawerWidth,
+              point.y >= synthTop, point.y < rootSize.height else { return nil }
         return EditorKnob.allCases.first { knob in
             guard fxExpanded || ![EditorKnob.delay, .reverb, .chordLevel].contains(knob),
                   let frame = knobFrames[knob], !frame.isEmpty, frame.contains(point) else { return false }
@@ -1007,10 +1061,26 @@ final class CodaEditorStore {
         }
     }
 
-    private func clampedMenuCenter(_ requested: CGPoint) -> CGPoint {
-        let edge: CGFloat = 276
-        return CGPoint(x: min(rootSize.width - edge, max(edge, requested.x)),
-                       y: min(rootSize.height - edge, max(drawerTop + edge, requested.y)))
+    private func menuPlacement(_ requested: CGPoint, mode: RadialMode = .primary) -> RadialPlacement {
+        let outerRadius: Double = switch mode {
+        case .primary: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialOuterBand / 2
+        case .roots: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialInnerBand / 2
+        case .all: CodaDesignTokens.EditorSurface.radialFamilyRadius + 2 * CodaDesignTokens.EditorSurface.radialFamilySpacing
+            + CodaDesignTokens.EditorSurface.radialFamilyBand / 2
+        }
+        return RadialGeometry.placement(tip: requested, viewport: rootSize,
+            outerRadius: outerRadius, margin: CodaDesignTokens.EditorSurface.radialMargin)
+    }
+
+    private func setRadialMode(_ mode: RadialMode) {
+        guard var state = radial else { return }
+        state.mode = mode
+        state.placement = menuPlacement(state.anchor, mode: mode)
+        state.selectedRing = nil
+        state.selectedSlot = nil
+        state.hasNavigated = false
+        radial = state
+        radialPreview = nil
     }
 
     private func outerLabels(for state: RadialMenuState) -> [String] {
@@ -1027,12 +1097,18 @@ final class CodaEditorStore {
     }
 
     private func updateRadialHover(at point: CGPoint) {
+        guard popup == nil else { return }
         guard var state = radial else {
             if var hold = holdMenu {
                 hold.selectedIndex = holdMenuLayout?.row(at: point)
                 holdMenu = hold
             }
             return
+        }
+        if !state.hasNavigated {
+            guard hypot(point.x - state.anchor.x, point.y - state.anchor.y)
+                    >= CodaDesignTokens.Input.holdMoveTolerance else { return }
+            state.hasNavigated = true
         }
         guard let hit = radialHit(at: point, state: state) else {
             state.selectedRing = nil
@@ -1076,7 +1152,7 @@ final class CodaEditorStore {
                 try await Task.sleep(for: .seconds(delay))
                 for attempt in 0..<CodaDesignTokens.Input.previewRetryAttempts {
                     guard !Task.isCancelled, let self, let session,
-                          self.previewOwner == owner, session.previewEpoch == epoch else { return }
+                          self.popup == nil, self.previewOwner == owner, session.previewEpoch == epoch else { return }
                     do {
                         try session.auditionPreview(chord: chord, owner: owner)
                         self.lastPreviewTime = ProcessInfo.processInfo.systemUptime
@@ -1118,22 +1194,14 @@ final class CodaEditorStore {
     private func radialHit(at point: CGPoint, state: RadialMenuState) -> (RadialRing, Int)? {
         let dx = Double(point.x - state.center.x)
         let dy = Double(point.y - state.center.y)
-        let radius = hypot(dx, dy)
+        let radius = hypot(dx, dy) / state.placement.scale
         let angle = atan2(dy, dx)
-        switch state.mode {
-        case .primary:
-            guard let ring = RadialGeometry.ring(forRadius: radius, rings: [(.inner, 64, 104), (.outer, 112, 160)]) else { return nil }
-            let count = ring == .inner ? 4 : 4
-            return (ring, RadialGeometry.slot(atAngle: angle, count: count))
-        case .roots:
-            guard (64...104).contains(radius) else { return nil }
-            return (.roots, RadialGeometry.slot(atAngle: angle, count: 12))
-        case .all:
-            let rings = radialRings().map { ($0.0, $0.2 - 20, $0.2 + 20) }
-            guard let ring = RadialGeometry.ring(forRadius: radius, rings: rings),
-                  let count = radialRings().first(where: { $0.0 == ring })?.1.count, count > 0 else { return nil }
-            return (ring, RadialGeometry.slot(atAngle: angle, count: count))
-        }
+        let layout = radialRings()
+        let bands = layout.map { ($0.0, $0.2 - $0.3 / 2, $0.2 + $0.3 / 2) }
+        guard let ring = RadialGeometry.ring(forRadius: radius, rings: bands),
+              let count = layout.first(where: { $0.0 == ring })?.1.count, count > 0 else { return nil }
+        guard let slot = RadialGeometry.slot(atAngle: angle, count: count, direction: state.placement.direction) else { return nil }
+        return (ring, slot)
     }
 
     private func radialIntent(for hit: (RadialRing, Int), state: RadialMenuState) -> RadialIntent? {
@@ -1145,7 +1213,15 @@ final class CodaEditorStore {
         case .odd: qualityIDs = qualities(for: .odd).map(\.id)
         default: qualityIDs = []
         }
-        return RadialChoiceResolver.resolve(context: state.context, ring: hit.0, slot: hit.1,
+        var slot = hit.1
+        let total = hit.0 == .roots ? 12 : qualityIDs.count
+        if state.mode != .primary {
+            let indices = RadialPage.indices(total: total, page: state.pages[hit.0, default: 0])
+            if total > RadialPage.capacity && slot == indices.count { return .nextPage(hit.0) }
+            guard slot < indices.count else { return nil }
+            slot += indices.lowerBound
+        }
+        return RadialChoiceResolver.resolve(context: state.context, ring: hit.0, slot: slot,
             suggestionCount: suggestionCount, hasClipboard: clipboard != nil, qualityIDs: qualityIDs)
     }
 
@@ -1161,14 +1237,17 @@ final class CodaEditorStore {
             let labels = radialRings().first(where: { $0.0 == ring })?.1 ?? []
             return labels.indices.contains(slot) ? labels[slot] : nil
         }
-        if ring == .roots { return Self.pitchNames.indices.contains(slot) ? Self.pitchNames[slot] : nil }
         let values = radialRings().first(where: { $0.0 == ring })?.1 ?? []
         return values.indices.contains(slot) ? values[slot] : nil
     }
 
     private func commitRadial(_ state: RadialMenuState, at point: CGPoint) {
+        guard popup == nil else { return }
         cancelRadialPreview()
-        guard let hit = radialHit(at: point, state: state), let intent = radialIntent(for: hit, state: state) else {
+        guard state.hasNavigated || hypot(point.x - state.anchor.x, point.y - state.anchor.y)
+                >= CodaDesignTokens.Input.holdMoveTolerance else { closeRadial(); return }
+        guard let hit = radialHit(at: point, state: state) else { closeRadial(); return }
+        guard let intent = radialIntent(for: hit, state: state) else {
             radial = nil
             return
         }
@@ -1178,12 +1257,16 @@ final class CodaEditorStore {
         pencilFeedbackIsCompletion = true
         transientPoint = point
         switch intent {
-        case .swapRoot:
-            radial?.mode = .roots
-            radial?.swapping = true
+        case .nextPage(let ring):
+            radial?.pages[ring, default: 0] += 1
             radial?.selectedRing = nil
             radial?.selectedSlot = nil
+            radial?.hasNavigated = false
             radialPreview = nil
+            return
+        case .swapRoot:
+            radial?.swapping = true
+            setRadialMode(.roots)
             return
         case .duplicate:
             if let id = state.regionID, let region = regions.first(where: { $0.id == id }) { duplicate(region) }
@@ -1206,19 +1289,13 @@ final class CodaEditorStore {
                 addChord(chord, at: start, length: MusicDefaults.stepsPerBar)
             }
         case .showAll:
-            radial?.mode = .all
-            radial?.selectedRing = nil
-            radial?.selectedSlot = nil
-            radialPreview = nil
+            setRadialMode(.all)
             return
         case .chooseRoot(let root):
             // First lift chooses only the draft root. The quality lift is the
             // sole editor transaction, so cancel/undo cannot expose half a swap.
             radial?.draft?.chooseRoot(root)
-            radial?.mode = .all
-            radial?.selectedRing = nil
-            radial?.selectedSlot = nil
-            radialPreview = nil
+            setRadialMode(.all)
             return
         }
         radial = nil

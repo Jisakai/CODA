@@ -40,6 +40,8 @@ public struct RuleBasedChordSuggestions: ChordSuggestionProvider {
                             vocabulary: ChordVocabulary) throws -> [ChordSuggestion] {
         if let existing {
             let quality = try vocabulary.quality(existing.qualityID)
+            // Includes additive qualities from the production vocabulary. Root
+            // and slash identity survive every existing-chord suggestion.
             return try quality.suggestions.prefix(3).map { id in
                 let chord = try Chord(root: existing.root, qualityID: id, slashBass: existing.slashBass)
                 return ChordSuggestion(chord: chord, function: function(of: chord, in: key))

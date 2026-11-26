@@ -4,7 +4,7 @@ import SwiftUI
 enum CodaDesignTokens {
     enum Colors {
         static let oled = Color(red: 0, green: 0, blue: 0)
-        static let darkGlass = Color(red: 22.0 / 255, green: 22.0 / 255, blue: 24.0 / 255).opacity(0.90)
+        static let darkGlass = Color(red: 22.0 / 255, green: 22.0 / 255, blue: 24.0 / 255)
         static let coalGutter = Color(red: 24.0 / 255, green: 25.0 / 255, blue: 29.0 / 255)
         static let coalScale = Color(red: 21.0 / 255, green: 22.0 / 255, blue: 25.0 / 255)
         static let primaryInk = Color(red: 226.0 / 255, green: 226.0 / 255, blue: 236.0 / 255)
@@ -58,6 +58,7 @@ enum CodaDesignTokens {
         static let timelineHeight: CGFloat = 20
         static let chordStripHeight: CGFloat = 104
         static let pitchGutterWidth: CGFloat = 56
+        static let pianoRollTopMIDI = 76
         static let pianoRollSemitoneHeight: CGFloat = 22
         static let minimumZoomedSemitoneHeight: CGFloat = 14
         static let maximumZoomedSemitoneHeight: CGFloat = 36
@@ -101,5 +102,44 @@ enum CodaDesignTokens {
         static let knobDetentSpacing: Double = 0.05
         static let navigationEdgeWidth: CGFloat = 20
         static let navigationPanThreshold: CGFloat = 40
+    }
+
+    enum EditorSurface {
+        static let acrylicTint = 0.045
+        static let acrylicHighlight = 0.025
+        static let elevationRadius: CGFloat = 18
+        static let elevationOffset: CGFloat = 6
+        static let popupGap = 8.0
+        static let popupWidth: CGFloat = 288
+        static let popupPadding: CGFloat = 16
+        static let keyboardNaturalOpacity = 0.10
+        static let keyboardAccidentalOpacity = 0.02
+        static let keyboardAccidentalWidth: CGFloat = 40
+        static let keyboardLabelInset: CGFloat = 5
+        static let chordDetailSize: CGFloat = 10
+        static let chordDetailLines = 3
+        static let toolIconSize: CGFloat = 23
+        static let toolIconWeight = Font.Weight.black
+        static let radialInnerRadius = 84.0
+        static let radialOuterRadius = 136.0
+        static let radialInnerBand = 40.0
+        static let radialOuterBand = 48.0
+        static let radialFamilyRadius = 132.0
+        static let radialFamilySpacing = 64.0
+        static let radialFamilyBand = 48.0
+        static let radialMargin = 8.0
+        static let drawerReservedFraction: CGFloat = 0.5
+        static let drawerPadding: CGFloat = 20
+        static let drawerSectionGap: CGFloat = 24
+        static let drawerControlGap: CGFloat = 18
+        static let drawerPresetHeight: CGFloat = 56
+        static let drawerMacroDiameter: CGFloat = 52
+        static let drawerKnobDiameter: CGFloat = 42
+        static let drawerTabWidth: CGFloat = 24
+        static let drawerTabHeight: CGFloat = 64
+        static let drawerHandleWidth: CGFloat = 4
+        static let drawerHandleHeight: CGFloat = 40
+        static let drawerCloseSize: CGFloat = 32
+        static let fxRowHeight: CGFloat = 40
     }
 }

@@ -2,6 +2,47 @@ import XCTest
 @testable import CodaMusic
 
 final class ChordSuggestionTests: MusicTestCase {
+    func testAdditiveSuggestionsExtendTheExistingTriadAndRemainAtomicEdits() throws {
+        let v = try vocabulary()
+        let provider = RuleBasedChordSuggestions()
+        for (base, expected) in [("major", ["add9", "add11"]),
+                                 ("minor", ["minorAdd9", "minorAdd11"])] {
+            for root in 0..<12 {
+                let original = try chord(root, base, slash: (root + 7) % 12)
+                let initial = try Progression(regions: [region(chord: original)], vocabulary: v)
+                let options = try provider.suggestions(existing: original, previous: nil, key: MusicDefaults.key, vocabulary: v)
+                XCTAssertEqual(Array(options.prefix(2).map(\.chord.qualityID)), expected)
+                for option in options.prefix(2) {
+                    XCTAssertEqual(option.chord.root, original.root)
+                    XCTAssertEqual(option.chord.slashBass, original.slashBass)
+                    let baseTones = Set(try v.quality(base).intervals)
+                    let addedTones = Set(try v.quality(option.chord.qualityID).intervals)
+                    XCTAssertTrue(baseTones.isStrictSubset(of: addedTones))
+                    XCTAssertEqual(addedTones.subtracting(baseTones).count, 1)
+                    var editor = ProgressionEditor(initial)
+                    try editor.apply([.swap(id: "a", chord: option.chord)], vocabulary: v)
+                    XCTAssertEqual(editor.progression.regions[0].chord, option.chord)
+                    XCTAssertEqual(editor.progression.regions[0].start, 0)
+                    XCTAssertEqual(editor.progression.regions[0].length, 16)
+                    XCTAssertTrue(editor.undo())
+                    XCTAssertEqual(editor.progression, initial)
+                    XCTAssertFalse(editor.undo())
+                }
+            }
+        }
+    }
+
+    func testAdditiveSuggestionMetadataNeverRemovesAnExistingPitchClass() throws {
+        let v = try vocabulary()
+        for quality in v.qualities {
+            for id in quality.suggestions where id.lowercased().contains("add") {
+                let candidate = try v.quality(id)
+                XCTAssertTrue(Set(quality.intervals.map { $0 % 12 }).isSubset(of:
+                    Set(candidate.intervals.map { $0 % 12 })), "\(quality.id) -> \(id)")
+            }
+        }
+    }
+
     func testExistingSuggestionsUseVocabularyPreserveRootAndSlashAndExcludeCurrent() throws {
         let v = try vocabulary()
         let provider: any ChordSuggestionProvider = RuleBasedChordSuggestions()

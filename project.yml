@@ -218,6 +218,7 @@ targets:
       # Compile the actual editor model into the offline integration-test target.
       - path: Sources/CodaApp/CodaEditorStore.swift
       - path: Sources/CodaApp/CodaDesignTokens.swift
+      - path: Sources/CodaApp/EditorViews.swift
       - path: Sources/CodaApp/PencilInputBridge.swift
       - path: Sources/CodaMusic/Resources/vocab.json
         buildPhase: resources

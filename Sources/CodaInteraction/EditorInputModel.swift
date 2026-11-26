@@ -91,6 +91,16 @@ public struct EditorViewport: Equatable, Sendable {
         Double(topMIDI - midi) * semitoneHeight - verticalOffset
     }
 
+    /// Only intersecting rows are rendered, in keyboard order. The container
+    /// still clips partial first/last rows to its own local roll bounds.
+    public func visiblePitches(in height: Double) -> [Int] {
+        guard height.isFinite, height > 0 else { return [] }
+        return (0...127).reversed().filter {
+            let y = self.y(forMIDI: $0)
+            return y < height && y + semitoneHeight > 0
+        }
+    }
+
     public mutating func pan(horizontalBy deltaX: Double, verticalBy deltaY: Double,
                              canvasWidth: Double, canvasHeight: Double) {
         guard deltaX.isFinite, deltaY.isFinite else { return }
@@ -195,7 +205,7 @@ public struct HoldMenuLayout: Equatable, Sendable {
 }
 
 public enum RadialContext: Equatable, Sendable { case existingChord, emptyBar }
-public enum RadialRing: Equatable, Sendable { case inner, outer, major, minor, odd, roots }
+public enum RadialRing: Hashable, Sendable { case inner, outer, major, minor, odd, roots }
 
 public enum RadialIntent: Equatable, Sendable {
     case swapRoot
@@ -208,6 +218,35 @@ public enum RadialIntent: Equatable, Sendable {
     case showAll
     case changeQuality(String)
     case chooseRoot(Int)
+    case nextPage(RadialRing)
+}
+
+/// Visible tool glyphs and spoken names share stable identities. This is only
+/// presentation metadata; input authorization remains at the Pencil ingress.
+public enum ChordTool: String, CaseIterable, Sendable {
+    case swap, duplicate, copy, delete, paste, rest
+
+    public var title: String {
+        switch self {
+        case .swap: "Swap chord"
+        case .duplicate: "Duplicate"
+        case .copy: "Copy"
+        case .delete: "Delete"
+        case .paste: "Paste"
+        case .rest: "Rest"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .swap: "arrow.left.arrow.right.circle.fill"
+        case .duplicate: "plus.square.fill.on.square.fill"
+        case .copy: "doc.on.doc.fill"
+        case .delete: "trash.fill"
+        case .paste: "clipboard.fill"
+        case .rest: "pause.circle.fill"
+        }
+    }
 }
 
 public enum RadialChoiceResolver {
@@ -243,28 +282,140 @@ public enum RadialChoiceResolver {
     }
 }
 
+/// Three readable options plus one navigation slot, on every large band.
+public enum RadialPage {
+    public static let capacity = 3
+    public static func count(total: Int) -> Int { max(1, (total + capacity - 1) / capacity) }
+    public static func indices(total: Int, page: Int) -> Range<Int> {
+        let start = (max(0, page) % count(total: total)) * capacity
+        return start..<min(total, start + capacity)
+    }
+}
+
+/// Immutable placement shared by rendering and selection for the menu's lifetime.
+public struct RadialPlacement: Equatable, Sendable {
+    public let origin: CGPoint
+    public let direction: Double
+    public let scale: Double
+    public init(origin: CGPoint, direction: Double, scale: Double = 1) {
+        self.origin = origin; self.direction = direction; self.scale = scale
+    }
+    public func point(radius: Double, angle: Double) -> CGPoint {
+        CGPoint(x: origin.x + cos(angle) * radius * scale,
+                y: origin.y + sin(angle) * radius * scale)
+    }
+}
+
 public enum RadialGeometry {
+    public static let sweep = 2 * Double.pi / 3
+    public static let defaultDirection = -2 * Double.pi / 3 // 30 degrees CCW from up
+    private static let downwardDirection = Double.pi / 3 // 30 degrees CCW from down
+    public static let slotGap = 0.015
+    public static let minimumScale = 0.8
+    private static let fittingScales = [1.0, 0.9, minimumScale]
+
+    public static func angle(forSlot slot: Int, count: Int, direction: Double = defaultDirection) -> Double {
+        direction - sweep / 2 + Double(slot) * sweep / Double(max(1, count))
+    }
+
+    /// The same angular interval and gaps used by RingSlotShape. A point in
+    /// the remaining 240 degrees always cancels, including wrapped angles.
+    public static func slot(atAngle angle: Double, count: Int,
+                            direction: Double = defaultDirection) -> Int? {
+        guard angle.isFinite, count > 0 else { return nil }
+        let turn = 2 * Double.pi
+        let start = direction - sweep / 2
+        let relative = ((angle - start).truncatingRemainder(dividingBy: turn) + turn)
+            .truncatingRemainder(dividingBy: turn)
+        guard relative < sweep else { return nil }
+        let width = sweep / Double(count)
+        let index = Int(floor(relative / width))
+        let within = relative - Double(index) * width
+        guard within >= slotGap, within <= width - slotGap else { return nil }
+        return index
+    }
+
+    /// Exact occupied sector bounds: tip, endpoints, and enclosed cardinal extrema.
+    public static func bounds(direction: Double, radius: Double) -> CGRect {
+        let start = direction - sweep / 2
+        let end = direction + sweep / 2
+        var points = [CGPoint.zero,
+                      CGPoint(x: cos(start) * radius, y: sin(start) * radius),
+                      CGPoint(x: cos(end) * radius, y: sin(end) * radius)]
+        for index in -8...8 {
+            let angle = Double(index) * .pi / 2
+            if angle >= start && angle <= end {
+                points.append(CGPoint(x: cos(angle) * radius, y: sin(angle) * radius))
+            }
+        }
+        let xs = points.map(\.x), ys = points.map(\.y)
+        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+    }
+
+    public static func placement(tip: CGPoint, viewport: CGSize, outerRadius: Double,
+                                 margin: Double = 8) -> RadialPlacement {
+        let available = CGRect(origin: .zero, size: viewport).insetBy(dx: margin, dy: margin)
+        // At an exact edge, relax only the margin needed to keep the tip anchored.
+        // Displaced corner fallbacks still respect the full margin below.
+        let anchoredAvailable = CGRect(
+            x: min(available.minX, tip.x), y: min(available.minY, tip.y),
+            width: max(available.maxX, tip.x) - min(available.minX, tip.x),
+            height: max(available.maxY, tip.y) - min(available.minY, tip.y))
+        let upwardBounds = bounds(direction: defaultDirection, radius: outerRadius)
+            .offsetBy(dx: tip.x, dy: tip.y)
+        let preferred = upwardBounds.minY < anchoredAvailable.minY ? downwardDirection : defaultDirection
+        func distance(_ angle: Double) -> Double { abs(atan2(sin(angle - preferred), cos(angle - preferred))) }
+        // Fixed CCW tilt in either vertical direction; adapt only when occupied
+        // bounds require it. Equal rotations prefer CCW, independent of sort ties.
+        // Nothing recomputes this during hover/selection.
+        let directions = (-180...180).sorted {
+            abs($0) == abs($1) ? $0 < $1 : abs($0) < abs($1)
+        }.map { preferred + Double($0) * .pi / 180 }
+        for scale in fittingScales {
+            for direction in directions {
+                let box = bounds(direction: direction, radius: outerRadius * scale)
+                    .offsetBy(dx: tip.x, dy: tip.y)
+                if anchoredAvailable.contains(box) {
+                    return RadialPlacement(origin: tip, direction: direction, scale: scale)
+                }
+            }
+        }
+        // A 120-degree fan cannot fit an exact 90-degree viewport corner at its
+        // tip. Only then allow bounded scale and the smallest fitting displacement.
+        var best = RadialPlacement(origin: tip, direction: preferred)
+        var bestCost = Double.infinity
+        for scale in fittingScales {
+            for direction in directions {
+                let box = bounds(direction: direction, radius: outerRadius * scale)
+                guard box.width <= available.width, box.height <= available.height else { continue }
+                let x = min(available.maxX - box.maxX, max(available.minX - box.minX, tip.x))
+                let y = min(available.maxY - box.maxY, max(available.minY - box.minY, tip.y))
+                let cost = hypot(x - tip.x, y - tip.y) + (1 - scale) * outerRadius + distance(direction)
+                if cost < bestCost {
+                    bestCost = cost
+                    best = RadialPlacement(origin: CGPoint(x: x, y: y), direction: direction, scale: scale)
+                }
+            }
+        }
+        return best
+    }
+
     public static func ring(forRadius radius: Double,
                             rings: [(RadialRing, Double, Double)]) -> RadialRing? {
         guard radius.isFinite, radius > 0 else { return nil }
         return rings.first(where: { radius >= $0.1 && radius <= $0.2 })?.0
     }
+}
 
-    /// Slot zero starts at twelve o'clock; increasing slots advance clockwise.
-    public static func slot(atAngle angle: Double, count: Int) -> Int {
-        guard angle.isFinite, count > 0 else { return 0 }
-        let turn = (angle + .pi / 2 + 2 * .pi).truncatingRemainder(dividingBy: 2 * .pi)
-        let position = turn / (2 * .pi) * Double(count)
-        let boundary = position.rounded()
-        // Inverse angle arithmetic can put an exact boundary a few ULPs below
-        // its slot. Snap only round-off noise, preserving either side of a hit.
-        let stablePosition = abs(position - boundary) <= 4 * Double(count).ulp ? boundary : position
-        return min(count - 1, Int(floor(stablePosition)))
-    }
-
-    public static func angle(forSlot slot: Int, count: Int) -> Double {
-        guard count > 0 else { return -.pi / 2 }
-        return Double(slot) * (2 * .pi / Double(count)) - .pi / 2
+public enum AnchoredPopupLayout {
+    public static func frame(anchor: CGRect, size: CGSize, viewport: CGSize,
+                             margin: Double = 8, gap: Double = 8) -> CGRect {
+        let width = min(size.width, max(0, viewport.width - margin * 2))
+        let height = min(size.height, max(0, viewport.height - margin * 2))
+        let x = min(viewport.width - margin - width, max(margin, anchor.midX - width / 2))
+        let below = anchor.maxY + gap
+        let y = below + height <= viewport.height - margin ? below : max(margin, anchor.minY - gap - height)
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 }
 

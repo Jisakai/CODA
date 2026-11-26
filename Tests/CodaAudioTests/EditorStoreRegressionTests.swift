@@ -10,6 +10,331 @@ import CodaNative
 /// dispatch/model regressions, not a substitute for real Pencil hardware tests.
 final class EditorStoreRegressionTests: XCTestCase {
     @MainActor
+    func testRenderedFanSectorsMatchHitTestingIncludingOutsideSweep() {
+        for direction in [-Double.pi, -.pi / 3, .pi / 2] {
+            for count in [2, 3, 4] {
+                let radius = 132.0
+                let thickness = 48.0
+                let bounds = CGRect(x: 0, y: 0, width: 312, height: 312)
+                for slot in 0..<count {
+                    let path = RingSlotShape(count: count, index: slot, radius: radius,
+                                             thickness: thickness, direction: direction).path(in: bounds)
+                    for degree in 0..<360 {
+                        let angle = Double(degree) * .pi / 180 + 0.001
+                        let point = CGPoint(x: bounds.midX + cos(angle) * radius, y: bounds.midY + sin(angle) * radius)
+                        XCTAssertEqual(path.contains(point),
+                            RadialGeometry.slot(atAngle: angle, count: count, direction: direction) == slot)
+                    }
+                    XCTAssertFalse(path.contains(CGPoint(x: bounds.midX, y: bounds.midY)))
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testRadialSectorBoundsFitAcrossModesAndOrientationFreezesDuringSelection() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        for x in [CGFloat(60), 1356] {
+            store.setRootSize(CGSize(width: 1366, height: 1024))
+            let tip = CGPoint(x: x, y: store.stripTop + 20)
+            store.openSqueeze(at: tip)
+            XCTAssertEqual(store.radial?.anchor, tip)
+            for mode in [RadialMode.primary, .all] {
+                if mode == .all { store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3)) }
+                let state = try XCTUnwrap(store.radial)
+                for (_, labels, radius, thickness) in store.radialRings() {
+                    let bounds = RadialGeometry.bounds(direction: state.placement.direction,
+                        radius: (radius + thickness / 2) * state.placement.scale)
+                        .offsetBy(dx: state.center.x, dy: state.center.y)
+                    XCTAssertTrue(CGRect(origin: .zero, size: store.rootSize).contains(bounds))
+                    XCTAssertLessThanOrEqual(labels.count, 4)
+                }
+            }
+            let location = try point(store, ring: .major, slot: 0)
+            store.pencilTouchBegan(at: location)
+            let frozen = store.radial?.placement
+            store.pencilTouchMoved(to: location)
+            store.setRootSize(CGSize(width: 1194, height: 834))
+            XCTAssertEqual(store.radial?.placement, frozen)
+            store.pencilTouchCancelled()
+        }
+    }
+
+    @MainActor
+    func testAllFamilyRingChoicesDispatchTheirOriginalProductionIdentity() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        for (family, ring) in [(ChordFamily.major, RadialRing.major), (.minor, .minor), (.odd, .odd)] {
+            for index in store.qualities(for: family).indices {
+                store.openSqueeze(at: CGPoint(x: 100, y: 100))
+                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+                let expected = store.qualities(for: family)[index].id
+                store.pencilTouchEnded(at: try point(store, ring: ring, slot: index))
+                XCTAssertEqual(store.regions.first?.chord.root, 0)
+                XCTAssertEqual(store.regions.first?.chord.qualityID, expected)
+            }
+        }
+    }
+
+    @MainActor
+    func testEveryRootIsReachableThroughRealPagedSwapWithoutIntermediateEdits() throws {
+        for root in 0..<12 {
+            let store = try makeStore()
+            let session = try XCTUnwrap(store.session)
+            defer { session.suspend() }
+            let before = session.editor.progression
+            store.openSqueeze(at: CGPoint(x: 100, y: 100))
+            store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 0))
+            let rootPoint = try point(store, ring: .roots, slot: root)
+            XCTAssertEqual(session.editor.progression, before, "Paging must never edit music")
+            store.pencilTouchEnded(at: rootPoint)
+            XCTAssertEqual(session.editor.progression, before, "Choosing a draft root must remain reversible by cancel")
+            store.pencilTouchEnded(at: try point(store, ring: .minor, slot: 0))
+            XCTAssertEqual(store.regions.first?.chord.root, root)
+            try session.undo()
+            XCTAssertEqual(session.editor.progression, before)
+        }
+    }
+
+    @MainActor
+    func testInitialRollRegisterContainsProductionVoicingAndEveryVisiblePitchLabel() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        let height = Double(store.rootSize.height - store.rollTop)
+        let pitches = store.viewport.visiblePitches(in: height)
+        for region in store.regions {
+            for pitch in region.pitches { XCTAssertTrue(pitches.contains(pitch)) }
+        }
+        for (upper, lower) in zip(pitches, pitches.dropFirst()) {
+            XCTAssertEqual(upper - lower, 1)
+            XCTAssertNotEqual(store.pitchName(upper), store.pitchName(lower))
+        }
+        XCTAssertEqual(store.rollTop, 176)
+    }
+
+    @MainActor
+    func testSharedAcrylicCompositesIdenticallyOverContrastingBackdrops() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        func pixels(over backdrop: Color) throws -> [UInt8] {
+            let renderer = ImageRenderer(content: CodaAcrylic(store: store)
+                .frame(width: 32, height: 32).background(backdrop))
+            renderer.scale = 1
+            let image = try XCTUnwrap(renderer.uiImage?.cgImage)
+            var bytes = [UInt8](repeating: 0, count: 32 * 32 * 4)
+            try bytes.withUnsafeMutableBytes { storage in
+                let context = try XCTUnwrap(CGContext(data: storage.baseAddress, width: 32, height: 32,
+                    bitsPerComponent: 8, bytesPerRow: 32 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(image, in: CGRect(x: 0, y: 0, width: 32, height: 32))
+            }
+            return bytes
+        }
+        let red = try pixels(over: .red)
+        XCTAssertEqual(red, try pixels(over: .blue), "Canvas detail/color must never bleed through the material")
+        for index in stride(from: 3, to: red.count, by: 4) { XCTAssertEqual(red[index], 255) }
+    }
+
+    @MainActor
+    func testSettingsPopupBlocksMusicAndCanvasNavigationIngress() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        let tip = CGPoint(x: 100, y: 100)
+        store.popup = .keyScale
+        XCTAssertFalse(store.acceptsPencilLocation(tip))
+        XCTAssertFalse(store.beginFingerNavigation(at: CGPoint(x: 500, y: 500)))
+        store.openSqueeze(at: tip)
+        XCTAssertNil(store.radial)
+        XCTAssertEqual(store.regionCount, 1)
+    }
+
+    @MainActor
+    func testSettingsPresentationCancelsDeleteAndStalePencilOrSqueezeReleasePreservesHistory() throws {
+        for popup in [EditorPopup.appSettings, .projectSettings, .keyScale, .tempo] {
+            for activeTouch in [false, true] {
+                let store = try makeStore()
+                let session = try XCTUnwrap(store.session)
+                defer { session.suspend() }
+                try session.edit([.resize(id: "a", start: 0, length: 15)])
+                let redoProgression = session.editor.progression
+                try session.undo()
+                let original = session.editor.progression
+                store.openSqueeze(at: CGPoint(x: 100, y: 100))
+                let delete = try point(store, ring: .inner, slot: 3)
+                if activeTouch { store.pencilTouchBegan(at: delete) }
+                store.pencilHover(at: delete, rollAngle: nil)
+                XCTAssertEqual(store.radial?.selectedRing, .inner)
+                XCTAssertEqual(store.radial?.selectedSlot, 3)
+
+                store.popup = popup
+                XCTAssertNil(store.radial, "Presentation must synchronously cancel the radial")
+                XCTAssertFalse(store.hasActivePencilTouch)
+                XCTAssertNil(store.holdMenu)
+                XCTAssertNil(store.resizeDraft)
+                XCTAssertNil(store.radialPreview)
+                if activeTouch {
+                    store.pencilTouchEnded(at: delete)
+                    store.finishSqueeze(at: delete)
+                } else {
+                    store.finishSqueeze(at: delete)
+                    store.pencilTouchEnded(at: delete)
+                }
+                // Already queued events can also arrive after presentation.
+                store.pencilTouchBegan(at: CGPoint(x: 400, y: 100))
+                store.pencilTouchMoved(to: delete)
+                store.pencilHover(at: delete, rollAngle: nil)
+                store.pencilTouchEnded(at: CGPoint(x: 400, y: 100))
+                XCTAssertFalse(store.hasActivePencilTouch)
+                XCTAssertNil(store.radial)
+                XCTAssertEqual(store.popup, popup)
+                XCTAssertEqual(store.regionCount, 1)
+                XCTAssertEqual(session.editor.progression, original)
+                XCTAssertTrue(store.canUndo)
+                XCTAssertTrue(store.canRedo)
+
+                // Traverse the real stacks; flags alone cannot detect an extra entry.
+                try session.undo()
+                XCTAssertTrue(store.regions.isEmpty)
+                XCTAssertFalse(store.canUndo)
+                try session.redo()
+                XCTAssertEqual(session.editor.progression, original)
+                try session.redo()
+                XCTAssertEqual(session.editor.progression, redoProgression)
+                XCTAssertFalse(store.canRedo)
+                XCTAssertEqual(store.popup, popup)
+
+                store.setTempo(130)
+                store.setKey(tonic: 7, mode: .major)
+                XCTAssertEqual(store.tempo, 130)
+                XCTAssertEqual(store.key.tonic, 7)
+                XCTAssertEqual(store.key.mode, .major)
+                store.popup = nil
+                store.openSqueeze(at: CGPoint(x: 100, y: 100))
+                store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 3))
+                XCTAssertEqual(store.regionCount, 0, "Ordinary Pencil Delete must work after dismissal")
+                try session.undo()
+                XCTAssertEqual(session.editor.progression, redoProgression)
+            }
+        }
+    }
+
+    @MainActor
+    func testSettingsPresentationCancelsPendingPreviewAndHoldWork() async throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let original = session.editor.progression
+        store.openSqueeze(at: CGPoint(x: 100, y: 100))
+        store.pencilHover(at: try point(store, ring: .outer, slot: 0), rollAngle: nil)
+        XCTAssertNotNil(store.radialPreview)
+        store.popup = .appSettings // Cancel before the queued preview task can run.
+        XCTAssertNil(store.radialPreview)
+        XCTAssertNil(store.radial)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(session.available, "A cancelled pending preview must not open audio behind settings")
+        store.popup = nil
+        store.pencilTouchBegan(at: CGPoint(x: 100, y: 100))
+        XCTAssertTrue(store.hasActivePencilTouch)
+        store.popup = .projectSettings
+        XCTAssertFalse(store.hasActivePencilTouch)
+        try await Task.sleep(for: .seconds(CodaDesignTokens.Input.holdDuration + 0.05))
+        XCTAssertNil(store.holdMenu, "Cancelled hold work cannot present behind settings")
+        XCTAssertEqual(store.popup, .projectSettings)
+        XCTAssertEqual(session.editor.progression, original)
+    }
+
+    @MainActor
+    func testSettingsPresentationCancelsResizeHoldAndKnobResetDrafts() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let original = session.editor.progression
+        let edge = CGPoint(x: 56 + store.viewport.x(forStep: 15.8, in: Double(store.contentWidth)), y: 100)
+        let end = CGPoint(x: 56 + store.viewport.x(forStep: 23.5, in: Double(store.contentWidth)), y: 100)
+        store.pencilTouchBegan(at: edge)
+        store.pencilTouchMoved(to: end)
+        XCTAssertEqual(store.resizeDraft?.end, 24)
+        store.popup = .tempo
+        XCTAssertNil(store.resizeDraft)
+        store.pencilTouchEnded(at: end)
+        XCTAssertEqual(session.editor.progression, original)
+        store.popup = nil
+        store.holdMenu = HoldMenuState(regionID: "a", origin: CGPoint(x: 100, y: 100), selectedIndex: 2)
+        let frame = try XCTUnwrap(store.holdMenuLayout?.frame)
+        let delete = CGPoint(x: frame.midX, y: frame.minY + 102)
+        store.popup = .keyScale
+        XCTAssertNil(store.holdMenu)
+        store.pencilTouchEnded(at: delete)
+        XCTAssertEqual(session.editor.progression, original)
+        store.popup = nil
+        store.openKnobReset(.cutoff, at: CGPoint(x: 1200, y: 700))
+        store.knobResetSelected = true
+        store.popup = .appSettings
+        XCTAssertNil(store.knobReset)
+        XCTAssertFalse(store.knobResetSelected)
+        store.finishSqueeze(at: nil)
+        XCTAssertEqual(store.popup, .appSettings)
+        XCTAssertEqual(session.editor.progression, original)
+    }
+
+    @MainActor
+    func testInitialSqueezeReleaseAndStationaryHoverCannotActivateClampedTools() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        let before = store.session?.editor.progression
+        let tip = CGPoint(x: 100, y: 100)
+        store.openSqueeze(at: tip)
+        store.pencilHover(at: tip, rollAngle: nil)
+        XCTAssertNil(store.radial?.selectedSlot)
+        store.finishSqueeze(at: tip)
+        XCTAssertNotNil(store.radial, "Opening squeeze release should leave the menu available")
+        XCTAssertEqual(store.session?.editor.progression, before)
+        store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 3))
+        XCTAssertEqual(store.regionCount, 0, "Deliberately lifting on Delete still works")
+    }
+
+    @MainActor
+    func testDrawerCoversStripAndRollButCannotEditCoveredMusic() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.drawerOpen = true
+        XCTAssertEqual(store.drawerTop, 72)
+        XCTAssertEqual(store.synthTop, store.drawerTop + (store.rootSize.height - store.drawerTop) / 2)
+        let hiddenBar = CGPoint(x: store.rootSize.width - 30, y: store.stripTop + 20)
+        XCTAssertFalse(store.acceptsPencilLocation(hiddenBar))
+        store.pencilTouchBegan(at: hiddenBar)
+        store.pencilTouchEnded(at: hiddenBar)
+        store.openSqueeze(at: hiddenBar)
+        XCTAssertNil(store.radial)
+        XCTAssertEqual(store.regionCount, 1)
+    }
+
+    @MainActor
+    func testDraggingChordBodyDoesNotMoveItAndRightEdgeStillResizesOnce() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let before = session.editor.progression
+        let body = CGPoint(x: 100, y: 100)
+        store.pencilTouchBegan(at: body)
+        store.pencilTouchMoved(to: CGPoint(x: 400, y: 100))
+        store.pencilTouchEnded(at: CGPoint(x: 400, y: 100))
+        XCTAssertEqual(session.editor.progression, before)
+        let width = Double(store.contentWidth)
+        let edge = CGPoint(x: 56 + store.viewport.x(forStep: 15.8, in: width), y: 100)
+        store.pencilTouchBegan(at: edge)
+        for step in [18.5, 20.5, 23.5] {
+            store.pencilTouchMoved(to: CGPoint(x: 56 + store.viewport.x(forStep: step, in: width), y: 100))
+        }
+        store.pencilTouchEnded(at: CGPoint(x: 56 + store.viewport.x(forStep: 23.5, in: width), y: 100))
+        XCTAssertEqual(store.regions.first?.start, 0)
+        XCTAssertEqual(store.regions.first?.length, 24)
+        try session.undo()
+        XCTAssertEqual(session.editor.progression, before, "One undo must restore the whole resize drag")
+    }
+
+    @MainActor
     func testPencilCoordinatorImplementsTheActualOptionalSqueezeSelector() throws {
         let store = try makeStore()
         defer { store.session?.suspend() }
@@ -30,11 +355,22 @@ final class EditorStoreRegressionTests: XCTestCase {
 
     @MainActor
     private func point(_ store: CodaEditorStore, ring: RadialRing, slot: Int) throws -> CGPoint {
+        if ring == .roots || ring == .major || ring == .minor || ring == .odd {
+            let desiredPage = slot / RadialPage.capacity
+            while store.radial?.pages[ring, default: 0] != desiredPage {
+                let state = try XCTUnwrap(store.radial)
+                let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
+                let angle = RadialGeometry.angle(forSlot: layout.1.count - 1, count: layout.1.count,
+                    direction: state.placement.direction) + RadialGeometry.sweep / Double(layout.1.count) / 2
+                store.pencilTouchEnded(at: state.placement.point(radius: layout.2, angle: angle))
+            }
+        }
         let state = try XCTUnwrap(store.radial)
         let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
-        let angle = RadialGeometry.angle(forSlot: slot, count: layout.1.count) + .pi / Double(layout.1.count)
-        return CGPoint(x: state.center.x + cos(angle) * layout.2,
-                       y: state.center.y + sin(angle) * layout.2)
+        let localSlot = ring == .inner || ring == .outer ? slot : slot % RadialPage.capacity
+        let angle = RadialGeometry.angle(forSlot: localSlot, count: layout.1.count,
+            direction: state.placement.direction) + RadialGeometry.sweep / Double(layout.1.count) / 2
+        return state.placement.point(radius: layout.2, angle: angle)
     }
 
     @MainActor
@@ -157,12 +493,13 @@ final class EditorStoreRegressionTests: XCTestCase {
         store.drawerOpen = true
         store.fxExpanded = true
         let x = store.rootSize.width - 200
-        store.knobFrames = [.cutoff: CGRect(x: x, y: 400, width: 42, height: 42)]
-        XCTAssertEqual(store.knob(at: CGPoint(x: x + 21, y: 421)), .cutoff)
+        let visibleY = store.synthTop + 80
+        store.knobFrames = [.cutoff: CGRect(x: x, y: visibleY, width: 42, height: 42)]
+        XCTAssertEqual(store.knob(at: CGPoint(x: x + 21, y: visibleY + 21)), .cutoff)
         // The same screen location now contains Reverb after drawer scrolling.
         store.knobFrames = [.cutoff: CGRect(x: x, y: 100, width: 42, height: 42),
-                            .reverb: CGRect(x: x, y: 400, width: 42, height: 42)]
-        let at = CGPoint(x: x + 21, y: 421)
+                            .reverb: CGRect(x: x, y: visibleY, width: 42, height: 42)]
+        let at = CGPoint(x: x + 21, y: visibleY + 21)
         XCTAssertEqual(store.knob(at: at), .reverb)
         XCTAssertNil(store.knob(at: CGPoint(x: x + 21, y: 121)), "Clipped controls cannot receive Pencil input")
         let cutoff = store.value(for: .cutoff)
@@ -177,6 +514,10 @@ final class EditorStoreRegressionTests: XCTestCase {
         XCTAssertEqual(store.value(for: .reverb), store.presetDefault(for: .reverb), accuracy: 1e-6)
         store.fxExpanded = false
         XCTAssertNil(store.knob(at: at))
+        store.fxExpanded = true
+        store.chromeHidden = true
+        XCTAssertNil(store.knob(at: at), "A hidden drawer cannot receive barrel roll or reset")
+        store.chromeHidden = false
         store.drawerOpen = false
         XCTAssertNil(store.knob(at: at))
     }

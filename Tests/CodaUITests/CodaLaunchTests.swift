@@ -135,26 +135,43 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
-        app.buttons["top.drawer"].tap()
+        XCTAssertTrue(app.buttons["drawer.pullTab"].waitForExistence(timeout: 10))
+        app.buttons["drawer.pullTab"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["editor.synthDrawer"].waitForExistence(timeout: 5))
         let drawer = app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.frame
         let window = app.windows.firstMatch.frame
-        XCTAssertEqual(drawer.minY, window.minY + 52 + 20 + 104, accuracy: 1)
+        XCTAssertEqual(drawer.minY, window.minY + 52 + 20, accuracy: 1)
         XCTAssertEqual(drawer.maxX, window.maxX, accuracy: 1)
         XCTAssertEqual(drawer.maxY, window.maxY, accuracy: 1)
+        XCTAssertFalse(app.buttons["top.drawer"].exists)
+        XCTAssertEqual(app.buttons["drawer.fxMix"].value as? String, "collapsed")
         for index in 0...2 {
             let preset = app.buttons["drawer.preset.\(index)"]
             XCTAssertTrue(preset.exists)
             preset.tap()
             XCTAssertEqual(preset.value as? String, "selected")
         }
-        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.cutoff"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.resonance"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.shape"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.detune"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.glide"].exists)
         attachScreenshot(named: "M1-synth-drawer", from: app)
+        let synth = app.scrollViews["drawer.synthScroll"].frame
+        XCTAssertEqual(synth.minY, drawer.minY + drawer.height / 2, accuracy: 1)
+        for knob in ["cutoff", "resonance", "shape", "detune", "glide"] {
+            let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
+            revealDrawerElement(control, in: app)
+            XCTAssertTrue(control.exists)
+            XCTAssertTrue(synth.contains(control.frame), "All five controls must be reachable in the lower half")
+        }
+        let fx = app.buttons["drawer.fxMix"]
+        revealDrawerElement(fx, in: app)
+        fx.tap()
+        XCTAssertEqual(fx.value as? String, "expanded")
+        for knob in ["delay", "reverb", "chordLevel"] {
+            let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
+            revealDrawerElement(control, in: app)
+            XCTAssertTrue(synth.contains(control.frame))
+        }
+        // One persistent tab closes even after the lower area has scrolled.
+        app.buttons["drawer.pullTab"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["editor.synthDrawer"].exists)
     }
 
     @MainActor
@@ -188,13 +205,13 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        XCTAssertTrue(app.buttons["top.drawer"].waitForExistence(timeout: 10))
-        app.buttons["top.drawer"].tap()
+        XCTAssertTrue(app.buttons["drawer.pullTab"].waitForExistence(timeout: 10))
+        app.buttons["drawer.pullTab"].tap()
         XCTAssertTrue(app.buttons["drawer.preset.0"].waitForExistence(timeout: 5))
         let knobs = ["wobble", "warmth", "cutoff", "resonance", "shape", "detune", "glide"]
         for preset in 0...2 {
+            revealDrawerElement(app.buttons["drawer.preset.\(preset)"], in: app)
             app.buttons["drawer.preset.\(preset)"].tap()
-            let snapshot = try app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.snapshot()
             func find(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
                 if node.identifier == identifier { return node }
                 for child in node.children {
@@ -203,6 +220,8 @@ final class CodaLaunchTests: XCTestCase {
                 return nil
             }
             for knob in knobs {
+                revealDrawerElement(app.descendants(matching: .any)["drawer.knob.dial.\(knob)"].firstMatch, in: app)
+                let snapshot = try app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.snapshot()
                 let control = find("drawer.knob.\(knob)", in: snapshot)
                 let dial = find("drawer.knob.dial.\(knob)", in: snapshot)
                 let dot = find("drawer.knob.dot.\(knob)", in: snapshot)
@@ -226,6 +245,7 @@ final class CodaLaunchTests: XCTestCase {
             }
         }
         let dial = app.descendants(matching: .any)["drawer.knob.dial.cutoff"].firstMatch
+        revealDrawerElement(dial, in: app)
         let readout = app.staticTexts["drawer.knob.readout.cutoff"]
         let before = readout.label
         let center = dial.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -282,9 +302,9 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [restoredMute], timeout: 2), .completed)
 
         for index in 0...2 {
-            app.buttons["top.drawer"].tap()
+            app.buttons["drawer.pullTab"].tap()
             app.buttons["drawer.preset.\(index)"].tap()
-            app.buttons["drawer.close"].tap()
+            app.buttons["drawer.pullTab"].tap()
             play.tap()
             XCTAssertEqual(play.value as? String, "playing")
             XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, "available")
@@ -302,6 +322,75 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["radial.menu.all"].waitForExistence(timeout: 5))
         attachScreenshot(named: "M1-radial-edge-fixture", from: app)
+    }
+
+    @MainActor
+    func testEverySettingsPopupStaysNearItsOwnInvokingControl() {
+        let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
+        launchAndDescribe(app)
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        for (controlID, surface) in [("top.appSettings", "appSettings"),
+                                     ("top.projectSettings", "projectSettings"),
+                                     ("top.keyScale", "keyScale"), ("top.tempo", "tempo")] {
+            let control = app.descendants(matching: .any)[controlID].firstMatch
+            XCTAssertTrue(control.exists)
+            let source = control.frame
+            control.tap()
+            let popup = app.descendants(matching: .any)["settings.popup.\(surface)"].firstMatch
+            XCTAssertTrue(popup.waitForExistence(timeout: 5))
+            let frame = popup.frame
+            XCTAssertTrue(window.contains(frame), "\(surface) must fit the landscape viewport")
+            XCTAssertGreaterThanOrEqual(frame.minY, source.maxY)
+            XCTAssertLessThan(frame.minY - source.maxY, 48)
+            XCTAssertGreaterThanOrEqual(source.midX, frame.minX - 24)
+            XCTAssertLessThanOrEqual(source.midX, frame.maxX + 24)
+            app.buttons["top.play"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertFalse(popup.exists)
+        }
+    }
+
+    @MainActor
+    func testKeyboardRowsStayBelowChromeAndFollowSemitoneRegister() {
+        let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
+        app.launchArguments = ["--coda-ui-fixture-four-bar"]
+        launchAndDescribe(app)
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch.frame
+        let rollTop = window.minY + 52 + 20 + 104
+        for midi in 65...76 {
+            let label = app.staticTexts["roll.pitch.\(midi)"]
+            XCTAssertTrue(label.exists, "Every semitone needs a keyboard label")
+            XCTAssertGreaterThanOrEqual(label.frame.minY, rollTop)
+            XCTAssertEqual(label.frame.midY, rollTop + CGFloat(76 - midi) * 22 + 11, accuracy: 1)
+            XCTAssertLessThanOrEqual(label.frame.maxX, window.minX + 56)
+        }
+        XCTAssertEqual(app.staticTexts["roll.pitch.76"].label, "E5")
+        XCTAssertEqual(app.staticTexts["roll.pitch.75"].label, "D\u{266F}5")
+        XCTAssertEqual(app.staticTexts["roll.pitch.65"].label, "F4")
+        XCTAssertFalse(app.staticTexts["roll.pitch.96"].exists, "Offscreen C labels must not enter the chrome")
+        let roll = app.descendants(matching: .any)["editor.pianoRoll"].firstMatch
+        XCTAssertEqual(roll.frame.minY, rollTop, accuracy: 1)
+        XCTAssertEqual(roll.frame.maxY, window.maxY, accuracy: 1)
+    }
+
+    @MainActor
+    private func revealDrawerElement(_ element: XCUIElement, in app: XCUIApplication,
+                                     file: StaticString = #filePath, line: UInt = #line) {
+        let scroll = app.scrollViews["drawer.synthScroll"]
+        XCTAssertTrue(scroll.exists, file: file, line: line)
+        for _ in 0..<8 {
+            let bounds = scroll.frame
+            if element.exists && bounds.contains(element.frame) && element.isHittable { return }
+            let above = element.exists && element.frame.minY < bounds.minY
+            // Drag in the outer padding so navigating does not turn a knob.
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: above ? 0.2 : 0.85))
+                .press(forDuration: 0.05, thenDragTo:
+                    scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: above ? 0.85 : 0.2)))
+        }
+        XCTFail("Drawer control must be scrollable into view: \(element.identifier)", file: file, line: line)
     }
 
     @MainActor
