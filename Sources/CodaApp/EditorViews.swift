@@ -877,7 +877,9 @@ private struct EditorSettingsPopover: View {
     let popup: EditorPopup
 
     var body: some View {
-        Group {
+        // Keep a concrete container for the popup identifier. Group is
+        // structurally flattened and does not reliably expose its own AX node.
+        ZStack(alignment: .topLeading) {
             switch popup {
             case .appSettings:
                 VStack(alignment: .leading, spacing: 12) {

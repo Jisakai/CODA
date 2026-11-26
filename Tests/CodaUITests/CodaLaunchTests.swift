@@ -331,15 +331,23 @@ final class CodaLaunchTests: XCTestCase {
         launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         let window = app.windows.firstMatch.frame
-        for (controlID, surface) in [("top.appSettings", "appSettings"),
-                                     ("top.projectSettings", "projectSettings"),
-                                     ("top.keyScale", "keyScale"), ("top.tempo", "tempo")] {
+        for (controlID, surface, childID) in [("top.appSettings", "appSettings", "settings.chordDetails"),
+                                               ("top.projectSettings", "projectSettings", "settings.loopLength"),
+                                               ("top.keyScale", "keyScale", "settings.key.0"),
+                                               ("top.tempo", "tempo", "settings.tempoField")] {
             let control = app.descendants(matching: .any)[controlID].firstMatch
             XCTAssertTrue(control.exists)
             let source = control.frame
             control.tap()
             let popup = app.descendants(matching: .any)["settings.popup.\(surface)"].firstMatch
-            XCTAssertTrue(popup.waitForExistence(timeout: 5))
+            let popupAppeared = popup.waitForExistence(timeout: 5)
+            let popupChild = app.descendants(matching: .any)[childID].firstMatch
+            if !popupAppeared || !popupChild.exists {
+                attachSettingsPopupDiagnostics(from: app, surface: surface,
+                                               expectedChild: childID, popupAppeared: popupAppeared)
+            }
+            XCTAssertTrue(popupAppeared, "Expected a concrete accessibility container for \(surface)")
+            XCTAssertTrue(popupChild.exists, "Expected \(surface) to preserve child identifier \(childID)")
             let frame = popup.frame
             XCTAssertTrue(window.contains(frame), "\(surface) must fit the landscape viewport")
             XCTAssertGreaterThanOrEqual(frame.minY, source.maxY)
@@ -349,6 +357,27 @@ final class CodaLaunchTests: XCTestCase {
             app.buttons["top.play"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             XCTAssertFalse(popup.exists)
         }
+    }
+
+    @MainActor
+    private func attachSettingsPopupDiagnostics(from app: XCUIApplication, surface: String,
+                                                expectedChild: String, popupAppeared: Bool) {
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "M1-settings-\(surface)-before-assertion.png"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let report = """
+        Surface: \(surface)
+        Popup AX container found: \(popupAppeared)
+        Expected child: \(expectedChild)
+
+        \(app.debugDescription)
+        """
+        let hierarchy = XCTAttachment(string: report)
+        hierarchy.name = "M1-settings-\(surface)-AX-before-assertion.txt"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
     }
 
     @MainActor
