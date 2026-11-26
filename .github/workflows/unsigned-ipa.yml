@@ -161,6 +161,28 @@ jobs:
             build/artifacts/ui-screenshots/M1-synth-drawer.png
             build/artifacts/ui-screenshots/M1-radial-edge-fixture.png
             build/artifacts/ui-screenshots/M1-diagnostic-*.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-center-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-center-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-left-padding-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-left-padding-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-bottom-padding-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-coordinate-bottom-padding-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-appSettings-invoking-control-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-invoking-control-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-center-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-center-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-left-padding-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-left-padding-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-bottom-padding-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-coordinate-bottom-padding-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-invoking-control-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-invoking-control-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-keyScale-invoking-control-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-keyScale-invoking-control-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-mute-restore-before-assertion.png
+            build/artifacts/ui-screenshots/M1-mute-restore-AX-before-assertion.txt
           if-no-files-found: error
           retention-days: 7
 

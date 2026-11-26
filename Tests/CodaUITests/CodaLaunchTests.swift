@@ -294,12 +294,19 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 10))
         let mute = app.buttons["top.chordMute"]
         let initialMute = mute.value as? String
+        print("M1 default mute first tap: frame=\(mute.frame) hittable=\(mute.isHittable) value=\(initialMute ?? "nil")")
         mute.tap()
         XCTAssertNotEqual(mute.value as? String, initialMute)
+        print("M1 default mute restore tap: frame=\(mute.frame) hittable=\(mute.isHittable) value=\(mute.value ?? "nil")")
         mute.tap()
         let restoredMute = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", initialMute ?? ""), object: mute)
-        XCTAssertEqual(XCTWaiter.wait(for: [restoredMute], timeout: 2), .completed)
+        let restoreResult = XCTWaiter.wait(for: [restoredMute], timeout: 2)
+        if restoreResult != .completed {
+            attachControlFailure(from: app, name: "M1-mute-restore",
+                                 report: "Initial mute: \(initialMute ?? "nil")\nCurrent: \(mute.debugDescription)")
+        }
+        XCTAssertEqual(restoreResult, .completed)
 
         for index in 0...2 {
             app.buttons["drawer.pullTab"].tap()
@@ -325,6 +332,34 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
+    func testSettingsIconCenterAndPaddingPresentProductionPopups() {
+        let app = XCUIApplication()
+        defer { attachDiagnostics(from: app) }
+        launchAndDescribe(app)
+        for surface in ["appSettings", "projectSettings"] {
+            let control = app.buttons["top.\(surface)"]
+            XCTAssertTrue(control.exists)
+            XCTAssertEqual(control.frame.width, 32, accuracy: 1)
+            XCTAssertEqual(control.frame.height, 32, accuracy: 1)
+            for (context, point) in [("coordinate-center", CGVector(dx: 0.5, dy: 0.5)),
+                                     ("coordinate-left-padding", CGVector(dx: 0.125, dy: 0.5)),
+                                     ("coordinate-bottom-padding", CGVector(dx: 0.5, dy: 0.875))] {
+                XCTAssertTrue(control.isHittable)
+                control.coordinate(withNormalizedOffset: point).tap()
+                let popup = app.descendants(matching: .any)["settings.popup.\(surface)"].firstMatch
+                let appeared = popup.waitForExistence(timeout: 5)
+                if !appeared {
+                    attachSettingsPopupDiagnostics(from: app, surface: surface, context: context,
+                                                   expectedChild: "popup after coordinate tap \(point)", popupAppeared: appeared)
+                }
+                XCTAssertTrue(appeared, "One tap at \(point) must present \(surface)")
+                app.buttons["top.play"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                XCTAssertFalse(popup.exists)
+            }
+        }
+    }
+
+    @MainActor
     func testEverySettingsPopupStaysNearItsOwnInvokingControl() {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
@@ -338,12 +373,13 @@ final class CodaLaunchTests: XCTestCase {
             let control = app.descendants(matching: .any)[controlID].firstMatch
             XCTAssertTrue(control.exists)
             let source = control.frame
+            print("M1 settings tap: id=\(controlID) frame=\(source) hittable=\(control.isHittable)")
             control.tap()
             let popup = app.descendants(matching: .any)["settings.popup.\(surface)"].firstMatch
             let popupAppeared = popup.waitForExistence(timeout: 5)
             let popupChild = app.descendants(matching: .any)[childID].firstMatch
             if !popupAppeared || !popupChild.exists {
-                attachSettingsPopupDiagnostics(from: app, surface: surface,
+                attachSettingsPopupDiagnostics(from: app, surface: surface, context: "invoking-control",
                                                expectedChild: childID, popupAppeared: popupAppeared)
             }
             XCTAssertTrue(popupAppeared, "Expected a concrete accessibility container for \(surface)")
@@ -360,22 +396,26 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
-    private func attachSettingsPopupDiagnostics(from app: XCUIApplication, surface: String,
+    private func attachSettingsPopupDiagnostics(from app: XCUIApplication, surface: String, context: String,
                                                 expectedChild: String, popupAppeared: Bool) {
+        attachControlFailure(from: app, name: "M1-settings-\(surface)-\(context)", report: """
+        Surface: \(surface)
+        Capture context: \(context)
+        Popup AX container found: \(popupAppeared)
+        Expected child: \(expectedChild)
+        """)
+    }
+
+    @MainActor
+    private func attachControlFailure(from app: XCUIApplication, name: String, report: String) {
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "M1-settings-\(surface)-before-assertion.png"
+        screenshot.name = "\(name)-before-assertion.png"
         screenshot.lifetime = .keepAlways
         add(screenshot)
 
-        let report = """
-        Surface: \(surface)
-        Popup AX container found: \(popupAppeared)
-        Expected child: \(expectedChild)
-
-        \(app.debugDescription)
-        """
-        let hierarchy = XCTAttachment(string: report)
-        hierarchy.name = "M1-settings-\(surface)-AX-before-assertion.txt"
+        let events = app.staticTexts["editor.uiDiagnostics"].value as? String ?? "UI event readout missing"
+        let hierarchy = XCTAttachment(string: "\(report)\n\nProduction UI events:\n\(events)\n\n\(app.debugDescription)")
+        hierarchy.name = "\(name)-AX-before-assertion.txt"
         hierarchy.lifetime = .keepAlways
         add(hierarchy)
     }

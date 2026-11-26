@@ -1,4 +1,4 @@
-"""Copy allowlisted review and per-test diagnostic PNGs from an xcresult export."""
+"""Copy only named, bounded review images and failure reports from an xcresult export."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import json
 import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 EXPECTED = (
@@ -16,6 +16,7 @@ EXPECTED = (
     "M1-radial-edge-fixture.png",
 )
 MAX_BYTES = 2 * 1024 * 1024
+MAX_TEXT_BYTES = 256 * 1024
 DIAGNOSTICS = tuple(
     f"M1-diagnostic-{test}.png"
     for test in (
@@ -26,8 +27,26 @@ DIAGNOSTICS = tuple(
         "testDrawerAndAllThreeProductionPresetsAreReachable",
         "testActualSessionPlayPauseAndChordMuteControls",
         "testEdgePositionedAllQualityRadialScreenshotFixture",
+        "testSettingsIconCenterAndPaddingPresentProductionPopups",
+        "testEverySettingsPopupStaysNearItsOwnInvokingControl",
     )
 )
+SETTINGS_DIAGNOSTICS = tuple(
+    f"M1-settings-{surface}-{context}-{suffix}"
+    for surface, contexts in (
+        ("appSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control")),
+        ("projectSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control")),
+        ("keyScale", ("invoking-control",)),
+        ("tempo", ("invoking-control",)),
+    )
+    for context in contexts
+    for suffix in ("before-assertion.png", "AX-before-assertion.txt")
+)
+MUTE_DIAGNOSTICS = (
+    "M1-mute-restore-before-assertion.png",
+    "M1-mute-restore-AX-before-assertion.txt",
+)
+ALLOWLIST = (*EXPECTED, *DIAGNOSTICS, *SETTINGS_DIAGNOSTICS, *MUTE_DIAGNOSTICS)
 
 
 def exported_name(value: str) -> str:
@@ -35,18 +54,30 @@ def exported_name(value: str) -> str:
 
 
 def matches_expected_label(label: str, expected: str) -> bool:
+    if expected not in ALLOWLIST:
+        return False
     if exported_name(label) == expected:
         return True
-    if expected not in (*EXPECTED, *DIAGNOSTICS):
-        return False
-    stem = re.escape(expected.removesuffix(".png"))
-    return re.fullmatch(rf"{stem}_[0-9]+_[0-9A-Fa-f]{{8}}(?:-[0-9A-Fa-f]{{4}}){{3}}-[0-9A-Fa-f]{{12}}\.png",
+    stem = re.escape(Path(expected).stem)
+    suffix = re.escape(Path(expected).suffix)
+    return re.fullmatch(rf"{stem}_[0-9]+_[0-9A-Fa-f]{{8}}(?:-[0-9A-Fa-f]{{4}}){{3}}-[0-9A-Fa-f]{{12}}{suffix}",
                         exported_name(label)) is not None
 
 
+def safe_payload(source: Path, parent: Path, filename: str) -> Path:
+    relative = PurePosixPath(filename.replace("\\", "/"))
+    if relative.is_absolute() or PureWindowsPath(filename).drive or ".." in relative.parts:
+        raise ValueError(f"unsafe attachment path: {filename}")
+    path = parent.joinpath(*relative.parts)
+    if not path.resolve().is_relative_to(source.resolve()) or path.is_symlink():
+        raise ValueError(f"attachment escapes export directory or is a symlink: {filename}")
+    return path
+
+
 def manifest_candidates(source: Path) -> dict[str, set[str]]:
-    matches = {name: set() for name in (*EXPECTED, *DIAGNOSTICS)}
+    matches = {name: set() for name in ALLOWLIST}
     for manifest in source.rglob("manifest.json"):
+        safe_payload(source, manifest.parent, manifest.name)
         try:
             data = json.loads(manifest.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -76,7 +107,8 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
                 for expected in matches:
                     if any(matches_expected_label(label, expected) for label in labels):
                         for filename in exported:
-                            matches[expected].add(exported_name(filename))
+                            path = safe_payload(source, manifest.parent, filename)
+                            matches[expected].add(path.relative_to(source).as_posix())
                 for child in node.values():
                     visit(child, tuple(labels))
             elif isinstance(node, list):
@@ -88,15 +120,35 @@ def manifest_candidates(source: Path) -> dict[str, set[str]]:
 
 
 def locate(source: Path, expected: str, aliases: set[str]) -> Path | None:
-    names = {expected, *aliases}
-    files = [path for path in source.rglob("*") if path.is_file()]
-    for path in files:
-        if path.name in names:
-            return path
-    for path in files:
-        if path.suffix.lower() == ".png" and any(path.name.endswith(name) for name in names):
-            return path
-    return None
+    candidates = {safe_payload(source, source, alias) for alias in aliases}
+    candidates.update(path for path in source.rglob(expected) if path.is_file())
+    files = []
+    for path in candidates:
+        safe_payload(source, path.parent, path.name)
+        if path.is_file():
+            files.append(path)
+    if len(files) > 1:
+        raise ValueError(f"ambiguous named attachment: {expected}")
+    return files[0] if files else None
+
+
+def validate_attachment(path: Path, expected: str) -> None:
+    size = path.stat().st_size
+    if expected.endswith(".txt"):
+        if not 0 < size <= MAX_TEXT_BYTES:
+            raise ValueError(f"text attachment size is outside the 256 KiB limit: {path.name}")
+        try:
+            report = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError(f"attachment is not UTF-8 text: {path.name}") from error
+        if "\x00" in report:
+            raise ValueError(f"attachment contains binary NUL: {path.name}")
+    else:
+        if not 8 < size <= MAX_BYTES:
+            raise ValueError(f"screenshot size is outside the 2 MiB limit: {path.name} ({size} bytes)")
+        with path.open("rb") as image:
+            if image.read(8) != b"\x89PNG\r\n\x1a\n":
+                raise ValueError(f"attachment is not a PNG: {path.name}")
 
 
 def main() -> int:
@@ -109,7 +161,10 @@ def main() -> int:
     if not args.source.is_dir():
         parser.error(f"xcresult attachment export is missing: {args.source}")
 
-    aliases = manifest_candidates(args.source)
+    try:
+        aliases = manifest_candidates(args.source)
+    except ValueError as error:
+        parser.error(str(error))
     manifests = sorted(args.source.rglob("manifest.json"))
     exported_files = sorted(path.name for path in args.source.rglob("*") if path.is_file())
     print(f"xcresult manifests: {len(manifests)}; exported files: {len(exported_files)}")
@@ -121,21 +176,22 @@ def main() -> int:
         except (OSError, json.JSONDecodeError):
             count = 0
         print(f"manifest {manifest.relative_to(args.source)}: {count} attachment entries")
-    print("exported filenames: " + (", ".join(exported_files) if exported_files else "(none)"))
     args.destination.mkdir(parents=True, exist_ok=True)
     missing = []
-    for expected in (*EXPECTED, *DIAGNOSTICS):
-        source = locate(args.source, expected, aliases[expected])
+    for expected in ALLOWLIST:
+        try:
+            source = locate(args.source, expected, aliases[expected])
+            if source is not None:
+                validate_attachment(source, expected)
+        except ValueError as error:
+            parser.error(str(error))
         if source is None:
             if expected in EXPECTED and not args.allow_missing_review:
                 missing.append(expected)
             continue
-        size = source.stat().st_size
-        if size <= 8 or size > MAX_BYTES:
-            parser.error(f"screenshot size is outside the 2 MiB limit: {source.name} ({size} bytes)")
-        with source.open("rb") as image:
-            if image.read(8) != b"\x89PNG\r\n\x1a\n":
-                parser.error(f"attachment is not a PNG: {source.name}")
+        target = args.destination / expected
+        if target.is_symlink() or not target.resolve().is_relative_to(args.destination.resolve()):
+            parser.error(f"unsafe attachment destination: {expected}")
         shutil.copyfile(source, args.destination / expected)
     if missing:
         parser.error(f"required named UI attachments were not exported: {', '.join(missing)}")

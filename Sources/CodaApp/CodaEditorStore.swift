@@ -90,6 +90,7 @@ final class CodaEditorStore {
             // Retire in-flight Pencil work before the modal becomes visible.
             if newValue != nil { pencilTouchCancelled() }
         }
+        didSet { recordUIEvent("popup.state \(oldValue?.rawValue ?? "nil")->\(popup?.rawValue ?? "nil")") }
     }
     var detailsVisible = false
     var drawerOpen = false
@@ -139,9 +140,50 @@ final class CodaEditorStore {
     @ObservationIgnored private var previewChord: Chord?
     @ObservationIgnored private var lastPreviewTime = -Double.infinity
 
-    init(session: MusicSession?, startupError: String? = nil) {
+    // Opt-in, MainActor-only native diagnostics. Never used by audio rendering.
+    let uiDiagnosticsEnabled: Bool
+    private(set) var uiDiagnosticReport = ""
+    @ObservationIgnored private(set) var uiAnchorFrames: [String: [EditorPopup: CGRect]] = [:]
+    @ObservationIgnored private(set) var uiPopupFrames: [EditorPopup: CGRect] = [:]
+    @ObservationIgnored private var uiEvents: [String] = []
+    @ObservationIgnored var uiEventObserver: ((String) -> Void)?
+
+    init(session: MusicSession?, startupError: String? = nil,
+         uiDiagnosticsEnabled: Bool = ProcessInfo.processInfo.arguments.contains("--coda-ui-geometry")) {
         self.session = session
         self.startupError = startupError
+        self.uiDiagnosticsEnabled = uiDiagnosticsEnabled
+    }
+
+    func recordUIEvent(_ event: String) {
+        guard uiDiagnosticsEnabled else { return }
+        let entry = "\(ProcessInfo.processInfo.systemUptime) \(event)"
+        uiEvents.append(entry)
+        if uiEvents.count > 96 { uiEvents.removeFirst(uiEvents.count - 96) }
+        uiDiagnosticReport = uiEvents.joined(separator: "\n")
+        print("M1 UI \(entry)")
+        uiEventObserver?(event)
+    }
+
+    func recordSettingsFrames(_ frames: [EditorPopup: CGRect], stage: String) {
+        guard uiDiagnosticsEnabled, uiAnchorFrames[stage] != frames else { return }
+        uiAnchorFrames[stage] = frames
+        let description = frames.keys.sorted { $0.rawValue < $1.rawValue }.map {
+            "\($0.rawValue)=\(frames[$0]!)"
+        }.joined(separator: "; ")
+        recordUIEvent("anchors.\(stage) [\(description)]")
+    }
+
+    func recordPopupFrame(_ frame: CGRect, popup: EditorPopup) {
+        guard uiDiagnosticsEnabled, uiPopupFrames[popup] != frame else { return }
+        uiPopupFrames[popup] = frame
+        recordUIEvent("popup.geometry.\(popup.rawValue) \(frame)")
+    }
+
+    func presentSettings(_ surface: EditorPopup) {
+        recordUIEvent("settings.action.\(surface.rawValue)")
+        if surface == .tempo { tempoDraft = String(Int(tempo.rounded())) }
+        popup = surface
     }
 
     var regions: [ChordRegion] { session?.editor.progression.regions ?? [] }
@@ -202,10 +244,12 @@ final class CodaEditorStore {
     }
 
     func toggleChordMute() {
+        recordUIEvent("mute.action before=\(controls.muted)")
         guard let session else { setError(startupError ?? "Audio session is unavailable."); return }
         var updated = session.controls
         updated.muted = updated.muted == 0 ? 1 : 0
-        publish(updated)
+        let published = publish(updated)
+        recordUIEvent("mute.result published=\(published) after=\(controls.muted) error=\(inlineError ?? "nil")")
     }
 
     func setTempo(_ value: Double) {

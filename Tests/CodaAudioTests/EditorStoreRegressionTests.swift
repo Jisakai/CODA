@@ -10,6 +10,80 @@ import CodaNative
 /// dispatch/model regressions, not a substitute for real Pencil hardware tests.
 final class EditorStoreRegressionTests: XCTestCase {
     @MainActor
+    func testHostedProductionCanvasReceivesAnchorsAndRendersEverySettingsAction() async throws {
+        let store = try makeStore(uiDiagnosticsEnabled: true)
+        let host = UIHostingController(rootView: CodaCanvas(store: store))
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
+        let window = scene.map { UIWindow(windowScene: $0) }
+            ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 1366, height: 1024))
+        let anchors = expectation(description: "Actual root preference receipt")
+        var receivedAnchors = false
+        store.uiEventObserver = { event in
+            if event.hasPrefix("anchors.root"), store.uiAnchorFrames["root"]?.count == 4, !receivedAnchors {
+                receivedAnchors = true
+                anchors.fulfill()
+            }
+        }
+        defer {
+            store.uiEventObserver = nil
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+            store.session?.suspend()
+        }
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        await fulfillment(of: [anchors], timeout: 5)
+
+        let rootFrames = try XCTUnwrap(store.uiAnchorFrames["root"])
+        XCTAssertEqual(rootFrames.count, 4)
+        XCTAssertEqual(store.uiAnchorFrames["topBar.content"], rootFrames)
+        XCTAssertEqual(store.uiAnchorFrames["topBar.acrylic"], rootFrames,
+                       "The real shared acrylic background must preserve control preferences")
+        for surface in [EditorPopup.appSettings, .projectSettings, .keyScale, .tempo] {
+            let anchor = try XCTUnwrap(rootFrames[surface])
+            XCTAssertEqual(store.uiAnchorFrames["producer.\(surface.rawValue)"]?[surface], anchor)
+            XCTAssertEqual(anchor.height, 32, accuracy: 1)
+            if surface == .appSettings || surface == .projectSettings {
+                XCTAssertEqual(anchor.width, 32, accuracy: 1)
+            }
+            XCTAssertTrue(window.bounds.contains(anchor))
+            let appeared = expectation(description: "Production popup appeared: \(surface)")
+            let measured = expectation(description: "Production popup laid out: \(surface)")
+            var receivedGeometry = false
+            store.uiEventObserver = { event in
+                if event == "popup.appear.\(surface.rawValue)" { appeared.fulfill() }
+                if event.hasPrefix("popup.geometry.\(surface.rawValue)"), !receivedGeometry {
+                    receivedGeometry = true
+                    measured.fulfill()
+                }
+            }
+            // Same action used by the production top bar; XCUI separately tests
+            // actual touch delivery, including icon centers and target padding.
+            store.presentSettings(surface)
+            host.view.layoutIfNeeded()
+            await fulfillment(of: [appeared, measured], timeout: 5)
+            XCTAssertEqual(store.popup, surface)
+            let frame = try XCTUnwrap(store.uiPopupFrames[surface])
+            XCTAssertGreaterThan(frame.width, 0)
+            XCTAssertGreaterThan(frame.height, 0)
+            XCTAssertTrue(window.bounds.contains(frame))
+            XCTAssertGreaterThanOrEqual(frame.minY, anchor.maxY)
+            XCTAssertLessThan(frame.minY - anchor.maxY, 48)
+            XCTAssertGreaterThanOrEqual(anchor.midX, frame.minX - 24)
+            XCTAssertLessThanOrEqual(anchor.midX, frame.maxX + 24)
+            let disappeared = expectation(description: "Production popup removed: \(surface)")
+            store.uiEventObserver = { event in
+                if event == "popup.disappear.\(surface.rawValue)" { disappeared.fulfill() }
+            }
+            store.popup = nil
+            await fulfillment(of: [disappeared], timeout: 5)
+        }
+    }
+
+    @MainActor
     func testRenderedFanSectorsMatchHitTestingIncludingOutsideSweep() {
         for direction in [-Double.pi, -.pi / 3, .pi / 2] {
             for count in [2, 3, 4] {
@@ -344,13 +418,13 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    private func makeStore() throws -> CodaEditorStore {
+    private func makeStore(uiDiagnosticsEnabled: Bool = false) throws -> CodaEditorStore {
         let vocabulary = try ChordVocabulary.load(in: Bundle(for: Self.self))
         let session = try MusicSession(vocabulary: vocabulary, offline: true)
         let chord = try Chord(root: 0, qualityID: "minor7")
         try session.edit([.add(ChordRegion(id: "a", chord: chord, start: 0, length: 16,
             pitches: [60, 63, 67, 70]))])
-        return CodaEditorStore(session: session)
+        return CodaEditorStore(session: session, uiDiagnosticsEnabled: uiDiagnosticsEnabled)
     }
 
     @MainActor

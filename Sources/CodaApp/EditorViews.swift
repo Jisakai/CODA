@@ -102,7 +102,10 @@ struct CodaCanvas: View {
                     let frame = AnchoredPopupLayout.frame(anchor: anchor, size: popupSize, viewport: geometry.size,
                         gap: CodaDesignTokens.EditorSurface.popupGap)
                     Color.black.opacity(0.001).contentShape(Rectangle())
-                        .onTapGesture { store.popup = nil }
+                        .onTapGesture { location in
+                            store.recordUIEvent("popup.dismiss.backdrop at=\(location)")
+                            store.popup = nil
+                        }
                         .zIndex(19)
                     EditorSettingsPopover(store: store, popup: popup)
                         .fixedSize(horizontal: false, vertical: true)
@@ -111,6 +114,11 @@ struct CodaCanvas: View {
                         } }
                         .modifier(AcrylicPanel(store: store))
                         .offset(x: frame.minX, y: frame.minY)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("editor.root")) } action: {
+                            store.recordPopupFrame($0, popup: popup)
+                        }
+                        .onAppear { store.recordUIEvent("popup.appear.\(popup.rawValue)") }
+                        .onDisappear { store.recordUIEvent("popup.disappear.\(popup.rawValue)") }
                         .zIndex(20)
                 }
 
@@ -123,7 +131,10 @@ struct CodaCanvas: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
             .coordinateSpace(name: "editor.root")
-            .onPreferenceChange(SettingsFramesKey.self) { settingsFrames = $0 }
+            .onPreferenceChange(SettingsFramesKey.self) {
+                settingsFrames = $0
+                store.recordSettingsFrames($0, stage: "root")
+            }
             .onPreferenceChange(PopupSizeKey.self) { popupSize = $0 }
             .onPreferenceChange(KnobFramesKey.self) { store.knobFrames = $0 }
             .background(CodaDesignTokens.Colors.oled)
@@ -151,16 +162,18 @@ private struct EditorTopBar: View {
 
     var body: some View {
         HStack(spacing: CodaDesignTokens.Geometry.topBarControlGap) {
-            Button { store.popup = .appSettings } label: {
+            Button { store.presentSettings(.appSettings) } label: {
                 Image(systemName: "gearshape.fill").font(.system(size: 15, weight: .black))
                     .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .modifier(SettingsAnchor(store: store, popup: .appSettings))
             .accessibilityLabel("App Settings")
             .accessibilityIdentifier("top.appSettings")
-            Button { store.popup = .projectSettings } label: {
+            Button { store.presentSettings(.projectSettings) } label: {
                 Image(systemName: "ellipsis").font(.system(size: 16, weight: .bold))
                     .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .modifier(SettingsAnchor(store: store, popup: .projectSettings))
             .accessibilityLabel("Project Settings")
@@ -170,7 +183,7 @@ private struct EditorTopBar: View {
                 .frame(width: 1, height: 20)
                 .padding(.horizontal, 2)
 
-            Button { store.popup = .keyScale } label: {
+            Button { store.presentSettings(.keyScale) } label: {
                 HStack(spacing: 6) {
                     Text("\(CodaEditorStore.pitchName(for: store.key.tonic)) \(store.key.mode == .major ? "Maj" : "Min")")
                         .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
@@ -195,7 +208,7 @@ private struct EditorTopBar: View {
             .padding(.horizontal, 9).frame(height: 32)
             .background(.white.opacity(0.06), in: Capsule())
             .contentShape(Capsule())
-            .onTapGesture { store.popup = .tempo; store.tempoDraft = String(Int(store.tempo.rounded())) }
+            .onTapGesture { store.presentSettings(.tempo) }
             .gesture(DragGesture(minimumDistance: 4).onChanged { value in
                 if tempoDragStart == nil { tempoDragStart = store.tempo }
                 guard let tempoDragStart else { return }
@@ -285,11 +298,21 @@ private struct EditorTopBar: View {
                 .accessibilityIdentifier("editor.redoState")
                 .accessibilityHidden(false)
                 .frame(width: 1, height: 1)
+
+            if store.uiDiagnosticsEnabled {
+                Text("UI events")
+                    .font(CodaDesignTokens.Typography.font(size: 1))
+                    .frame(width: 1, height: 1).opacity(0.01)
+                    .accessibilityIdentifier("editor.uiDiagnostics")
+                    .accessibilityValue(store.uiDiagnosticReport)
+            }
         }
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
         .padding(.horizontal, CodaDesignTokens.Geometry.topBarHorizontalPadding)
         .frame(height: CodaDesignTokens.Geometry.topBarHeight)
+        .onPreferenceChange(SettingsFramesKey.self) { store.recordSettingsFrames($0, stage: "topBar.content") }
         .background { CodaAcrylic(store: store) }
+        .onPreferenceChange(SettingsFramesKey.self) { store.recordSettingsFrames($0, stage: "topBar.acrylic") }
         .buttonStyle(.plain)
         // Give the container its own AX node so its identifier does not
         // propagate to (and replace the identifiers of) the controls inside.
@@ -318,6 +341,9 @@ private struct SettingsAnchor: ViewModifier {
             GeometryReader { geometry in
                 Color.clear.preference(key: SettingsFramesKey.self,
                     value: [popup: geometry.frame(in: .named("editor.root"))])
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("editor.root")) } action: {
+                        store.recordSettingsFrames([popup: $0], stage: "producer.\(popup.rawValue)")
+                    }
             }
         }
     }

@@ -134,6 +134,14 @@ struct PencilInputBridge: UIViewRepresentable {
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldReceive touch: UITouch) -> Bool {
+            // Observe once through an existing noncancelling recognizer. Do not
+            // add a competing gesture or change routing for diagnostic capture.
+            if gestureRecognizer === hideChromeTap, touch.type == .direct,
+               store.uiDiagnosticsEnabled, let rootView {
+                let point = touch.location(in: rootView)
+                let hit = touch.view.map { "\(type(of: $0)) frame=\($0.convert($0.bounds, to: rootView))" } ?? "nil"
+                store.recordUIEvent("touch.begin at=\(point) hit=\(hit) popup=\(store.popup?.rawValue ?? "nil") muted=\(store.controls.muted)")
+            }
             if gestureRecognizer === undoTap || gestureRecognizer === redoTap || gestureRecognizer === hideChromeTap {
                 return touch.type == .direct && !store.shouldIgnoreFingerShortcut
             }
