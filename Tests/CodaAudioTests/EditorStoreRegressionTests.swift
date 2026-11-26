@@ -170,6 +170,7 @@ final class EditorStoreRegressionTests: XCTestCase {
             for mode in [RadialMode.primary, .all] {
                 if mode == .all { store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3)) }
                 let state = try XCTUnwrap(store.radial)
+                assertRenderedRadialClearsChrome(store)
                 for (_, labels, radius, thickness) in store.radialRings() {
                     let bounds = RadialGeometry.bounds(direction: state.placement.direction,
                         radius: (radius + thickness / 2) * state.placement.scale)
@@ -185,6 +186,76 @@ final class EditorStoreRegressionTests: XCTestCase {
             store.setRootSize(CGSize(width: 1194, height: 834))
             XCTAssertEqual(store.radial?.placement, frozen)
             store.pencilTouchCancelled()
+        }
+    }
+
+    @MainActor
+    func testProductionSqueezeAndLeftEdgeScreenshotFanKeepCompletePathsBelowChrome() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
+                     CGSize(width: 1376, height: 1032)] {
+            store.setRootSize(size)
+            XCTAssertEqual(store.stripTop, 72)
+            for tip in [CGPoint(x: 60, y: 72), CGPoint(x: 60, y: 92),
+                        CGPoint(x: size.width / 2, y: 100),
+                        CGPoint(x: size.width - 10, y: 92), CGPoint(x: size.width - 10, y: 175)] {
+                store.openSqueeze(at: tip)
+                XCTAssertEqual(store.radial?.anchor, tip)
+                assertRenderedRadialClearsChrome(store)
+                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+                XCTAssertEqual(store.radial?.mode, .all)
+                assertRenderedRadialClearsChrome(store)
+                let state = try XCTUnwrap(store.radial)
+                store.pencilHover(at: try point(store, ring: .minor, slot: 0), rollAngle: nil)
+                XCTAssertEqual(store.radial?.placement, state.placement)
+                XCTAssertEqual(store.radial?.selectedRing, .minor)
+                XCTAssertEqual(store.radial?.selectedSlot, 0)
+                store.closeRadial()
+            }
+
+            // Same anchor/mode as --coda-ui-fixture-radial-edge, still solved
+            // through the production layout path. Do not relocate the fixture.
+            store.openSqueeze(at: CGPoint(x: 60, y: store.stripTop + 28))
+            var fixture = try XCTUnwrap(store.radial)
+            fixture.anchor = CGPoint(x: 12, y: store.stripTop + 16)
+            for mode in [RadialMode.primary, .all] {
+                fixture.mode = mode
+                store.radial = fixture
+                store.setRootSize(size)
+                XCTAssertEqual(store.radial?.anchor, CGPoint(x: 12, y: 88))
+                assertRenderedRadialClearsChrome(store)
+                let first = try XCTUnwrap(store.radial?.placement)
+                store.setRootSize(size)
+                XCTAssertEqual(store.radial?.placement, first)
+            }
+            store.closeRadial()
+        }
+    }
+
+    @MainActor
+    private func assertRenderedRadialClearsChrome(_ store: CodaEditorStore,
+                                                file: StaticString = #filePath, line: UInt = #line) {
+        guard let state = store.radial else {
+            XCTFail("Expected the production radial", file: file, line: line)
+            return
+        }
+        // Use actual SwiftUI arc paths, not RadialGeometry.bounds (the solver's
+        // own oracle), and include every slot's complete inner/outer arc.
+        for (_, labels, radius, thickness) in store.radialRings() {
+            let scaledRadius = radius * state.placement.scale
+            let scaledThickness = thickness * state.placement.scale
+            let extent = scaledRadius + scaledThickness / 2
+            let rect = CGRect(x: 0, y: 0, width: extent * 2, height: extent * 2)
+            for slot in labels.indices {
+                let path = RingSlotShape(count: labels.count, index: slot, radius: scaledRadius,
+                    thickness: scaledThickness, direction: state.placement.direction).path(in: rect)
+                let box = path.boundingRect.offsetBy(dx: state.center.x - extent, dy: state.center.y - extent)
+                XCTAssertGreaterThanOrEqual(box.minY, 72 - 1e-6, file: file, line: line)
+                XCTAssertGreaterThanOrEqual(box.minX, -1e-6, file: file, line: line)
+                XCTAssertLessThanOrEqual(box.maxX, store.rootSize.width + 1e-6, file: file, line: line)
+                XCTAssertLessThanOrEqual(box.maxY, store.rootSize.height + 1e-6, file: file, line: line)
+            }
         }
     }
 

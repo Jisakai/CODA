@@ -1086,7 +1086,7 @@ private struct RadialMenuView: View {
                         .frame(width: 96, height: 64)
                         .background { CodaAcrylic(store: store).clipShape(Capsule()) }
                         .position(x: min(geometry.size.width - 48, max(48, center.x)),
-                                  y: min(geometry.size.height - 32, max(32, center.y)))
+                                  y: min(geometry.size.height - 32, max(store.stripTop + 32, center.y)))
                 }
             }
             // Explicit root coordinates: positioned children must not determine

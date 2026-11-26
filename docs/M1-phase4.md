@@ -478,3 +478,90 @@ regression plus the complementary test; all four real-touch popup/UI geometry
 checks; remaining combined M1 native/sanitizer/archive/unsigned IPA gates; and
 deferred owner iPad Pencil, appearance, listening and feel acceptance. Stop for
 review within M1.
+
+## Radial chrome exclusion correction (2026-11-26, based on d70cf0f)
+
+Visually inspected the real `M1-radial-edge-fixture.png` from run 45803166744
+at the supplied local artifact path. Its dimensions are 2752x2064 pixels
+(1376x1032 points at 2x). The left-edge All fan obscures the 4/4 toolbar badge
+and ruler bar-2 label. This is evidence from the prior simulator run, not a
+new screenshot or a physical Pencil result.
+
+Causal finding: `RadialGeometry.bounds` already accounts for the sector tip,
+outer endpoints and enclosed cardinal extrema. The acceptance rectangle was
+wrong: placement used the entire root viewport inset by 8pt. Neither the
+anchored search nor the translated fallback excluded the 52pt toolbar plus
+20pt timeline. The existing store regression also asserted containment only
+in the entire root viewport, using the same bounds helper as the solver.
+Thus an occupied sector could be geometrically inside the viewport and still
+cover chrome. This was not a reason to move the fixture or change the sweep.
+
+Production correction:
+
+- Placement takes an explicit `minimumY`. The store passes its actual
+  `stripTop` (72pt with chrome visible, zero exclusion with chrome hidden) for
+  primary, root picker and All placement, including mode changes and idle
+  viewport resizing. The fit rectangle begins at 80pt with the existing 8pt
+  margin. Anchoring may relax a physical viewport-edge margin but never this
+  chrome boundary. Both anchored and translated candidates use the exclusion.
+- The existing deterministic direction order, 120-degree sweep, preferred
+  -120-degree orientation, canonical top-edge +60-degree orientation, bounded
+  scales 1/0.9/0.8 and fallback cost remain. When the top chrome makes the tip
+  infeasible, the origin shifts into the fitting area; feasible tips retain
+  their anchor. The top-center regression requires the exact +60-degree tilt
+  and a y=80 fallback for tips above that boundary, at full scale.
+- An impossible fit now returns nil instead of the old unchecked initial
+  placement. Opening refuses it, a mode change retains its existing fitting
+  menu, and an idle resize closes a menu that no longer fits. No overlapping
+  placement is returned as a fallback. Active selection retains the existing
+  frozen placement semantics.
+- The hover-preview capsule also clamps below the timeline. Ring paths,
+  concentric radii/bands, label paging, selection and inverse hit-test transform
+  are unchanged. The screenshot fixture still opens from (60, stripTop+28)
+  and requests the original (12, stripTop+16) All anchor; its only source
+  adjustment handles the now-optional placement result.
+
+Focused native regression coverage prepared:
+
+- `testChromeExclusionAcrossEdgesCornersAndEveryBandExtent`: deterministic
+  placement for all edges/corners, the left fixture and interior tips on
+  1194x834, 1366x1024 and 1376x1032 viewports, at the production primary/root/All
+  maximum extents (160/156/284pt). Independently samples the swept perimeter
+  and radial interior, requires y>=72 and viewport containment, scale>=0.8,
+  repeatability and at most 180pt displacement for these cases.
+- `testTopCenterChromeFallbackRetainsCanonicalDownwardTiltAndFeasibleTipAnchor`
+  and `testInfeasibleFanDoesNotReturnAnOverlappingPlacement`: exact canonical
+  tilt/fallback, feasible tip preservation, and explicit nil for unusable
+  viewports. Existing chrome-free top-edge tests remain, with optional results
+  unwrapped rather than weakening their original expectations.
+- `testProductionSqueezeAndLeftEdgeScreenshotFanKeepCompletePathsBelowChrome`:
+  calls real store squeeze ingress at legal strip edges/empty bars, transitions
+  to All through the actual outer slot, and checks hover against that same
+  transform. Recreates the unchanged fixture anchor and passes it through
+  production relayout for primary and All. Checks every actual
+  `RingSlotShape.path(...).boundingRect`, including complete inner/outer arcs,
+  independently of the solver's bounds helper, for y>=72 and viewport fit.
+  The prior orientation-freeze test now uses the same path assertions too;
+  its active-selection resize/freeze assertions remain intact.
+
+Actual checks in this pass:
+
+- `python -m unittest discover -s Tests/Scaffold -p 'test_*.py' -v`: 35 tests,
+  34 passed and one existing symlink test skipped because this host cannot
+  create symlinks. Packaging tests use synthetic archives, not a new app IPA.
+- `git diff --check`: passed; Git printed the existing CRLF conversion warnings
+  for the pre-existing task/roadmap changes.
+- `Get-Command swift,xcodebuild,xcodegen,python,clang++,g++,cmake
+  -ErrorAction SilentlyContinue`: only Python was available. No native Swift,
+  interaction/store XCTest, DSP/transport tests, sanitizer, simulator, archive
+  or IPA execution is claimed. No geometry replica was substituted for Swift.
+
+Changed files: `Sources/CodaInteraction/EditorInputModel.swift`,
+`Sources/CodaApp/CodaEditorStore.swift`, `Sources/CodaApp/EditorViews.swift`,
+`Tests/CodaInteractionTests/EditorInputModelTests.swift`,
+`Tests/CodaAudioTests/EditorStoreRegressionTests.swift`, and this report.
+Protected task/roadmap/spec/decision/design documents and unrelated files were
+left as found. No staging, commit, push or CI trigger occurred. Parent review,
+native execution and a fresh inspection of the unchanged named edge screenshot
+remain required before shipping; prior M1 hardware/audio acceptance gates still
+apply. This correction adds no M1b work.

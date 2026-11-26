@@ -217,7 +217,11 @@ final class CodaEditorStore {
         guard size.width > 0, size.height > 0 else { return }
         rootSize = size
         if !hasActivePencilTouch, var state = radial {
-            state.placement = menuPlacement(state.anchor, mode: state.mode)
+            guard let placement = menuPlacement(state.anchor, mode: state.mode) else {
+                closeRadial()
+                return
+            }
+            state.placement = placement
             radial = state
         }
     }
@@ -718,17 +722,17 @@ final class CodaEditorStore {
             return
         }
         guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
-        guard let stripHit = stripHit(at: point) else { return }
+        guard let stripHit = stripHit(at: point), let placement = menuPlacement(point) else { return }
         switch stripHit {
         case .region(let id, _):
             guard let region = regions.first(where: { $0.id == id }) else { return }
             radial = RadialMenuState(mode: .primary, context: .existingChord, regionID: id,
-                                     emptyStart: nil, anchor: point, placement: menuPlacement(point),
+                                     emptyStart: nil, anchor: point, placement: placement,
                                      selectedRing: nil, selectedSlot: nil,
                                      draft: RadialSwapDraft(root: region.chord.root, qualityID: region.chord.qualityID))
         case .emptyBar(let start):
             radial = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
-                                     emptyStart: start, anchor: point, placement: menuPlacement(point),
+                                     emptyStart: start, anchor: point, placement: placement,
                                      selectedRing: nil, selectedSlot: nil, draft: nil)
         }
         radialPreview = nil
@@ -917,7 +921,8 @@ final class CodaEditorStore {
                 var moved = state
                 moved.anchor = CGPoint(x: 12, y: stripTop + 16)
                 moved.mode = .all
-                moved.placement = menuPlacement(moved.anchor, mode: .all)
+                guard let placement = menuPlacement(moved.anchor, mode: .all) else { return state }
+                moved.placement = placement
                 return moved
             }
         }
@@ -1105,7 +1110,7 @@ final class CodaEditorStore {
         }
     }
 
-    private func menuPlacement(_ requested: CGPoint, mode: RadialMode = .primary) -> RadialPlacement {
+    private func menuPlacement(_ requested: CGPoint, mode: RadialMode = .primary) -> RadialPlacement? {
         let outerRadius: Double = switch mode {
         case .primary: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialOuterBand / 2
         case .roots: CodaDesignTokens.EditorSurface.radialOuterRadius + CodaDesignTokens.EditorSurface.radialInnerBand / 2
@@ -1113,13 +1118,14 @@ final class CodaEditorStore {
             + CodaDesignTokens.EditorSurface.radialFamilyBand / 2
         }
         return RadialGeometry.placement(tip: requested, viewport: rootSize,
-            outerRadius: outerRadius, margin: CodaDesignTokens.EditorSurface.radialMargin)
+            outerRadius: outerRadius, margin: CodaDesignTokens.EditorSurface.radialMargin,
+            minimumY: chromeHidden ? 0 : Double(stripTop))
     }
 
     private func setRadialMode(_ mode: RadialMode) {
-        guard var state = radial else { return }
+        guard var state = radial, let placement = menuPlacement(state.anchor, mode: mode) else { return }
         state.mode = mode
-        state.placement = menuPlacement(state.anchor, mode: mode)
+        state.placement = placement
         state.selectedRing = nil
         state.selectedSlot = nil
         state.hasNavigated = false

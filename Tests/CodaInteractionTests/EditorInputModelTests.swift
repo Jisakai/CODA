@@ -25,13 +25,13 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertEqual(viewport.visiblePitches(in: 400).last, 0)
     }
 
-    func testFanSweepTiltAdaptivePlacementAndBoundedCornerFallback() {
+    func testFanSweepTiltAdaptivePlacementAndBoundedCornerFallback() throws {
         XCTAssertEqual(RadialGeometry.sweep, 2 * .pi / 3, accuracy: 1e-12)
         XCTAssertEqual(RadialGeometry.defaultDirection, -2 * .pi / 3, accuracy: 1e-12)
         let size = CGSize(width: 1194, height: 834)
         for x in [400.0, 800] {
             let tip = CGPoint(x: x, y: 450)
-            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
             XCTAssertEqual(placement.origin, tip)
             XCTAssertEqual(placement.direction, -2 * .pi / 3, accuracy: 1e-12)
             XCTAssertEqual(placement.scale, 1)
@@ -42,7 +42,7 @@ final class EditorInputModelTests: XCTestCase {
         for tip in [CGPoint(x: 600, y: 12), CGPoint(x: 600, y: 822),
                     CGPoint(x: 12, y: 417), CGPoint(x: 1182, y: 417),
                     .zero, CGPoint(x: 1194, y: 0), CGPoint(x: 0, y: 834), CGPoint(x: 1194, y: 834)] {
-            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
             for _ in 0..<20 {
                 XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
             }
@@ -65,11 +65,11 @@ final class EditorInputModelTests: XCTestCase {
         }
     }
 
-    func testTopCenterFanUsesExactCounterClockwiseDownwardTiltAtTheTip() {
+    func testTopCenterFanUsesExactCounterClockwiseDownwardTiltAtTheTip() throws {
         let size = CGSize(width: 1194, height: 834)
         for y in [0.0, 8, 12] {
             let tip = CGPoint(x: size.width / 2, y: y)
-            let placement = RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284)
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
             XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
             XCTAssertEqual(placement.origin, tip)
             XCTAssertEqual(placement.scale, 1)
@@ -82,6 +82,70 @@ final class EditorInputModelTests: XCTestCase {
             for _ in 0..<20 {
                 XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
             }
+        }
+    }
+
+    func testChromeExclusionAcrossEdgesCornersAndEveryBandExtent() throws {
+        for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
+                     CGSize(width: 1376, height: 1032)] {
+            let tips = [CGPoint.zero, CGPoint(x: size.width / 2, y: 0),
+                CGPoint(x: size.width, y: 0), CGPoint(x: 0, y: 72),
+                CGPoint(x: size.width, y: 72), CGPoint(x: 12, y: 88), // screenshot fixture
+                CGPoint(x: 60, y: 92), CGPoint(x: size.width - 10, y: 92),
+                CGPoint(x: 0, y: size.height / 2), CGPoint(x: size.width, y: size.height / 2),
+                CGPoint(x: 0, y: size.height), CGPoint(x: size.width / 2, y: size.height),
+                CGPoint(x: size.width, y: size.height), CGPoint(x: size.width / 2, y: 450)]
+            // Primary, root picker and All: inner AND outer edges, not just label centers.
+            for radius in [160.0, 156, 284] {
+                for tip in tips {
+                    let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                        outerRadius: radius, minimumY: 72))
+                    XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size,
+                        outerRadius: radius, minimumY: 72), placement)
+                    XCTAssertGreaterThanOrEqual(placement.scale, RadialGeometry.minimumScale)
+                    XCTAssertLessThanOrEqual(placement.scale, 1)
+                    XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                    // Independent perimeter sampling checks the whole swept sector;
+                    // do not reuse the solver's bounds calculation as the oracle.
+                    for degree in 0...120 {
+                        let angle = placement.direction - .pi / 3 + Double(degree) * .pi / 180
+                        for r in [0.0, radius * 0.4, radius] {
+                            let point = placement.point(radius: r, angle: angle)
+                            XCTAssertGreaterThanOrEqual(point.x, -1e-9)
+                            XCTAssertLessThanOrEqual(point.x, size.width + 1e-9)
+                            XCTAssertGreaterThanOrEqual(point.y, 72 - 1e-9)
+                            XCTAssertLessThanOrEqual(point.y, size.height + 1e-9)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testTopCenterChromeFallbackRetainsCanonicalDownwardTiltAndFeasibleTipAnchor() throws {
+        let size = CGSize(width: 1194, height: 834)
+        for radius in [160.0, 284] {
+            for y in [0.0, 12, 72, 80, 100] {
+                let tip = CGPoint(x: size.width / 2, y: y)
+                let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                    outerRadius: radius, minimumY: 72))
+                XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
+                XCTAssertEqual(placement.origin.x, tip.x, accuracy: 1e-9)
+                XCTAssertEqual(placement.origin.y, max(80, y), accuracy: 1e-9)
+                XCTAssertEqual(placement.scale, 1)
+            }
+            let tip = CGPoint(x: 600, y: 450)
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                outerRadius: radius, minimumY: 72))
+            XCTAssertEqual(placement.origin, tip)
+            XCTAssertEqual(placement.direction, RadialGeometry.defaultDirection)
+        }
+    }
+
+    func testInfeasibleFanDoesNotReturnAnOverlappingPlacement() {
+        for size in [CGSize(width: 1194, height: 72), CGSize(width: 100, height: 180)] {
+            XCTAssertNil(RadialGeometry.placement(tip: CGPoint(x: 12, y: 88), viewport: size,
+                outerRadius: 284, minimumY: 72))
         }
     }
 

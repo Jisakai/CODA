@@ -353,14 +353,19 @@ public enum RadialGeometry {
     }
 
     public static func placement(tip: CGPoint, viewport: CGSize, outerRadius: Double,
-                                 margin: Double = 8) -> RadialPlacement {
-        let available = CGRect(origin: .zero, size: viewport).insetBy(dx: margin, dy: margin)
-        // At an exact edge, relax only the margin needed to keep the tip anchored.
-        // Displaced corner fallbacks still respect the full margin below.
+                                 margin: Double = 8, minimumY: Double = 0) -> RadialPlacement? {
+        // Chrome is an exclusion, not an edge margin that anchoring may relax.
+        guard viewport.width > 2 * margin, viewport.height > minimumY + 2 * margin else { return nil }
+        let available = CGRect(x: margin, y: minimumY + margin,
+            width: viewport.width - 2 * margin, height: viewport.height - minimumY - 2 * margin)
+        // At a physical edge, relax only the margin needed to keep an in-viewport
+        // tip anchored. The top chrome boundary retains its margin in all paths.
+        let anchoredMinX = max(0, min(available.minX, tip.x))
+        let anchoredMinY = minimumY > 0 ? available.minY : max(0, min(available.minY, tip.y))
         let anchoredAvailable = CGRect(
-            x: min(available.minX, tip.x), y: min(available.minY, tip.y),
-            width: max(available.maxX, tip.x) - min(available.minX, tip.x),
-            height: max(available.maxY, tip.y) - min(available.minY, tip.y))
+            x: anchoredMinX, y: anchoredMinY,
+            width: min(viewport.width, max(available.maxX, tip.x)) - anchoredMinX,
+            height: min(viewport.height, max(available.maxY, tip.y)) - anchoredMinY)
         let upwardBounds = bounds(direction: defaultDirection, radius: outerRadius)
             .offsetBy(dx: tip.x, dy: tip.y)
         let preferred = upwardBounds.minY < anchoredAvailable.minY ? downwardDirection : defaultDirection
@@ -380,9 +385,10 @@ public enum RadialGeometry {
                 }
             }
         }
-        // A 120-degree fan cannot fit an exact 90-degree viewport corner at its
-        // tip. Only then allow bounded scale and the smallest fitting displacement.
-        var best = RadialPlacement(origin: tip, direction: preferred)
+        // Corners and tips in the reserved chrome cannot always stay anchored.
+        // Only then allow bounded scale and the smallest fitting displacement.
+        // No feasible placement means no menu, never an unchecked overlapping fan.
+        var best: RadialPlacement?
         var bestCost = Double.infinity
         for scale in fittingScales {
             for direction in directions {
