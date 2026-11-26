@@ -19,6 +19,19 @@ constexpr float kStealFadeSeconds = 0.004f;
 constexpr float kDelayFeedback = 0.30f;
 constexpr float kSmoothingSeconds = 0.012f;
 constexpr uint32_t kControlDrainLimit = 8;
+// Provisional feel constants; owner listening acceptance remains required.
+constexpr float kChuckAttackSeconds=.002f, kChuckDecaySeconds=.035f;
+constexpr float kChuckReleaseSeconds=.018f, kChuckFilterSeconds=.008f;
+constexpr float kChuckNoiseSeconds=.012f, kChuckNoiseLevel=.24f;
+struct Event : CodaNoteEvent { bool performance=false; CodaPerformanceEvent payload{}; };
+bool equal_owner(const CodaNoteOwner &a,const CodaNoteOwner &b) noexcept {
+    return a.prepare_epoch==b.prepare_epoch && a.plan_generation==b.plan_generation &&
+        a.cycle==b.cycle && a.activation==b.activation && a.instance==b.instance;
+}
+bool equal_harmonic(const CodaPerformanceEvent &a,const CodaPerformanceEvent &b) noexcept {
+    auto owner=a.owner; owner.instance=b.owner.instance;
+    return equal_owner(owner,b.owner) && a.harmonic_token==b.harmonic_token;
+}
 
 
 inline float clampf(float x, float lo, float hi) { return std::max(lo, std::min(x, hi)); }
@@ -55,7 +68,9 @@ bool decode_controls(const CodaControls &in, Controls &out) {
 }
 
 struct Voice {
-    bool active=false, releasing=false;
+    bool active=false, releasing=false, performance=false;
+    CodaPerformanceEvent payload{};
+    float noteDetuneRatio=1, noiseEnvelope=0; uint32_t noiseState=1;
     coda::Envelope envelope{};
     uint8_t preset=0;
     uint32_t region=0;
@@ -77,15 +92,15 @@ constexpr std::array<PresetSpec,3> kPresets{{
 }};
 
 struct SPSCEvents {
-    std::array<CodaNoteEvent,CODA_DSP_QUEUE_CAPACITY> data{};
+    std::array<Event,CODA_DSP_QUEUE_CAPACITY> data{};
     alignas(64) std::atomic<uint32_t> head{0};
     alignas(64) std::atomic<uint32_t> tail{0};
-    bool push(const CodaNoteEvent &e) noexcept {
+    bool push(const Event &e) noexcept {
         const uint32_t h=head.load(std::memory_order_relaxed), n=(h+1)%CODA_DSP_QUEUE_CAPACITY;
         if (n==tail.load(std::memory_order_acquire)) return false;
         data[h]=e; head.store(n,std::memory_order_release); return true;
     }
-    bool pop(CodaNoteEvent &e) noexcept {
+    bool pop(Event &e) noexcept {
         const uint32_t t=tail.load(std::memory_order_relaxed);
         if (t==head.load(std::memory_order_acquire)) return false;
         e=data[t]; tail.store((t+1)%CODA_DSP_QUEUE_CAPACITY,std::memory_order_release); return true;
@@ -115,7 +130,7 @@ struct CodaDSP {
     std::array<Voice,CODA_DSP_VOICES> voices{};
     SPSCEvents events{}; SPSCControls controls{};
     Controls target{}, smooth{};
-    CodaNoteEvent pending{}; bool hasPending=false;
+    Event pending{}; bool hasPending=false;
     std::array<float,3> *delay=nullptr;
     std::array<float,4> *reverb=nullptr;
     float *predelay=nullptr;
@@ -133,6 +148,8 @@ struct CodaDSP {
     uint8_t publishedKind=0;
     uint32_t region=0;
     bool hasRegion=false;
+    bool harmonicPerformance=false; CodaPerformanceEvent harmonic{};
+    float chuckFilterDecay=1, chuckNoiseDecay=1;
     std::array<float,CODA_DSP_VOICES> regionFrequency{}, predecessor{};
     std::array<bool,CODA_DSP_VOICES> regionPresent{}, predecessorPresent{};
     uint64_t delivered=0, late=0, eventHash=1469598103934665603ull;
@@ -147,17 +164,25 @@ struct CodaDSP {
 
 namespace {
 void release_voice(Voice &v) noexcept { if (v.active) {v.releasing=true;v.envelope.off();} }
-void note_on(CodaDSP &d, const CodaNoteEvent &e) noexcept {
-    if(!d.hasRegion || d.region!=e.region_id) {
+void note_on(CodaDSP &d, const Event &e) noexcept {
+    if(!d.hasRegion || d.harmonicPerformance!=e.performance ||
+       (e.performance ? !equal_harmonic(d.harmonic,e.payload) : d.region!=e.region_id)) {
         d.predecessor=d.regionFrequency;d.predecessorPresent=d.regionPresent;
         d.regionPresent.fill(false);d.region=e.region_id;d.hasRegion=true;
+        d.harmonicPerformance=e.performance;d.harmonic=e.payload;
     }
     Voice *slot=nullptr;
-    for (auto &v:d.voices) if (v.active && v.region==e.region_id && v.pitch==e.pitch) { slot=&v; break; }
+    for (auto &v:d.voices) if (v.active && v.performance==e.performance && v.pitch==e.pitch &&
+        (e.performance || v.region==e.region_id)) { slot=&v; break; }
     if (!slot) for (auto &v:d.voices) if (!v.active) { slot=&v; break; }
     if (!slot) {
         slot=&d.voices[0];
         for (auto &v:d.voices) if ((v.releasing && !slot->releasing) || (v.releasing==slot->releasing && v.age<slot->age)) slot=&v;
+        slot->stealTail=slot->lastOutput;
+        slot->stealTotal=std::max(1u,static_cast<uint32_t>(kStealFadeSeconds*d.rate));
+        slot->stealRemaining=slot->stealTotal;
+    }
+    if(e.performance && slot->active && slot->stealRemaining==0) {
         slot->stealTail=slot->lastOutput;
         slot->stealTotal=std::max(1u,static_cast<uint32_t>(kStealFadeSeconds*d.rate));
         slot->stealRemaining=slot->stealTotal;
@@ -169,12 +194,18 @@ void note_on(CodaDSP &d, const CodaNoteEvent &e) noexcept {
     v.active=true; v.releasing=false; v.region=e.region_id; v.pitch=e.pitch; v.rank=e.voice_rank;
     v.targetFrequency=midi; v.frequency=canGlide ? old : midi; v.amp=0; v.envelope.on();v.preset=d.smooth.preset; v.filterEnv=1.0f;
     v.filterIc1=v.filterIc2=0;
-    v.velocity=0.8f; v.age=d.sampleClock;
+    v.performance=e.performance;v.payload=e.payload;
+    v.velocity=e.performance?e.payload.effective_velocity:0.8f;
+    v.noteDetuneRatio=e.performance?std::pow(2.0f,e.payload.detune_cents/1200.0f):1.0f;
+    v.noiseEnvelope=1;v.noiseState=static_cast<uint32_t>(e.payload.owner.instance)^0x9e3779b9u;
+    if(!v.noiseState)v.noiseState=1;
+    v.age=d.sampleClock;
     if(slot->stealRemaining==0) v.stealGain=1.0f;
     d.regionFrequency[e.voice_rank]=midi;d.regionPresent[e.voice_rank]=true;
 }
-void note_off(CodaDSP &d, const CodaNoteEvent &e) noexcept {
-    for (auto &v:d.voices) if (v.active && v.region==e.region_id && v.pitch==e.pitch) release_voice(v);
+void note_off(CodaDSP &d, const Event &e) noexcept {
+    for (auto &v:d.voices) if (v.active && v.performance==e.performance && v.pitch==e.pitch &&
+        (e.performance?equal_owner(v.payload.owner,e.payload.owner):v.region==e.region_id)) release_voice(v);
 }
 float oscillator(float phase, float increment, uint8_t shape, float &triangleState) noexcept {
     const float t=phase/kTwoPi;
@@ -195,12 +226,14 @@ float voice_sample(CodaDSP &d, Voice &v) noexcept {
     if(glideSeconds>0) v.frequency += (v.targetFrequency-v.frequency)/(glideSeconds*static_cast<float>(d.rate));
     else v.frequency=v.targetFrequency;
     const float shapeScale=0.5f+1.5f*c.shape;
-    v.amp=v.envelope.tick(d.rate,spec.attack*shapeScale,spec.decay,spec.sustain,spec.release*shapeScale);
+    const bool chuck=v.performance && v.payload.attack_mode==CODA_ATTACK_CHUCK;
+    v.amp=chuck?v.envelope.tick(d.rate,kChuckAttackSeconds,kChuckDecaySeconds,0,kChuckReleaseSeconds):
+        v.envelope.tick(d.rate,spec.attack*shapeScale,spec.decay,spec.sustain,spec.release*shapeScale);
     if(v.envelope.stage==coda::Stage::idle) {v.active=false;return 0;}
     const float wobble=c.wobble;
     d.driftPhase+=kTwoPi*(0.07f+0.55f*wobble)/static_cast<float>(d.rate); if(d.driftPhase>=kTwoPi)d.driftPhase-=kTwoPi;
     const float drift=std::sin(d.driftPhase)*(spec.driftBase+0.0025f*wobble);
-    const float center=v.frequency*(1.0f+drift);
+    const float center=v.frequency*(1.0f+drift)*v.noteDetuneRatio;
     float bankA=0,bankB=0;
     for(int i=0;i<3;i++) {
         const float hz=center*d.detuneRatio[i];
@@ -216,8 +249,13 @@ float voice_sample(CodaDSP &d, Voice &v) noexcept {
     const float sub=std::sin(v.subPhase)*spec.subLevel;
     v.subPhase+=subInc;if(v.subPhase>=kTwoPi)v.subPhase-=kTwoPi;
     raw+=sub;
-    v.filterEnv*=d.filterEnvDecay;
-    const float cutoffNorm=clampf(c.cutoff*(1.0f-0.28f*c.warmth)+0.20f*v.filterEnv,0,1);
+    if(chuck) {
+        v.noiseState^=v.noiseState<<13;v.noiseState^=v.noiseState>>17;v.noiseState^=v.noiseState<<5;
+        raw+=(static_cast<float>(v.noiseState>>8)*(2.0f/16777215.0f)-1.0f)*v.noiseEnvelope*kChuckNoiseLevel;
+        v.noiseEnvelope=flush_denormal(v.noiseEnvelope*d.chuckNoiseDecay);
+    }
+    v.filterEnv*=chuck?d.chuckFilterDecay:d.filterEnvDecay;
+    const float cutoffNorm=clampf(c.cutoff*(1.0f-0.28f*c.warmth)+0.20f*v.filterEnv+(v.performance?v.payload.filter_delta:0.0f),0,1);
     const uint32_t cutoffIndex=static_cast<uint32_t>(cutoffNorm*511.0f+0.5f);
     const float g=d.filterG[cutoffIndex];
     const float k=2.0f-1.85f*c.resonance;
@@ -253,7 +291,8 @@ float process_sample(CodaDSP &d) noexcept {
             if(d.presetGain<=0.0f) { d.smooth.preset=d.target.preset; d.presetSwitchPending=false; }
         }
     } else d.presetGain=std::min(1.0f,d.presetGain+fadeStep);
-    for(const auto &v:d.voices) if(v.active && v.region==d.region)
+    for(const auto &v:d.voices) if(v.active && v.performance==d.harmonicPerformance &&
+        (v.performance?equal_harmonic(v.payload,d.harmonic):v.region==d.region))
         d.regionFrequency[v.rank]=v.frequency;
     for(uint32_t applied=0;applied<CODA_DSP_MAX_EVENTS_PER_SAMPLE;applied++) {
         if(!d.hasPending&&d.events.pop(d.pending)) d.hasPending=true;
@@ -262,7 +301,14 @@ float process_sample(CodaDSP &d) noexcept {
         ++d.delivered;
         if(d.pending.sample_offset!=static_cast<int64_t>(d.sampleClock))++d.late;
         d.eventHash=(d.eventHash ^ static_cast<uint64_t>(d.pending.sample_offset))*1099511628211ull;
-        d.eventHash=(d.eventHash ^ d.pending.region_id)*1099511628211ull;
+        if(d.pending.performance) {
+            const auto &p=d.pending.payload;
+            const uint64_t words[]={0x50455246ull,p.owner.prepare_epoch,p.owner.plan_generation,p.owner.cycle,
+                p.owner.activation,p.owner.instance,p.harmonic_token,p.pitch,p.voice_rank,p.attack_mode};
+            for(auto word:words)d.eventHash=(d.eventHash^word)*1099511628211ull;
+            const float values[]={p.base_velocity,p.effective_velocity,p.detune_cents,p.filter_delta};
+            for(float value:values){uint32_t bits;std::memcpy(&bits,&value,sizeof(bits));d.eventHash=(d.eventHash^bits)*1099511628211ull;}
+        } else d.eventHash=(d.eventHash ^ d.pending.region_id)*1099511628211ull;
         d.eventHash=(d.eventHash ^ d.pending.kind)*1099511628211ull;
         d.hasPending=false;
     }
@@ -359,6 +405,8 @@ int coda_dsp_prepare(CodaDSP *d,double rate,uint32_t block) {
         const float hz=80.0f*std::pow(160.0f,normalized);
         d->filterG[i]=std::tan(kPi*std::min(hz,static_cast<float>(rate)*0.42f)/static_cast<float>(rate));
     }
+    d->chuckFilterDecay=std::exp(-1.0f/(kChuckFilterSeconds*static_cast<float>(rate)));
+    d->chuckNoiseDecay=std::exp(-1.0f/(kChuckNoiseSeconds*static_cast<float>(rate)));
     d->filterEnvDecay=std::exp(-1.0f/(0.08f*static_cast<float>(rate)));
     d->delayLowpassCoeff=1.0f-std::exp(-kTwoPi*3000.0f/static_cast<float>(rate));
     d->chordsEQ.prepare(rate);d->masterEQ.prepare(rate);
@@ -377,7 +425,7 @@ void coda_dsp_reset(CodaDSP *d) {
     d->presetSwitchPending=false; d->sampleClock=0; d->hasPending=false;
     d->target=Controls{}; d->smooth=d->target;d->stopped=false;
     d->publishedOffset=-1;d->publishedAtOffset=0;d->publishedKind=0;
-    d->hasRegion=false;d->regionPresent.fill(false);d->predecessorPresent.fill(false);
+    d->hasRegion=false;d->harmonicPerformance=false;d->harmonic={};d->regionPresent.fill(false);d->predecessorPresent.fill(false);
     d->delivered=d->late=0;d->eventHash=1469598103934665603ull;
     if(d->delay)std::memset(d->delay,0,sizeof(*d->delay)*d->delaySize);
     if(d->reverb)std::memset(d->reverb,0,sizeof(*d->reverb)*d->reverbSize);
@@ -385,19 +433,33 @@ void coda_dsp_reset(CodaDSP *d) {
     if(d->delayGeneration)std::fill_n(d->delayGeneration,d->delaySize,0);
     if(d->reverbGeneration)std::fill_n(d->reverbGeneration,d->reverbSize,0);
     if(d->predelayGeneration)std::fill_n(d->predelayGeneration,d->predelaySize,0);
-    CodaNoteEvent e; while(d->events.pop(e)){} Controls c; while(d->controls.pop(c)){}
+    Event e; while(d->events.pop(e)){} Controls c; while(d->controls.pop(c)){}
 }
 int coda_dsp_publish_controls(CodaDSP *d,const CodaControls *v) {
     if(!d||!v||d->stopped)return 0; Controls decoded; if(!decode_controls(*v,decoded))return 0; return d->controls.push(decoded)?1:0;
 }
+static int enqueue(CodaDSP *d,const Event &e) {
+    if(d->stopped || e.sample_offset<d->publishedOffset)return 0;
+    const bool same=e.sample_offset==d->publishedOffset;
+    if(same && (e.kind<d->publishedKind || d->publishedAtOffset>=CODA_DSP_MAX_EVENTS_PER_SAMPLE))return 0;
+    if(!d->events.push(e))return 0;
+    d->publishedAtOffset=same?d->publishedAtOffset+1:1;
+    d->publishedOffset=e.sample_offset;d->publishedKind=e.kind;return 1;
+}
 int coda_dsp_push_event(CodaDSP *d,const CodaNoteEvent *e) {
     if(!d||!e||e->sample_offset<0||e->kind>CODA_EVENT_ON||e->pitch>127||e->voice_rank>=CODA_DSP_VOICES)return 0;
-    if(d->stopped || e->sample_offset<d->publishedOffset) return 0;
-    const bool same=e->sample_offset==d->publishedOffset;
-    if(same && (e->kind<d->publishedKind || d->publishedAtOffset>=CODA_DSP_MAX_EVENTS_PER_SAMPLE))return 0;
-    if(!d->events.push(*e))return 0;
-    d->publishedAtOffset=same?d->publishedAtOffset+1:1;
-    d->publishedOffset=e->sample_offset;d->publishedKind=e->kind;return 1;
+    Event event{};static_cast<CodaNoteEvent&>(event)=*e;return enqueue(d,event);
+}
+int coda_dsp_push_performance_event(CodaDSP *d,const CodaPerformanceEvent *e) {
+    if(!d||!e||e->sample_offset<0||e->kind>CODA_EVENT_ON||e->pitch>127||e->voice_rank>=CODA_DSP_VOICES||
+       e->attack_mode>CODA_ATTACK_CHUCK||!e->owner.prepare_epoch||!e->owner.plan_generation||
+       !e->owner.activation||!e->owner.instance||!e->harmonic_token)return 0;
+    if(!std::isfinite(e->base_velocity)||e->base_velocity<=0||e->base_velocity>1||
+       !std::isfinite(e->effective_velocity)||e->effective_velocity<=0||e->effective_velocity>1||
+       !std::isfinite(e->detune_cents)||std::abs(e->detune_cents)>3||
+       !std::isfinite(e->filter_delta)||std::abs(e->filter_delta)>.02f)return 0;
+    Event event{};event.sample_offset=e->sample_offset;event.kind=e->kind;event.pitch=e->pitch;
+    event.voice_rank=e->voice_rank;event.performance=true;event.payload=*e;return enqueue(d,event);
 }
 int coda_dsp_process(CodaDSP *d,float *out,uint32_t frames) {
     if(!d||!out||!d->delay||!d->reverb||!d->predelay||!d->delayGeneration||!d->reverbGeneration||!d->predelayGeneration||frames>d->maxBlock)return 0;
@@ -425,4 +487,16 @@ void coda_dsp_inspect(const CodaDSP *d,CodaDSPDiagnostics *out) {
         o.region=v.region;o.rank=v.rank;o.amplitude=v.amp;o.frequency=v.frequency;o.target_frequency=v.targetFrequency;
     }
 }
+}
+
+extern "C" void coda_dsp_inspect_performance(const CodaDSP *d,CodaPerformanceVoiceDiagnostic out[CODA_DSP_VOICES]) {
+    if(!d||!out)return;
+    for(size_t i=0;i<d->voices.size();++i) {
+        const auto &v=d->voices[i];auto &o=out[i];o={};
+        o.owner=v.payload.owner;o.harmonic_token=v.payload.harmonic_token;
+        o.base_velocity=v.performance?v.payload.base_velocity:.8f;o.effective_velocity=v.velocity;
+        o.detune_cents=v.payload.detune_cents;o.filter_delta=v.payload.filter_delta;
+        o.active=v.active;o.performance=v.performance;o.pitch=v.pitch;o.rank=v.rank;
+        o.attack_mode=v.payload.attack_mode;o.releasing=v.releasing;
+    }
 }

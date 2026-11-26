@@ -22,6 +22,18 @@ typedef struct {
 } CodaNoteEvent;
 
 typedef struct {
+    uint64_t prepare_epoch, plan_generation, cycle, activation, instance;
+} CodaNoteOwner;
+typedef enum { CODA_ATTACK_ORDINARY = 0, CODA_ATTACK_CHUCK = 1 } CodaAttackMode;
+typedef struct {
+    int64_t sample_offset;
+    CodaNoteOwner owner;
+    uint64_t harmonic_token;
+    uint8_t kind, pitch, voice_rank, attack_mode;
+    float base_velocity, effective_velocity, detune_cents, filter_delta;
+} CodaPerformanceEvent;
+
+typedef struct {
     float wobble, warmth, cutoff, resonance, shape, detune, glide;
     float delay_amount, reverb_amount, chord_level, tempo_bpm;
     uint8_t preset, muted;
@@ -51,6 +63,11 @@ void coda_dsp_reset(CodaDSP *);
    Producer must not refill the same offset after render has begun that block. */
 int coda_dsp_publish_controls(CodaDSP *, const CodaControls *);
 int coda_dsp_push_event(CodaDSP *, const CodaNoteEvent *);
+/* Shares legacy FIFO/admission. All owner identity fields and harmonic_token MUST be
+   nonzero; only owner.cycle may be zero. OFF matches ALL owner fields + pitch, not rank/harmonic.
+   Caller supplies nonwrapping runtime identities; compiler tokens alone are
+   insufficient. Both kinds require fully valid modulation/velocity payloads. */
+int coda_dsp_push_performance_event(CodaDSP *, const CodaPerformanceEvent *);
 /* Queue ordered by absolute sample_offset from reset; offs precede ons at ties. */
 int coda_dsp_process(CodaDSP *, float *mono_output, uint32_t frame_count);
 void coda_dsp_stop(CodaDSP *);
@@ -67,6 +84,14 @@ typedef struct {
     CodaVoiceDiagnostic voices[CODA_DSP_VOICES];
 } CodaDSPDiagnostics;
 void coda_dsp_inspect(const CodaDSP *, CodaDSPDiagnostics *);
+typedef struct {
+    CodaNoteOwner owner;
+    uint64_t harmonic_token;
+    float base_velocity, effective_velocity, detune_cents, filter_delta;
+    uint8_t active, performance, pitch, rank, attack_mode, releasing;
+} CodaPerformanceVoiceDiagnostic;
+/* Same consumer-between-blocks/quiescence restriction as coda_dsp_inspect. */
+void coda_dsp_inspect_performance(const CodaDSP *, CodaPerformanceVoiceDiagnostic out[CODA_DSP_VOICES]);
 
 #ifdef __cplusplus
 }

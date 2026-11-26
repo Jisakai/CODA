@@ -1,0 +1,37 @@
+# M1b bounded DSP slice — November 26, 2026
+
+Implemented against SPEC §§8, 13, 16, 20 and the orchestrator DSP contract. This is DSP only, not completed M1b integration or native acceptance.
+
+## Production behavior
+
+- Existing CodaNoteEvent/source initializers, legacy gain 0.8, legacy event hash sequence and entry point remain. One tagged, fixed-capacity SPSC FIFO serves both APIs: 1023 usable entries, shared monotonic ordering, OFF-before-ON ties and 32 events/sample. Failed validation/full admission does not mutate producer admission state.
+- New POD CodaPerformanceEvent and CodaNoteOwner carry sample timing, exact epoch/plan/cycle/activation/instance ownership, independent harmonic token and ascending rank, attack, base/effective velocity and modulation. Every owner identity field and harmonic_token MUST be nonzero; only owner.cycle may be zero. No counter allocation or identity wrapping occurs here.
+- OFF releases only matching owner (all five fields) AND pitch in the performance domain. Rank, harmonic token, velocity and modulation may differ on OFF, but all payload fields still pass validation. Legacy and performance OFFs cannot release each other's voices. Same-pitch performance replacement takes a new owner and preserves a 4ms bounded steal tail.
+- Harmonic glide identity includes epoch/plan/cycle/activation/harmonic token, excluding instance. Staggered attacks retain the predecessor snapshot. Changing harmonic identity never clears held voices; normal 12-voice release-first/oldest stealing remains bounded.
+- Base and effective velocities must be finite in (0,1]; tiny positive chuck remains valid without minimum clamp. Base is retained; effective drives actual voice gain. Detune ±3 cents changes oscillator/sub frequency; normalized filter delta ±0.02 changes the actual cutoff lookup. Invalid producer values are rejected, not clamped. The resulting cutoff retains the existing safe DSP clamp.
+- Chuck uses the same voice_sample and all three preset oscillator parameter sets, FX and master. Central provisional constants: 2ms linear attack, 35ms decay to zero sustain, 18ms release from current amplitude, 8ms filter-envelope exponential time constant, deterministic per-voice xorshift32 noise at 0.24 raw mix with 12ms exponential time constant. Ordinary preset ADSR is bypassed only for chuck. Compiler rake/gate are not implemented here. No listening quality claim.
+- Separate fixed-size diagnostics expose exact voice owner, harmonic token, pitch, rank, mode, releasing state, base/effective velocity and modulation. Read only between render calls on the consumer, or under full quiescence. Existing diagnostics layout is unchanged. Performance event hashes cover identity and modulation; legacy hashes retain their original sequence.
+
+## Tests and actual local results
+
+New CodaDSP/tests/performance_tests.h is included and invoked by existing CodaDSP/tests/dsp_tests.cpp. Existing assertions remain. The existing two DSP workflow steps now build separate optimized and ASan/UBSan test-only lock-hook dylibs alongside their executables in build/generated/dsp, linking via @rpath and @executable_path. All original flags, gates and transport steps remain unchanged.
+
+Native tests added: five-field stale OFF rejection; metadata-independent exact release/tails; both stagger directions/all 12 ranks; harmonic transitions; sorted predecessor glide; same-pitch replacement; legacy/performance isolation; all ten gain levels with actual output energy; base/effective separation in diagnostics plus actual audio: base 0.7/effective 0.31 renders identically to base/effective 0.31 and at lower energy than base/effective 0.7; tiny positive chuck; detune/filter endpoints and independent audio differences; invalid ON/OFF validation and unchanged admission; mixed ordering/full/recovery/32-vs-33 admission; all-presets finite bounded chuck energy, decay, release and ordinary differences; deterministic noise; render allocation/free hooks on the new path. Apple-only dyld interposition lives in the separate tests/lock_hooks.cpp dynamic library, which owns thread-local enable/count state exposed through the C test-only lock_hooks.h API. dyld excludes the interposing image itself, allowing wrappers to call through safely while instrumenting production DSP calls in the main executable. Self-calibration initializes both locks outside counting, calls real pthread_mutex_lock and os_unfair_lock_lock with counting enabled, safely unlocks, disables counting and asserts exactly one count for each individual lock and exactly two combined. Every instrumented production coda_dsp_process call in performance_audio enables the hooks immediately before rendering and disables them immediately afterward, asserting zero locks alongside the existing allocation/free assertions. These hooks cover those lock entry points, not every possible synchronization primitive.
+
+Executed locally:
+
+- python -m unittest discover -s Tests/Scaffold -v: 35 tests, OK, one host symlink capability skip. IPA messages in this suite describe fixtures only, not a built device IPA.
+- git diff --check: passed (existing CRLF conversion warnings only).
+- Get-Command/where discovery: clang++, g++, cl, swift and xcodebuild unavailable on PATH. Standard LLVM/MSYS paths and recursive Visual Studio 2022 compiler search also found no native compiler. No installs or machine changes.
+
+C++ executable, new assertions, lock interposition and sanitizers have NOT been compiled/executed on this Windows host. They require the existing Mac build/test commands; this report does not claim native green. No CI started, IPA produced, simulator/pixel review, iPad installation or listening performed.
+
+Native commands for the orchestrator (not run locally):
+
+Use the complete build/link/run commands in the existing two DSP steps of .github/workflows/unsigned-ipa.yml; the executable must load its corresponding separate dylib. Same-image hooks in the executable cannot cover its own production calls. Native execution remains required to validate dyld binding, calibration, production lock counts and sanitizer compatibility; scaffold checks do not establish any of these.
+
+## Required next transport/session slice
+
+Current transport emits CodaNoteEvent using region IDs; MusicSession still converts stepOffset into CodaGridEvent, losing fractional timing/performance payload. Neither is edited here. Transport must assign fresh nonwrapping prepare epoch, plan generation, cycle and activation qualifications to compiler-local tokens; restore/audition needs a fresh activation each incarnation. It must preserve exact owner on OFF, sorted rank and harmonic membership across staggered notes, offset timing/cycle variation, publication-before-render ordering and shared backpressure. A new plan/seek/audition must retire exact prior ownership without stale OFF collision. DSP validates identities structurally; it cannot prove caller uniqueness or lifecycle safety. Full transport/session/native integration, sanitizer execution and physical feel acceptance remain REQUIRED.
+
+Changed files: CodaDSP/include/coda_dsp.h; CodaDSP/src/coda_dsp.cpp; CodaDSP/tests/dsp_tests.cpp; new CodaDSP/tests/performance_tests.h; new CodaDSP/tests/lock_hooks.h and lock_hooks.cpp; the two DSP workflow steps; this report. Preserved unrelated dirty files, foundation compiler/model, UI, transport/session and all other workflow configuration. No staging, commits, pushes or CI triggers.

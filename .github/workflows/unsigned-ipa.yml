@@ -59,9 +59,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/generated/dsp
+          clang++ -std=c++20 -O2 -Wall -Wextra -pthread -dynamiclib \
+            CodaDSP/tests/lock_hooks.cpp -Wl,-install_name,@rpath/libcoda_lock_hooks.dylib \
+            -o build/generated/dsp/libcoda_lock_hooks.dylib
           clang++ -std=c++20 -O2 -Wall -Wextra -pthread \
             -I CodaDSP/include \
             CodaDSP/src/coda_dsp.cpp CodaDSP/tests/dsp_tests.cpp \
+            -L build/generated/dsp -lcoda_lock_hooks -Wl,-rpath,@executable_path \
             -o build/generated/dsp/dsp_tests
           build/generated/dsp/dsp_tests build/generated/dsp/four-bar \
             | tee build/generated/dsp/DSP-verification.txt
@@ -70,8 +74,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -dynamiclib \
+            CodaDSP/tests/lock_hooks.cpp -Wl,-install_name,@rpath/libcoda_lock_hooks_sanitized.dylib \
+            -o build/generated/dsp/libcoda_lock_hooks_sanitized.dylib
           clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I CodaDSP/include CodaDSP/src/coda_dsp.cpp CodaDSP/tests/dsp_tests.cpp \
+            -L build/generated/dsp -lcoda_lock_hooks_sanitized -Wl,-rpath,@executable_path \
             -o build/generated/dsp/dsp_tests_sanitized
           # Apple's runtime rejects LeakSanitizer; retain address/UB checks.
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
