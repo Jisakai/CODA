@@ -194,5 +194,8 @@ static void test_performance() {
     require(coda_test_lock_count()==2,"both real lock hooks increase render_locks by exactly two");
     require(pthread_mutex_destroy(&mutex)==0,"calibration mutex destruction");
 #endif
-    test_performance_ownership();test_performance_admission();test_performance_signal();test_performance_glide();
+    std::fprintf(stderr,"DSP calibration complete; ownership\n");test_performance_ownership();
+    std::fprintf(stderr,"DSP admission\n");test_performance_admission();
+    std::fprintf(stderr,"DSP signal\n");test_performance_signal();
+    std::fprintf(stderr,"DSP glide\n");test_performance_glide();
 }

@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)startWithError:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(start());
 - (void)close;
 - (int)publishPlan:(const CodaPlan *)plan NS_SWIFT_NAME(publish(plan:));
+- (int)publishPerformancePlan:(const CodaPerformancePlan *)plan generation:(uint64_t *)generation NS_SWIFT_NAME(publish(performancePlan:generation:));
+- (int)enqueuePerformanceCycle:(const CodaPerformanceCycle *)cycle generation:(uint64_t)generation NS_SWIFT_NAME(enqueue(performanceCycle:generation:));
+- (CodaPerformanceStatus)performanceStatus;
 - (int)publishControls:(const CodaControls *)controls NS_SWIFT_NAME(publish(controls:));
 - (int)auditionPitches:(const uint8_t * _Nullable)pitches count:(uint32_t)count frames:(uint32_t)frames NS_SWIFT_NAME(audition(pitches:count:frames:));
 - (CodaTransportStatus)transportStatus;

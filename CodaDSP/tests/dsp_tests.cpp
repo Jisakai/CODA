@@ -188,7 +188,9 @@ static std::vector<float> render_progression(int preset,uint32_t block) {
 #include "performance_tests.h"
 
 int main(int argc,char **argv) {
+    std::setbuf(stderr,nullptr);std::fprintf(stderr,"DSP phase: performance calibration/tests\n");
     test_performance();
+    std::fprintf(stderr,"DSP phase: legacy tests\n");
     test_core(CODA_PRESET_PLUCK);test_core(CODA_PRESET_CURRENTS);test_core(CODA_PRESET_WOBBLE);
     test_release_and_events();test_pass2();test_validation_and_queue();test_controls_change_signal();test_control_endpoints_and_sample_rates();test_mute_tail();test_dense_voice_stealing();
     const char *names[]={"Pluck","Currents","Wobble"};

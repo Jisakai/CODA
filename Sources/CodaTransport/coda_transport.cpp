@@ -50,6 +50,96 @@ bool valid(const CodaPlan &p) {
 }
 }
 struct CodaTransport {
+    CodaPerformancePlan performancePlans[CODA_PLAN_SLOTS]{};
+    uint64_t generations[CODA_PLAN_SLOTS]{};
+    bool performanceModes[CODA_PLAN_SLOTS]{};
+    uint64_t epoch=0, generationCounter=0, activation=0;
+    struct Lane {
+        CodaPerformanceCycle cycles[4]{};
+        std::atomic<uint64_t> head{0}, tail{0};
+        uint64_t producerGeneration=0, lastCycle=0;
+        double rate=0; uint16_t length=0;
+    } lanes[CODA_PLAN_SLOTS];
+    // Producer owns occupancy; consumer publishes retirement only after last use.
+    uint64_t occupied[CODA_PLAN_SLOTS]{};
+    std::atomic<uint64_t> retired[CODA_PLAN_SLOTS]{};
+    uint32_t queuedSlots[CODA_PLAN_SLOTS]{};
+    std::atomic<uint64_t> outApplied{0},outRejected{0},outRequired{0};
+    int reserveSlot() {
+        unsigned used=0;int free=-1;
+        for(unsigned i=0;i<CODA_PLAN_SLOTS;++i) {
+            if(occupied[i] && retired[i].load(std::memory_order_acquire)==occupied[i]) occupied[i]=0;
+            if(occupied[i]) ++used;else free=int(i);
+        }
+        return used>=3?-1:free;
+    }
+    const CodaPerformanceCycle *pc=nullptr;
+    uint64_t generation=0, localPosition=0, underruns=0;
+    bool performance=false, starved=false;
+    CodaPerformanceEvent performanceHeld[12]{};
+    bool performanceOn[12]{};
+    std::atomic<uint64_t> outEpoch{0}, outGeneration{0}, outPerformanceCycle{0}, outRequested{0}, outUnderruns{0};
+    std::atomic<uint32_t> outStarved{0},outQueued{0};
+    bool freshActivation() {
+        if(activation==UINT64_MAX) {++failures; playing=false; return false;}
+        ++activation; return true;
+    }
+    void performanceEmit(CodaPerformanceEvent e, bool qualified=false) {
+        e.sample_offset=int64_t(clock);
+        if(!qualified) e.owner={epoch,generation,pc->cycle_index,activation,e.owner.instance};
+        if(!coda_dsp_push_performance_event(dsp,&e)) {++failures; playing=false;return;}
+        if(e.kind) { for(unsigned i=0;i<12;++i) if(!performanceOn[i]) {
+            performanceOn[i]=true;performanceHeld[i]=e;break;
+        }} else for(unsigned i=0;i<12;++i) if(performanceOn[i] &&
+            performanceHeld[i].owner.instance==e.owner.instance && performanceHeld[i].pitch==e.pitch) performanceOn[i]=false;
+    }
+    void performanceRelease() {
+        for(unsigned i=0;i<12;++i) if(performanceOn[i]) {
+            auto e=performanceHeld[i];e.kind=0;performanceEmit(e,true);
+        }
+    }
+    void performanceRestore() {
+        CodaPerformanceEvent notes[12]{}; bool on[12]{};
+        index=0;
+        while(index<pc->count && uint64_t(pc->events[index].sample_offset)<=localPosition) {
+            auto e=pc->events[index++];
+            if(e.kind) {for(unsigned i=0;i<12;++i) if(!on[i]) {notes[i]=e;on[i]=true;break;}}
+            else for(unsigned i=0;i<12;++i) if(on[i] && notes[i].owner.instance==e.owner.instance) on[i]=false;
+        }
+        if(!freshActivation()) return;
+        for(unsigned i=0;i<12;++i) if(on[i]) performanceEmit(notes[i]);
+    }
+    void performanceDue() {
+        while(index<pc->count && uint64_t(pc->events[index].sample_offset)<=localPosition) {
+            auto e=pc->events[index++];
+            if(e.kind) performanceEmit(e);
+            else for(unsigned i=0;i<12;++i) if(performanceOn[i] && performanceHeld[i].owner.instance==e.owner.instance) {
+                e.owner=performanceHeld[i].owner;performanceEmit(e,true);break;
+            }
+        }
+    }
+    void performanceTick(bool changed) {
+        if(!playing || !pc) return;
+        if(localPosition>=pc->sample_count) {
+            if(!auditioning) performanceDue();
+            performanceRelease();
+            if(!plans[active].looping) {playing=false;completed=true;return;}
+            auto &lane=lanes[active];
+            const auto t=lane.tail.load(std::memory_order_relaxed), h=lane.head.load(std::memory_order_acquire);
+            if(t==h) {
+                if(!starved) {++underruns;starved=true;}
+                return;
+            }
+            pc=&lane.cycles[t%4];lane.tail.store(t+1,std::memory_order_release);
+            localPosition=0;cycle=pc->cycle_index;index=0;starved=false;restore=!auditioning;
+        }
+        if(!auditioning) {
+            if(restore || changed) {performanceRestore();restore=false;}
+            else performanceDue();
+        }
+        ++localPosition;++position;
+    }
+
     CodaDSP *dsp=nullptr;
     CodaPlan plans[CODA_PLAN_SLOTS]{};
     std::atomic<uint32_t> head{0}, tail{0};
@@ -78,6 +168,7 @@ struct CodaTransport {
         return true;
     }
     void release() {
+        performanceRelease();
         for(auto &h:held) if(h.on) emit(0,h.pitch,h.rank,h.region);
     }
     uint32_t newRegion() {
@@ -101,18 +192,51 @@ struct CodaTransport {
         }
     }
     void tick() {
+        // Leave room for the DSP signed sample clock. Exhaustion cannot alias an
+        // earlier timestamp; retire ownership once and then remain silent.
+        if(clock>=uint64_t(INT64_MAX)-1) {release();playing=false;++clock;return;}
+
         // At most one plan and one audition per sample. Old queue contains no
         // future notes: the scheduler is the exclusive DSP producer/consumer.
         const auto h=head.load(std::memory_order_acquire);
         bool changed=false;
         if(tail.load(std::memory_order_relaxed)!=h) {
+            const auto first=tail.load(std::memory_order_relaxed), candidate=queuedSlots[(h-1)%CODA_PLAN_SLOTS];
+            // Latest cumulative snapshot supersedes every earlier pending one.
+            for(auto q=first;q<h-1;++q) {
+                const auto slot=queuedSlots[q%CODA_PLAN_SLOTS];
+                retired[slot].store(generations[slot],std::memory_order_release);
+            }
+            const auto &incoming=plans[candidate];
+            const bool explicitPosition=incoming.position_revision>positionRevision;
+            const bool restart=incoming.playback_revision>playbackRevision && incoming.playing && completed;
+            const bool atBoundary=hasPlan && playing && plans[active].looping &&
+                (performance ? pc && localPosition>=pc->sample_count
+                             : position>=boundary((cycle+1)*plans[active].length));
+            const auto required=atBoundary ? cycle+1:cycle;
+            const bool reject=performanceModes[candidate] && hasPlan && !explicitPosition && !restart &&
+                performancePlans[candidate].initial_cycle.cycle_index!=required;
+            if(reject) {
+                outRequired.store(required,std::memory_order_relaxed);
+                outRejected.store(generations[candidate],std::memory_order_release);
+                retired[candidate].store(generations[candidate],std::memory_order_release);
+                tail.store(h,std::memory_order_release);
+            } else {
             release(); auditioning=false;
             const auto oldCycle=cycle, oldPosition=position;
+            const bool oldPerformance=performance, restarting=completed;
+            const auto oldLocalPosition=localPosition;
             const auto oldLength=hasPlan?plans[active].length:0;
             const auto oldRate=hasPlan?plans[active].samples_per_step:1;
             const double oldStep=hasPlan?double(position-boundary(cycle*oldLength))/oldRate:0;
-            const auto t=h-1; // superseded queued snapshots never produce notes
-            active=t%CODA_PLAN_SLOTS; hasPlan=true;
+            const auto t=h-1;
+            const bool hadPlan=hasPlan;const auto previous=active;
+            active=candidate; hasPlan=true;
+            performance=performanceModes[active];generation=generations[active];
+            if(performance) {
+                pc=&performancePlans[active].initial_cycle;
+                localPosition=0; starved=false;
+            }
             const auto &p=plans[active];
             const bool playbackCommand=p.playback_revision>playbackRevision;
             const bool positionCommand=p.position_revision>positionRevision;
@@ -123,6 +247,13 @@ struct CodaTransport {
             if(oldLength==p.length && oldRate==p.samples_per_step) {
                 cycle=oldCycle; position=oldPosition;
             }
+            if(oldLength && oldPerformance!=performance && !completed) {
+                cycle=required;
+                if(atBoundary || oldLength!=p.length || oldRate!=p.samples_per_step) {
+                    const double localStep=atBoundary?0:std::fmod(oldStep,p.length);
+                    position=uint64_t(std::round((double(cycle*p.length)+localStep)*p.samples_per_step));
+                }
+            }
             if(positionCommand) {
                 cycle=0; position=boundary(p.seek_step<p.length?p.seek_step:p.length-1);
                 positionRevision=p.position_revision; completed=false;
@@ -131,12 +262,28 @@ struct CodaTransport {
                 if(p.playing && completed) {cycle=0; position=0; completed=false;}
                 playing=p.playing; playbackRevision=p.playback_revision;
             }
+            if(performance) {
+                cycle=pc->cycle_index;
+                if(positionCommand) {
+                    const auto step=p.seek_step<p.length?p.seek_step:p.length-1;
+                    localPosition=boundary(cycle*p.length+step)-pc->sample_origin;
+                } else if(oldLength && oldCycle==cycle) {
+                    if(playbackCommand && p.playing && restarting) localPosition=0;
+                    else if(oldPerformance && oldLength==p.length && oldRate==p.samples_per_step) localPosition=oldLocalPosition;
+                    else localPosition=uint64_t(std::round((double(cycle*p.length)+std::fmod(oldStep,p.length))*p.samples_per_step))-pc->sample_origin;
+                    if(localPosition>pc->sample_count) localPosition=pc->sample_count;
+                } else localPosition=0;
+                position=pc->sample_origin+localPosition;
+            }
             origin=position; index=0;
             for(auto &id:regionIDs) id=0;
             // ACK previous slot only AFTER its last access. Retain current slot.
+            if(hadPlan) retired[previous].store(generations[previous],std::memory_order_release);
+            outApplied.store(generations[active],std::memory_order_release);
             if(t>0) outAck.store(t,std::memory_order_release);
             tail.store(h,std::memory_order_release);
             restore=playing; changed=true;
+            }
         }
         if(ah.load(std::memory_order_acquire)!=at.load(std::memory_order_relaxed)) {
             if(!changed) release();
@@ -150,6 +297,9 @@ struct CodaTransport {
             changed=true;
         } else if(auditioning && clock>=auditionEnd) {
             release(); auditioning=false; restore=playing; changed=true;
+        }
+        if(hasPlan && performance) {
+            performanceTick(changed);++clock;return;
         }
         if(hasPlan && playing) {
             const auto &p=plans[active];
@@ -180,6 +330,45 @@ struct CodaTransport {
         ++clock;
     }
 };
+namespace {
+bool cycleBoundary(uint64_t cycle,double rate,uint16_t length,uint64_t &origin) {
+    if(cycle>maxGrid/length || cycle*length>maxGrid-length) return false;
+    const double value=std::round(double(cycle*length)*rate);
+    if(!std::isfinite(value) || value>double(INT64_MAX)-192000.*128.) return false;
+    origin=uint64_t(value);return true;
+}
+bool validCycle(const CodaPerformanceCycle &c,double rate,uint16_t length) {
+    uint64_t origin,end;
+    if(c.count>CODA_PLAN_EVENTS || !cycleBoundary(c.cycle_index,rate,length,origin) ||
+       !cycleBoundary(c.cycle_index+1,rate,length,end) || c.sample_origin!=origin || !c.sample_count || c.sample_count!=end-origin) return false;
+    CodaPerformanceEvent held[12]{};bool on[12]{};unsigned group=0;
+    for(uint32_t i=0;i<c.count;++i) {
+        const auto &e=c.events[i];const auto &o=e.owner;
+        if(e.sample_offset<0 || uint64_t(e.sample_offset)>c.sample_count || e.kind>1 || e.pitch>127 || e.voice_rank>=12 ||
+           e.attack_mode>1 || !o.instance || o.prepare_epoch || o.plan_generation || o.cycle || o.activation || !e.harmonic_token ||
+           !std::isfinite(e.base_velocity) || e.base_velocity<=0 || e.base_velocity>1 ||
+           !std::isfinite(e.effective_velocity) || e.effective_velocity<=0 || e.effective_velocity>1 ||
+           !std::isfinite(e.detune_cents) || std::abs(e.detune_cents)>3 ||
+           !std::isfinite(e.filter_delta) || std::abs(e.filter_delta)>.02f) return false;
+        if(i && (e.sample_offset<c.events[i-1].sample_offset || (e.sample_offset==c.events[i-1].sample_offset && e.kind<c.events[i-1].kind))) return false;
+        if(!i || e.sample_offset!=c.events[i-1].sample_offset) group=0;
+        if(++group>32) return false;
+        if(e.kind) {
+            if(uint64_t(e.sample_offset)==c.sample_count) return false;
+            for(uint32_t j=0;j<i;++j) if(c.events[j].kind && c.events[j].owner.instance==o.instance) return false;
+            for(unsigned j=0;j<12;++j) if(on[j] && held[j].pitch==e.pitch) return false;
+            unsigned j=0;while(j<12 && on[j]) ++j;if(j==12) return false;
+            held[j]=e;on[j]=true;
+        } else {
+            unsigned j=0;while(j<12 && (!on[j] || held[j].owner.instance!=o.instance || held[j].pitch!=e.pitch)) ++j;
+            if(j==12) return false;
+            on[j]=false;
+        }
+    }
+    for(bool h:on) if(h) return false;
+    return true;
+}
+}
 extern "C" {
 CodaTransport *coda_transport_create() {
     auto *t=new(std::nothrow) CodaTransport;
@@ -190,7 +379,13 @@ void coda_transport_destroy(CodaTransport *t) { if(t) {coda_dsp_destroy(t->dsp);
 int coda_transport_prepare(CodaTransport *t,double sr) {
     if(!t) return 0;
     t->prepared=false;
-    if(!coda_dsp_prepare(t->dsp,sr,1)) return 0;
+    if(t->epoch==UINT64_MAX || !coda_dsp_prepare(t->dsp,sr,1)) return 0;
+    ++t->epoch;t->activation=0;
+    t->performance=false;t->pc=nullptr;t->underruns=0;t->starved=false;
+    for(unsigned i=0;i<CODA_PLAN_SLOTS;++i) {t->occupied[i]=0;t->retired[i]=0;t->lanes[i].head=0;t->lanes[i].tail=0;t->lanes[i].producerGeneration=0;}
+    t->outApplied=0;t->outRejected=0;t->outRequired=0;
+    for(auto &on:t->performanceOn) on=false;
+    t->outEpoch=t->epoch;t->outGeneration=0;t->outPerformanceCycle=0;t->outRequested=0;t->outUnderruns=0;t->outStarved=0;t->outQueued=0;
     t->head=0; t->tail=0; t->ch=0; t->ct=0; t->ah=0; t->at=0;
     t->hasPlan=false; t->playing=false; t->auditioning=false; t->restore=false;
     t->playbackRevision=0; t->positionRevision=0; t->completed=false; t->outPlaybackState=0;
@@ -203,10 +398,13 @@ int coda_transport_prepare(CodaTransport *t,double sr) {
 int coda_transport_publish(CodaTransport *t,const CodaPlan *p) {
     if(!t || !t->prepared || !p || !valid(*p)) return -1;
     const auto h=t->head.load(std::memory_order_relaxed);
-    // tail identifies first queued slot; tail-1 is still active. Keep it alive.
-    const auto tail=t->tail.load(std::memory_order_acquire);
-    if(h-(tail?tail-1:0)>=CODA_PLAN_SLOTS-1 || h==UINT32_MAX) return 0;
-    t->plans[h%CODA_PLAN_SLOTS]=*p;
+    const int available=t->reserveSlot();
+    if(available<0 || h==UINT32_MAX) return 0;
+    if(t->generationCounter==UINT64_MAX) return -1;
+    const auto slot=uint32_t(available);
+    t->performanceModes[slot]=false;
+    t->generations[slot]=++t->generationCounter;t->occupied[slot]=t->generationCounter;
+    t->plans[slot]=*p;t->queuedSlots[h%CODA_PLAN_SLOTS]=slot;
     t->head.store(h+1,std::memory_order_release); return 1;
 }
 int coda_transport_controls(CodaTransport *t,const CodaControls *c) {
@@ -233,8 +431,19 @@ void coda_transport_render(CodaTransport *t,float *out,uint32_t n) {
     for(unsigned i=0;i<7 && c!=h;++i,++c)
         if(!coda_dsp_publish_controls(t->dsp,&t->controls[c%8])) ++t->failures;
     t->ct.store(c,std::memory_order_release);
-    for(uint32_t i=0;i<n;++i) {t->tick(); if(!coda_dsp_process(t->dsp,out+i,1)) ++t->failures;}
+    for(uint32_t i=0;i<n;++i) {
+        if(t->clock>=uint64_t(INT64_MAX)) {out[i]=0;continue;}
+        t->tick(); if(!coda_dsp_process(t->dsp,out+i,1)) ++t->failures;
+    }
     CodaDSPDiagnostics d{}; coda_dsp_inspect(t->dsp,&d);
+    t->outGeneration.store(t->performance?t->generation:0);
+    t->outPerformanceCycle.store(t->performance && t->pc?t->pc->cycle_index:0);
+    t->outRequested.store(t->performance && t->pc?t->pc->cycle_index+1:0);
+    if(t->performance) {
+        const auto &lane=t->lanes[t->active];
+        t->outQueued.store(uint32_t(lane.head.load(std::memory_order_acquire)-lane.tail.load(std::memory_order_relaxed)));
+    } else t->outQueued.store(0);
+    t->outUnderruns.store(t->underruns);t->outStarved.store(t->starved);
     t->outClock.store(t->clock,std::memory_order_relaxed); t->outCycle.store(t->cycle,std::memory_order_relaxed);
     t->outDelivered.store(d.delivered,std::memory_order_relaxed); t->outLate.store(d.late,std::memory_order_relaxed);
     t->outHash.store(d.event_hash,std::memory_order_relaxed); t->outFailures.store(t->failures,std::memory_order_relaxed);
@@ -249,4 +458,44 @@ void coda_transport_status(const CodaTransport *t,CodaTransportStatus *s) {
     *s={t->outClock.load(),t->outCycle.load(),t->outDelivered.load(),t->outLate.load(),t->outHash.load(),
         intent>>1,t->outAck.load(),t->outFailures.load(),t->outRegion.load(),uint16_t(p&65535),uint8_t(intent&1)};
 }
+int coda_transport_publish_performance(CodaTransport *t,const CodaPerformancePlan *p,uint64_t *accepted) {
+    if(!t || !t->prepared || !p || !accepted) return -1;
+    CodaPlan shell{};shell.playback_revision=p->playback_revision;shell.position_revision=p->position_revision;
+    shell.samples_per_step=p->samples_per_step;shell.length=p->length;shell.seek_step=p->seek_step;
+    shell.playing=p->playing;shell.looping=p->looping;
+    if(!valid(shell) || !validCycle(p->initial_cycle,p->samples_per_step,p->length) || t->generationCounter==UINT64_MAX) return -1;
+    const auto h=t->head.load(std::memory_order_relaxed);
+    const int available=t->reserveSlot();
+    if(available<0 || h==UINT32_MAX) return 0;
+    const auto slot=uint32_t(available);const auto g=t->generationCounter+1;
+    t->performancePlans[slot]=*p;t->plans[slot]=shell;t->performanceModes[slot]=true;t->generations[slot]=g;
+    auto &lane=t->lanes[slot];lane.head=0;lane.tail=0;lane.producerGeneration=g;
+    lane.rate=p->samples_per_step;lane.length=p->length;lane.lastCycle=p->initial_cycle.cycle_index;
+    t->occupied[slot]=g;t->generationCounter=g;t->queuedSlots[h%CODA_PLAN_SLOTS]=slot;
+    *accepted=g;t->head.store(h+1,std::memory_order_release);return 1;
+}
+int coda_transport_enqueue_performance_cycle(CodaTransport *t,uint64_t g,const CodaPerformanceCycle *c) {
+    if(!t || !t->prepared || !c || !g) return -1;
+    for(unsigned slot=0;slot<CODA_PLAN_SLOTS;++slot) {
+        if(t->occupied[slot]!=g || t->retired[slot].load(std::memory_order_acquire)==g) continue;
+        auto &lane=t->lanes[slot];
+        if(lane.producerGeneration!=g || lane.lastCycle==UINT64_MAX || c->cycle_index!=lane.lastCycle+1 ||
+           !validCycle(*c,lane.rate,lane.length)) return -1;
+        const auto h=lane.head.load(std::memory_order_relaxed),tail=lane.tail.load(std::memory_order_acquire);
+        if(h-(tail?tail-1:0)>=3 || h==UINT64_MAX) return 0;
+        lane.cycles[h%4]=*c;lane.lastCycle=c->cycle_index;
+        lane.head.store(h+1,std::memory_order_release);return 1;
+    }
+    return -1;
+}
+void coda_transport_performance_status(const CodaTransport *t,CodaPerformanceStatus *s) {
+    if(!t || !s) return;
+    *s={t->outEpoch.load(),t->outGeneration.load(),t->outPerformanceCycle.load(),t->outRequested.load(),t->outUnderruns.load(),t->outQueued.load(),uint8_t(t->outStarved.load()),
+        t->outApplied.load(std::memory_order_acquire),t->outRejected.load(std::memory_order_acquire),t->outRequired.load()};
+}
+
+void coda_transport_inspect_performance(const CodaTransport *t,CodaPerformanceVoiceDiagnostic out[CODA_DSP_VOICES]) {
+    if(t && out) coda_dsp_inspect_performance(t->dsp,out);
+}
+
 }

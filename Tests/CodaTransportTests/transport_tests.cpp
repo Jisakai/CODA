@@ -7,6 +7,11 @@
 #include <vector>
 #include <condition_variable>
 #include <chrono>
+#if defined(__APPLE__)
+#include "../../CodaDSP/tests/lock_hooks.h"
+#include <pthread.h>
+#include <os/lock.h>
+#endif
 
 static void check(bool ok,const char *s) {if(!ok) {std::fprintf(stderr,"FAIL: %s\n",s);std::exit(1);}}
 struct Owner {
@@ -26,11 +31,17 @@ static CodaTransportStatus status(CodaTransport *t) {CodaTransportStatus s{}; co
 static void run(CodaTransport *t,uint32_t n,uint32_t block=257) {
     float out[1024]; check(block<=1024,"test block");
     count_allocations=true;
+#if defined(__APPLE__)
+    coda_test_lock_begin();
+#endif
     for(uint32_t at=0;at<n;) {
         auto size=std::min(block,n-at); coda_transport_render(t,out,size); at+=size;
         for(uint32_t i=0;i<size;++i) check(std::isfinite(out[i]) && std::abs(out[i])<0.73f,"finite safe audio");
     }
     count_allocations=false;
+#if defined(__APPLE__)
+    coda_test_lock_end();check(coda_test_lock_count()==0,"transport render zero mutex/unfair locks");
+#endif
     check(allocation_count==0 && deallocation_count==0,"zero render allocations/deallocations");
     check(status(t).failures==0 && status(t).late==0,"no admission failures or late events");
 }
@@ -268,7 +279,21 @@ static void concurrencyAndReprepare() {
     check(!closed.load() && !gate.enter(),"close excludes new callbacks and waits for in-flight reader");
     gate.leave(); closer.join(); check(closed.load() && !gate.enter(),"close joins reader before destruction");
 }
+#include "performance_tests.h"
 int main() {
+    std::setbuf(stderr,nullptr);
+#if defined(__APPLE__)
+    pthread_mutex_t calibrationMutex;check(pthread_mutex_init(&calibrationMutex,nullptr)==0,"lock calibration init");
+    os_unfair_lock unfair=OS_UNFAIR_LOCK_INIT;
+    coda_test_lock_begin();pthread_mutex_lock(&calibrationMutex);pthread_mutex_unlock(&calibrationMutex);coda_test_lock_end();
+    check(coda_test_lock_count()==1,"real mutex hook exact one");
+    coda_test_lock_begin();os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);coda_test_lock_end();
+    check(coda_test_lock_count()==1,"real unfair hook exact one");
+    coda_test_lock_begin();pthread_mutex_lock(&calibrationMutex);pthread_mutex_unlock(&calibrationMutex);
+    os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);coda_test_lock_end();
+    check(coda_test_lock_count()==2,"both real hooks exact two");pthread_mutex_destroy(&calibrationMutex);
+#endif
+
     // A stuck production queue/gate fails deterministically instead of hanging CI.
     std::mutex mutex; std::condition_variable cv; bool finished=false;
     std::thread watchdog([&] {std::unique_lock lock(mutex);
@@ -280,6 +305,8 @@ int main() {
     void (*volatile freeProbe)(void *)=::operator delete;
     count_allocations=true; auto *probe=allocProbe(16); freeProbe(probe); count_allocations=false;
     check(allocation_count && deallocation_count,"allocation hooks calibrated"); allocation_count=deallocation_count=0;
+    performanceModePhase();performanceBoundaryRejection();performanceConcurrentReconfiguration();
+    performanceTransport(); performanceTransitions(); performanceAdmission(); performanceRetriggerAndAudio(); performanceConcurrentRefill(); performanceAbsoluteOrigins(); performanceNonzeroSeekAndConfiguration();
     timing(); transitions(); nonloopBoundaries(); auditionAtEnd(); durableIntent(); fractionalPauseIntent(); pressureAndValidation(); concurrencyAndReprepare();
     {std::lock_guard lock(mutex); finished=true;} cv.notify_one(); watchdog.join();
     std::puts("PASS: production transport timing, transitions, publication, controls, concurrency, gate, reprepare; zero render new/delete");

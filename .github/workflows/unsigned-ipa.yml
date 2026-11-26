@@ -67,7 +67,7 @@ jobs:
             CodaDSP/src/coda_dsp.cpp CodaDSP/tests/dsp_tests.cpp \
             -L build/generated/dsp -lcoda_lock_hooks -Wl,-rpath,@executable_path \
             -o build/generated/dsp/dsp_tests
-          build/generated/dsp/dsp_tests build/generated/dsp/four-bar \
+          python3 scripts/run_native_test.py build/generated/dsp/dsp_tests build/generated/dsp/four-bar \
             | tee build/generated/dsp/DSP-verification.txt
 
       - name: Build and run DSP sanitizers
@@ -83,7 +83,7 @@ jobs:
             -o build/generated/dsp/dsp_tests_sanitized
           # Apple's runtime rejects LeakSanitizer; retain address/UB checks.
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
-            build/generated/dsp/dsp_tests_sanitized
+            python3 scripts/run_native_test.py build/generated/dsp/dsp_tests_sanitized
 
       - name: Test production transport and sanitizers
         shell: bash
@@ -94,15 +94,19 @@ jobs:
           clang++ -std=c++20 -O2 -Wall -Wextra -pthread \
             -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
             CodaDSP/src/coda_dsp.cpp Sources/CodaTransport/coda_transport.cpp \
-            Tests/CodaTransportTests/transport_tests.cpp -o build/generated/transport/transport_tests
-          build/generated/transport/transport_tests
+            Tests/CodaTransportTests/transport_tests.cpp \
+            -L build/generated/dsp -lcoda_lock_hooks -Wl,-rpath,@executable_path/../dsp \
+            -o build/generated/transport/transport_tests
+          python3 scripts/run_native_test.py build/generated/transport/transport_tests
           clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
             CodaDSP/src/coda_dsp.cpp Sources/CodaTransport/coda_transport.cpp \
-            Tests/CodaTransportTests/transport_tests.cpp -o build/generated/transport/transport_tests_sanitized
+            Tests/CodaTransportTests/transport_tests.cpp \
+            -L build/generated/dsp -lcoda_lock_hooks_sanitized -Wl,-rpath,@executable_path/../dsp \
+            -o build/generated/transport/transport_tests_sanitized
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
-            build/generated/transport/transport_tests_sanitized
+            python3 scripts/run_native_test.py build/generated/transport/transport_tests_sanitized
 
       - name: Prepare exact iPadOS 27.2 simulator destination
         shell: bash
