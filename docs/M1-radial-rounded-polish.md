@@ -1,5 +1,37 @@
 # M1 radial rounded-arc polish
 
+## Final third bounded correction - November 26, 2026
+
+Against HEAD `70deac2af07a6f5e18a0e24bcf1e967ca7e2ea7a`, exact native run **45863773368 completed FAILURE**. This is correction **3 of maximum 3**, pending native verification, not an accepted fix. Hermes owns review/release. No M1b code was started.
+
+### Actual evidence and screenshot pixels
+
+Read the exact supplied `t_61b56adc-native-failure.log`: grouping actual XCTest assertion-error records by source line gives **81 at line 200 and 2 at line 252**, exactly **83**. The original full-grid SwiftUI `Path.contains` checks and the two newly added exact cap-tip SwiftUI checks fail false versus true. Adjacent local/placed/bridged CGPath checks and explicit move/close/cubic checks pass. Therefore neither baking placement before bridging nor replacing the stroke with one explicit closed contour resolved the native defect. The full-grid failures remain offset zero near ending caps across directions/counts/slots/scales; this is not evidence of a general winding reversal or placement defect. Supplied passing interaction/music/UI and DSP/transport/sanitizer results do not waive this failure.
+
+Separately inspected the **actual attached run-45863773368 pixels**:
+
+- `M1-radial-primary-fixture.png` (primary): two continuous dark curved backings with round exposed ends and lighter curved inset pills. Swap/duplicate/copy/delete follow the inner curve; Cm9/Cm11/Cm6/grid follow the outer curve. Backing remains visible between choices. The menu overlaps the first chord card and pitch-gutter labels; visible upper ends sit below the timeline.
+- `M1-radial-edge-fixture.png` (All): three continuous curved backings with round ends, curved pills, lower paging arrows, bright minor-family choices and dimmer other families. The menu overlaps chord-strip content, including part of the second chord label, and pitch labels. Visible upper ends sit below the timeline. Neither image shows yellow, straight-row choices or disconnected wedge sectors.
+
+These are observations of the supplied failed build, not new correction-3 screenshots or evidence of containment, every-edge fit, or physical testing.
+
+### Bounded diagnosis and implementation
+
+The remaining evidence supports investigating **curve decomposition at the SwiftUI consumer**: a narrow interior cap-tip region disagrees while CGPath consumers agree. The first two construction routes retained long circular-arc cubics. A coarse curve approximation could omit a narrow region near a curved extremum. This is a hypothesis, not an observed SwiftUI implementation detail; the log does not establish private winding/root-solving, ray-degeneracy or flattening internals. No winding reversal, fill-rule change or coordinate nudge is justified by the evidence.
+
+`Sources/CodaInteraction/EditorInputModel.swift`, `RadialArc.path`, now applies three levels of midpoint **de Casteljau subdivision** to each existing cubic: eight shorter cubic elements representing the same original polynomial, with the same traversal, endpoints and tangents (subject only to floating-point arithmetic). Lines, move and close are retained. This does not flatten to a polygon, approximate a circle afresh, enlarge the cap or change dimensions. It changes the curve decomposition delivered to SwiftUI, rather than repeating the failed contour-construction hypothesis. All production rendering and local/placed hit consumers still receive this one canonical CGPath; the existing SwiftUI bridge and real `Path.contains` assertions remain. The bounded cost is eight cubic elements per original cubic and one temporary path per path construction, off the audio thread. No render-thread code changed.
+
+`Tests/CodaAudioTests/EditorStoreRegressionTests.swift` adds only `testRoundedCapSubdivisionSeamsKeepNativeContainmentParity`: 204 strictly interior points around both caps, including junctions, tip and subdivision-angle samples, across two directions and three scales; each checks local CGPath, placed CGPath, bridged CGPath and real SwiftUI containment. **Every original full-grid loop/sample/three-way assertion and both exact cap-tip cases/contour assertions are unchanged.** No shadow wrapper, alternate oracle, relaxed tolerance, skip or redirection was introduced. Existing dimensions, minimum scale, maximum displacement **180 pt**, placement and round shapes remain unchanged.
+
+### Checks, limits and handoff
+
+- `python -m unittest discover -s Tests/Scaffold -v`: **35 run, 34 passed, 1 existing symlink-capability skip**. Synthetic fixture IPA checks are not a native app build.
+- `git diff --check`: passed; Git reports LF/CRLF conversion warnings. Inspected the complete three-file correction diff and read back the changes.
+- Tool discovery still finds no `swift`, `xcodebuild`, `xcrun` or `xcodegen`. No Swift compilation/execution or Python geometry replica was performed. This correction is **not native-proven** and no replacement pixels exist here.
+- Hermes must run the unchanged full-grid and exact cap-tip tests plus the additional regression, required native/sanitizer gates, and produce/review **new** primary and All screenshot pixels. If this final decomposition correction fails, report the native blocker; do not waive or proceed into M1b or make another speculative retry under this authorization.
+- Only the production geometry file, native regression file and this report were edited. Pre-existing dirty `.codex_task.md`, `DECISIONS_LOG.md`, `ROADMAP.md`, `docs/briefs/M1b.md` and untracked `docs/briefs/M1b-foundation.md` are preserved, as are unrelated fonts/IDEA/review files. No staging, commits, pushes, CI, dependencies, project/provider/config/credential changes, machine settings, compiler/model/editor launch, drawer/AI/music/audio/pattern work or interim IPA installation.
+- M1 remains accepted for progression, not physically tested. Native plus NEW-pixel gates still precede M1b code. No intermediate installation is needed; final M1b device IPA remains required and M2 remains gated. Stop for Hermes review.
+
 ## Second bounded correction - November 26, 2026
 
 Against supplied HEAD `7472bab76dcdbef439176437a3ac7c7d5f51c7cd`; Hermes reviews and runs native verification. This is attempt 2 of 3, not M1b implementation. Hermes launched the actual Codex CLI with explicit `-c model_provider="xingchi" -m gpt-6.1-sol` arguments; provider-side routing is not independently observable.

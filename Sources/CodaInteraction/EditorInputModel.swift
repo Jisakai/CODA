@@ -333,9 +333,55 @@ public struct RadialArc: Equatable, Sendable {
         outline.addArc(center: startCenter, radius: halfWidth,
                        startAngle: start + .pi, endAngle: start + 2 * .pi, clockwise: false)
         outline.closeSubpath()
+        // The native parity grid isolates SwiftUI-only misses just inside cap
+        // tips. Give its curve consumer shorter cubics without changing the
+        // contour: de Casteljau subdivision preserves each original polynomial.
+        let subdivided = CGMutablePath()
+        var current = CGPoint.zero
+        outline.applyWithBlock { pointer in
+            let element = pointer.pointee
+            switch element.type {
+            case .moveToPoint:
+                current = element.points[0]
+                subdivided.move(to: current)
+            case .addLineToPoint:
+                current = element.points[0]
+                subdivided.addLine(to: current)
+            case .addCurveToPoint:
+                Self.appendCubic(to: subdivided, from: current,
+                    control1: element.points[0], control2: element.points[1],
+                    end: element.points[2], depth: 3)
+                current = element.points[2]
+            case .closeSubpath:
+                subdivided.closeSubpath()
+            case .addQuadCurveToPoint:
+                // addArc emits cubic curves; retain any quadratic verbatim.
+                subdivided.addQuadCurve(to: element.points[1], control: element.points[0])
+                current = element.points[1]
+            @unknown default:
+                break
+            }
+        }
         // Bake placement into the canonical filled geometry before bridging.
         var transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: center.x, ty: center.y)
-        return outline.copy(using: &transform)!
+        return subdivided.copy(using: &transform)!
+    }
+
+    private static func appendCubic(to path: CGMutablePath, from p0: CGPoint,
+                                    control1 p1: CGPoint, control2 p2: CGPoint,
+                                    end p3: CGPoint, depth: Int) {
+        guard depth > 0 else {
+            path.addCurve(to: p3, control1: p1, control2: p2)
+            return
+        }
+        func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+        }
+        let a = midpoint(p0, p1), b = midpoint(p1, p2), c = midpoint(p2, p3)
+        let d = midpoint(a, b), e = midpoint(b, c)
+        let split = midpoint(d, e)
+        appendCubic(to: path, from: p0, control1: a, control2: d, end: split, depth: depth - 1)
+        appendCubic(to: path, from: split, control1: e, control2: c, end: p3, depth: depth - 1)
     }
 }
 

@@ -254,6 +254,41 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testRoundedCapSubdivisionSeamsKeepNativeContainmentParity() {
+        for direction in [-Double.pi, .pi / 2] {
+            let arc = RadialGeometry.pill(slot: 0, count: 2, radius: 132,
+                                         thickness: 48, direction: direction)
+            let localPath = arc.path()
+            for scale in [0.8, 0.9, 1.0] {
+                let center = CGPoint(x: 156 * scale, y: 156 * scale)
+                let placed = arc.path(center: center, scale: scale)
+                let rendered = RingSlotShape(count: 2, index: 0, radius: 132,
+                    thickness: 48, direction: direction, scale: scale)
+                    .path(in: CGRect(x: 0, y: 0, width: 312 * scale, height: 312 * scale))
+                for isEnd in [false, true] {
+                    let angle = isEnd ? arc.end : arc.start
+                    let cap = CGPoint(x: cos(angle) * arc.radius, y: sin(angle) * arc.radius)
+                    // Probe both cap junctions, subdivision seams and the tip,
+                    // strictly inside the circle rather than on its boundary.
+                    for step in 0...16 {
+                        let normal = angle + (isEnd ? 0 : .pi) + Double(step) * .pi / 16
+                        let distance = arc.thickness / 2 * 0.98
+                        let local = CGPoint(x: cap.x + cos(normal) * distance,
+                                            y: cap.y + sin(normal) * distance)
+                        let point = CGPoint(x: center.x + local.x * scale,
+                                            y: center.y + local.y * scale)
+                        let context = "direction=\(direction) scale=\(scale) end=\(isEnd) step=\(step)"
+                        XCTAssertTrue(localPath.contains(local, using: .winding), context)
+                        XCTAssertTrue(placed.contains(point, using: .winding), context)
+                        XCTAssertTrue(rendered.cgPath.contains(point, using: .winding), context)
+                        XCTAssertTrue(rendered.contains(point, eoFill: false), context)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
     func testProductionHoverUsesRoundedPillsAndCancelsOnExposedBackingInEveryMode() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
