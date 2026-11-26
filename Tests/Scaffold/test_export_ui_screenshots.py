@@ -119,9 +119,10 @@ class ScreenshotExportTests(unittest.TestCase):
                 f"M1-settings-{surface}-{context}"
                 for surface in ("appSettings", "projectSettings")
                 for context in ("coordinate-center", "coordinate-left-padding",
-                                "coordinate-bottom-padding", "invoking-control")
+                                "coordinate-bottom-padding", "invoking-control", "invoking-control-snapshot")
             ] + ["M1-settings-keyScale-invoking-control", "M1-settings-tempo-invoking-control",
-                 "M1-mute-restore"]
+                 "M1-settings-keyScale-invoking-control-snapshot",
+                 "M1-settings-tempo-invoking-control-snapshot", "M1-mute-restore"]
             names = [f"{capture}-{suffix}" for capture in captures
                      for suffix in ("before-assertion.png", "AX-before-assertion.txt")]
             self.assertEqual(set(names), set((*exporter.SETTINGS_DIAGNOSTICS, *exporter.MUTE_DIAGNOSTICS)))

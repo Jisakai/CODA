@@ -373,39 +373,85 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
-    func testEverySettingsPopupStaysNearItsOwnInvokingControl() {
+    func testEverySettingsPopupStaysNearItsOwnInvokingControl() throws {
         let app = XCUIApplication()
-        defer { attachDiagnostics(from: app) }
+        // Retain the final screen capture without resolving live AX queries
+        // from defer after a timeout. Cached per-state reports are added below.
+        defer {
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "M1-diagnostic-testEverySettingsPopupStaysNearItsOwnInvokingControl.png"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
         launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
-        let window = app.windows.firstMatch.frame
+        var state = try app.windows.firstMatch.snapshot()
+        let window = state.frame
         for (controlID, surface, childID) in [("top.appSettings", "appSettings", "settings.chordDetails"),
                                                ("top.projectSettings", "projectSettings", "settings.loopLength"),
                                                ("top.keyScale", "keyScale", "settings.key.0"),
                                                ("top.tempo", "tempo", "settings.tempoField")] {
-            let control = app.descendants(matching: .any)[controlID].firstMatch
-            XCTAssertTrue(control.exists)
-            let source = control.frame
+            let control = controlID == "top.tempo" ? app.otherElements[controlID].firstMatch : app.buttons[controlID]
+            let sourceNode = cachedDescendant(controlID, in: state)
+            XCTAssertNotNil(sourceNode, "Expected invoking control \(controlID)")
+            let source = try XCTUnwrap(sourceNode).frame
             print("M1 settings tap: id=\(controlID) frame=\(source) hittable=\(control.isHittable)")
             control.tap()
-            let popup = app.descendants(matching: .any)["settings.popup.\(surface)"].firstMatch
+            // Export a screenshot and the last successful AX state BEFORE any
+            // popup lookup can stall. The report explicitly labels stale state.
+            attachCachedSettingsState(state, surface: surface, context: "invoking-control",
+                                      report: "After tap; AX is cached BEFORE tap. Expected child: \(childID)")
+            let popup = app.otherElements["settings.popup.\(surface)"].firstMatch
             let popupAppeared = popup.waitForExistence(timeout: 5)
-            let popupChild = app.descendants(matching: .any)[childID].firstMatch
-            if !popupAppeared || !popupChild.exists {
-                attachSettingsPopupDiagnostics(from: app, surface: surface, context: "invoking-control",
-                                               expectedChild: childID, popupAppeared: popupAppeared)
-            }
+            // One window snapshot per state includes popup children, viewport,
+            // and the production event readout. All checks below are local.
+            state = try app.windows.firstMatch.snapshot()
+            attachCachedSettingsState(state, surface: surface, context: "invoking-control-snapshot",
+                                      report: "After popup wait; appeared=\(popupAppeared). Expected child: \(childID)")
+            let popupNode = cachedDescendant("settings.popup.\(surface)", in: state)
             XCTAssertTrue(popupAppeared, "Expected a concrete accessibility container for \(surface)")
-            XCTAssertTrue(popupChild.exists, "Expected \(surface) to preserve child identifier \(childID)")
-            let frame = popup.frame
+            XCTAssertNotNil(popupNode, "Expected popup in cached window snapshot")
+            let frame = try XCTUnwrap(popupNode).frame
+            XCTAssertNotNil(cachedDescendant(childID, in: try XCTUnwrap(popupNode)),
+                            "Expected \(surface) to preserve child identifier \(childID)")
             XCTAssertTrue(window.contains(frame), "\(surface) must fit the landscape viewport")
             XCTAssertGreaterThanOrEqual(frame.minY, source.maxY)
             XCTAssertLessThan(frame.minY - source.maxY, 48)
             XCTAssertGreaterThanOrEqual(source.midX, frame.minX - 24)
             XCTAssertLessThanOrEqual(source.midX, frame.maxX + 24)
             app.buttons["top.play"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            XCTAssertFalse(popup.exists)
+            state = try app.windows.firstMatch.snapshot()
+            XCTAssertNil(cachedDescendant("settings.popup.\(surface)", in: state),
+                         "Expected \(surface) dismissal after tapping Play")
         }
+    }
+
+    private func cachedDescendant(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
+        if node.identifier == identifier { return node }
+        for child in node.children {
+            if let match = cachedDescendant(identifier, in: child) { return match }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func attachCachedSettingsState(_ state: XCUIElementSnapshot, surface: String,
+                                           context: String, report: String) {
+        let name = "M1-settings-\(surface)-\(context)"
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "\(name)-before-assertion.png"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        // Snapshot values/children are cached; diagnostics never resolve live queries.
+        func describe(_ node: XCUIElementSnapshot, depth: Int = 0) -> String {
+            let line = "\(String(repeating: " ", count: depth))id=\(node.identifier) type=\(node.elementType.rawValue) frame=\(node.frame) label=\(node.label) value=\(String(describing: node.value))"
+            return ([line] + node.children.map { describe($0, depth: depth + 1) }).joined(separator: "\n")
+        }
+        let events = cachedDescendant("editor.uiDiagnostics", in: state)?.value
+        let text = XCTAttachment(string: "\(report)\nProduction UI events (cached): \(String(describing: events))\n\(describe(state))")
+        text.name = "\(name)-AX-before-assertion.txt"
+        text.lifetime = .keepAlways
+        add(text)
     }
 
     @MainActor

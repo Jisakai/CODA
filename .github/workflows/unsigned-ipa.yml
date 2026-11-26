@@ -182,6 +182,14 @@ jobs:
             build/artifacts/ui-screenshots/M1-settings-keyScale-invoking-control-AX-before-assertion.txt
             build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-before-assertion.png
             build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-appSettings-invoking-control-snapshot-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-appSettings-invoking-control-snapshot-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-invoking-control-snapshot-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-projectSettings-invoking-control-snapshot-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-keyScale-invoking-control-snapshot-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-keyScale-invoking-control-snapshot-AX-before-assertion.txt
+            build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-snapshot-before-assertion.png
+            build/artifacts/ui-screenshots/M1-settings-tempo-invoking-control-snapshot-AX-before-assertion.txt
             build/artifacts/ui-screenshots/M1-mute-restore-before-assertion.png
             build/artifacts/ui-screenshots/M1-mute-restore-AX-before-assertion.txt
           if-no-files-found: error

@@ -36,10 +36,10 @@ DIAGNOSTICS = tuple(
 SETTINGS_DIAGNOSTICS = tuple(
     f"M1-settings-{surface}-{context}-{suffix}"
     for surface, contexts in (
-        ("appSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control")),
-        ("projectSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control")),
-        ("keyScale", ("invoking-control",)),
-        ("tempo", ("invoking-control",)),
+        ("appSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control", "invoking-control-snapshot")),
+        ("projectSettings", ("coordinate-center", "coordinate-left-padding", "coordinate-bottom-padding", "invoking-control", "invoking-control-snapshot")),
+        ("keyScale", ("invoking-control", "invoking-control-snapshot")),
+        ("tempo", ("invoking-control", "invoking-control-snapshot")),
     )
     for context in contexts
     for suffix in ("before-assertion.png", "AX-before-assertion.txt")
