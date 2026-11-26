@@ -560,65 +560,58 @@ final class CodaLaunchTests: XCTestCase {
             app.launchArguments.append("--coda-ui-geometry")
         }
         app.launch()
-        assertLandscapeSceneGeometry(in: app)
-        if orientation.isLandscape { assertLandscapeContentFrame(in: app) }
+        assertLandscapeSceneGeometry(in: app, checkContent: orientation.isLandscape)
         print("M1 initial launch AX tree (\(name)); app state: \(app.state.rawValue)\n\(app.debugDescription)")
     }
 
     @MainActor
+    @discardableResult
     private func assertLandscapeSceneGeometry(in app: XCUIApplication,
-                                              file: StaticString = #filePath, line: UInt = #line) {
-        let readout = app.staticTexts["editor.sceneGeometry"]
-        let validGeometry = NSPredicate { _, _ in
-            guard readout.exists, let value = readout.value as? String else { return false }
-            let fields = value.split(separator: "|")
-            guard fields.count == 7, fields[0] == "landscape" else { return false }
+                                              checkContent: Bool = false,
+                                              file: StaticString = #filePath, line: UInt = #line) -> CGRect {
+        do {
+            // One remote AX request after launch/orientation synchronization.
+            // Never nest remote AX work inside a waiter: its deadline can
+            // interrupt the snapshot before otherwise valid geometry returns.
+            let state = try app.windows.firstMatch.snapshot()
+            let bounds = state.frame
+            let readout = cachedDescendant("editor.sceneGeometry", in: state)
+            let value = readout?.value as? String
+            let fields = value?.split(separator: "|", omittingEmptySubsequences: false) ?? []
             let sizes = fields.dropFirst().compactMap { Double($0) }
-            guard sizes.count == 6, sizes[0] > sizes[1], sizes[1] > 0 else { return false }
-            // Scene, window and hosting view must agree: no portrait window
-            // underneath a landscape host, or stale host size after rotation.
-            return stride(from: 2, to: 6, by: 2).allSatisfy {
-                abs(sizes[$0] - sizes[0]) <= 1 && abs(sizes[$0 + 1] - sizes[1]) <= 1
+            guard fields.count == 7, fields[0] == "landscape",
+                  sizes.count == 6, sizes.allSatisfy({ $0.isFinite }),
+                  sizes[0] > sizes[1], sizes[1] > 0 else {
+                XCTFail("Expected landscape scene/window/host sizes; got \(value ?? "nil")",
+                        file: file, line: line)
+                return bounds
             }
+            // Scene, window and hosting view must agree even when AX screen
+            // coordinates remain portrait after a portrait-start lock check.
+            XCTAssertTrue(stride(from: 2, to: 6, by: 2).allSatisfy {
+                abs(sizes[$0] - sizes[0]) <= 1 && abs(sizes[$0 + 1] - sizes[1]) <= 1
+            }, "Expected matching landscape scene/window/host sizes; got \(value ?? "nil")",
+               file: file, line: line)
+            if checkContent {
+                let bar = cachedDescendant("editor.topBar", in: state)?.frame ?? .zero
+                XCTAssertTrue(bounds.width > bounds.height && bar.width > bar.height
+                    && abs(bar.height - 52) <= 1 && abs(bar.width - bounds.width) <= 1
+                    && abs(bar.minX - bounds.minX) <= 1 && abs(bar.minY - bounds.minY) <= 1,
+                    "Top bar must span the landscape window horizontally: \(bar), window: \(bounds)",
+                    file: file, line: line)
+            }
+            return bounds
+        } catch {
+            XCTFail("Unable to snapshot landscape geometry: \(error)", file: file, line: line)
+            return .zero
         }
-        let ready = XCTNSPredicateExpectation(predicate: validGeometry, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed,
-                       "Expected matching landscape scene/window/host sizes; got \(readout.value ?? "nil")",
-                       file: file, line: line)
     }
 
     @MainActor
     @discardableResult
     private func assertLandscapeContentFrame(in app: XCUIApplication,
                                              file: StaticString = #filePath, line: UInt = #line) -> CGRect {
-        let topBar = app.otherElements["editor.topBar"].firstMatch
-        let window = app.windows.firstMatch
-        var bar = CGRect.zero
-        var bounds = CGRect.zero
-        var snapshotError = "none"
-        let landscapeFrame = NSPredicate { _, _ in
-            do {
-                // Read each element once per poll, rather than separate exists
-                // and frame queries against all AX element types.
-                bar = try topBar.snapshot().frame
-                bounds = try window.snapshot().frame
-                snapshotError = "none"
-            } catch {
-                snapshotError = String(describing: error)
-                return false
-            }
-            return bounds.width > bounds.height && bar.width > bar.height
-                && abs(bar.height - 52) <= 1 && abs(bar.width - bounds.width) <= 1
-                && abs(bar.minX - bounds.minX) <= 1 && abs(bar.minY - bounds.minY) <= 1
-        }
-        let ready = XCTNSPredicateExpectation(predicate: landscapeFrame, object: nil)
-        let result = XCTWaiter.wait(for: [ready], timeout: 10)
-        // Never issue fresh AX frame queries while building a failure message:
-        // those retries outlived the waiter and the test allowance on CI.
-        XCTAssertEqual(result, .completed,
-                       "Top bar must span the landscape window horizontally: \(bar), window: \(bounds), snapshot error: \(snapshotError)",
-                       file: file, line: line)
-        return bounds
+        assertLandscapeSceneGeometry(in: app, checkContent: true, file: file, line: line)
     }
 
     @MainActor
@@ -656,7 +649,6 @@ final class CodaLaunchTests: XCTestCase {
 
     @MainActor
     private func attachScreenshot(named name: String, from app: XCUIApplication) {
-        assertLandscapeSceneGeometry(in: app)
         let window = assertLandscapeContentFrame(in: app)
         do {
             // app.screenshot() previously cropped/padded already-oriented pixels

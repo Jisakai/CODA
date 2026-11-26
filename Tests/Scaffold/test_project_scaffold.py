@@ -203,6 +203,39 @@ class ProjectScaffoldTests(unittest.TestCase):
             r"override var prefersInterfaceOrientationLocked: Bool\s*\{\s*true\s*\}",
         )
 
+    def test_ui_geometry_uses_one_cached_snapshot_without_nested_waiters(self):
+        ui = (ROOT / "Tests/CodaUITests/CodaLaunchTests.swift").read_text(encoding="utf-8")
+        geometry = ui.split("private func assertLandscapeSceneGeometry(", 1)[1].split(
+            "private func attachDiagnostics(", 1)[0]
+        self.assertEqual(geometry.count(".snapshot()"), 1)
+        self.assertIn("let state = try app.windows.firstMatch.snapshot()", geometry)
+        for identifier in ("editor.sceneGeometry", "editor.topBar"):
+            self.assertIn(f'cachedDescendant("{identifier}", in: state)', geometry)
+        for live_query in ("XCTWaiter", "XCTNSPredicateExpectation", ".exists", "readout.value"):
+            self.assertNotIn(live_query, geometry)
+        for invariant in (
+            'fields.count == 7, fields[0] == "landscape"',
+            "sizes.count == 6", "sizes[0] > sizes[1], sizes[1] > 0",
+            "abs(sizes[$0] - sizes[0]) <= 1", "abs(sizes[$0 + 1] - sizes[1]) <= 1",
+            "bounds.width > bounds.height && bar.width > bar.height",
+            "abs(bar.height - 52) <= 1", "abs(bar.width - bounds.width) <= 1",
+            "abs(bar.minX - bounds.minX) <= 1", "abs(bar.minY - bounds.minY) <= 1",
+        ):
+            with self.subTest(invariant=invariant):
+                self.assertIn(invariant, geometry)
+        # Keep the runtime inventory and both checks after a portrait launch.
+        self.assertEqual(len(re.findall(r"^    func test\w+\(", ui, re.M)), 15)
+        lock_test = ui.split("func testLaunchShowsEmptyEditorAndLocksLandscape()", 1)[1].split(
+            "func testCaptureNormalization", 1
+        )[0]
+        portrait_start = lock_test.split("launchAndDescribe(app, orientation: .portrait)", 1)[1]
+        self.assertEqual(portrait_start.count("assertLandscapeSceneGeometry(in: app)"), 2)
+        capture = ui.split("private func attachScreenshot(", 1)[1]
+        for invariant in ("XCUIScreen.main.screenshot().image", "bitmap.width", "bitmap.height",
+                          "source.size.width * source.scale", "source.size.height * source.scale",
+                          "window.width / window.height"):
+            self.assertIn(invariant, capture)
+
     def test_runtime_has_no_external_package_declarations(self):
         self.assertNotIn("packages:", self.project)
         self.assertNotIn("package:", self.project)
