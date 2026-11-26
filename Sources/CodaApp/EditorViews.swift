@@ -18,7 +18,15 @@ struct CodaCanvas: View {
     @State private var popupSize = PopupSizeKey.defaultValue
 
     var body: some View {
-        GeometryReader { geometry in
+        // Register these dependencies on the State-owning view before building
+        // GeometryReader's deferred content. With only a conditional read below,
+        // popup == nil skips settingsFrames: the first preference delivery can
+        // leave that closure holding the initial empty State value. A later
+        // observable popup change alone then cannot pass the anchor gate.
+        let frames = settingsFrames
+        let measuredPopupSize = popupSize
+        let activePopup = store.popup
+        return GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 CodaDesignTokens.Colors.oled
                 if store.chromeHidden {
@@ -98,8 +106,8 @@ struct CodaCanvas: View {
                     .position(x: geometry.size.width / 2, y: store.rollTop + 16)
                     .zIndex(13)
 
-                if let popup = store.popup, let anchor = settingsFrames[popup] {
-                    let frame = AnchoredPopupLayout.frame(anchor: anchor, size: popupSize, viewport: geometry.size,
+                if let popup = activePopup, let anchor = frames[popup] {
+                    let frame = AnchoredPopupLayout.frame(anchor: anchor, size: measuredPopupSize, viewport: geometry.size,
                         gap: CodaDesignTokens.EditorSurface.popupGap)
                     Color.black.opacity(0.001).contentShape(Rectangle())
                         .onTapGesture { location in

@@ -84,6 +84,59 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testHostedSettingsPresentedBeforeFirstAnchorPassRenderEverySurface() async throws {
+        // Complement the unchanged late-presentation regression above: this
+        // ordering initially has a popup but no preferences. Both orders must
+        // converge without another action or an unrelated store mutation.
+        for surface in [EditorPopup.appSettings, .projectSettings, .keyScale, .tempo] {
+            let store = try makeStore(uiDiagnosticsEnabled: true)
+            let host = UIHostingController(rootView: CodaCanvas(store: store))
+            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
+            let window = scene.map { UIWindow(windowScene: $0) }
+                ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 1366, height: 1024))
+            let anchors = expectation(description: "Initial anchors: \(surface)")
+            let appeared = expectation(description: "Initially requested popup appeared: \(surface)")
+            let measured = expectation(description: "Initially requested popup laid out: \(surface)")
+            var receivedAnchors = false
+            var receivedGeometry = false
+            store.uiEventObserver = { event in
+                if event.hasPrefix("anchors.root"), store.uiAnchorFrames["root"]?.count == 4, !receivedAnchors {
+                    receivedAnchors = true
+                    anchors.fulfill()
+                }
+                if event == "popup.appear.\(surface.rawValue)" { appeared.fulfill() }
+                if event.hasPrefix("popup.geometry.\(surface.rawValue)"), !receivedGeometry {
+                    receivedGeometry = true
+                    measured.fulfill()
+                }
+            }
+            defer {
+                store.uiEventObserver = nil
+                window.isHidden = true
+                window.rootViewController = nil
+                previousKeyWindow?.makeKey()
+                store.session?.suspend()
+            }
+            store.presentSettings(surface)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.layoutIfNeeded()
+            await fulfillment(of: [anchors, appeared, measured], timeout: 5)
+            XCTAssertEqual(store.popup, surface)
+            let anchor = try XCTUnwrap(store.uiAnchorFrames["root"]?[surface])
+            let frame = try XCTUnwrap(store.uiPopupFrames[surface])
+            XCTAssertGreaterThan(frame.width, 0)
+            XCTAssertGreaterThan(frame.height, 0)
+            XCTAssertTrue(window.bounds.contains(frame))
+            XCTAssertGreaterThanOrEqual(frame.minY, anchor.maxY)
+            XCTAssertLessThan(frame.minY - anchor.maxY, 48)
+            XCTAssertGreaterThanOrEqual(anchor.midX, frame.minX - 24)
+            XCTAssertLessThanOrEqual(anchor.midX, frame.maxX + 24)
+        }
+    }
+
+    @MainActor
     func testRenderedFanSectorsMatchHitTestingIncludingOutsideSweep() {
         for direction in [-Double.pi, -.pi / 3, .pi / 2] {
             for count in [2, 3, 4] {

@@ -401,3 +401,80 @@ sidekick, persistence/export, roll editing, voicing roll, razor/split tools or
 patterns. Strip Split remains omitted (optional in this brief). No M1b work.
 This report records prepared coverage, not proof that the complete original M1
 acceptance checklist has passed. Stop here for Hermes review.
+
+## Settings render dependency correction (2026-11-26, HEAD 2168659)
+
+Reviewed the downloaded run 45803166744 report
+`M1-settings-appSettings-coordinate-center-AX-before-assertion.txt`.
+It records all four anchors at the root, a real touch at (26,26),
+`settings.action.appSettings`, and `popup.state nil->appSettings`, but no
+popup appearance/geometry and no AX panel. The hosted production test also
+fails after calling the same store action directly. This establishes a
+presentation failure after dispatch, not a missed touch or just an AX label.
+
+Ranked, falsifiable hypotheses:
+
+1. **Conditional State dependency / stale GeometryReader capture (leading).**
+   `settingsFrames` belongs to CodaCanvas, but its only read was inside
+   GeometryReader's deferred content after `if let popup = store.popup`.
+   Initial nil short-circuits that read. Root preference receipt proves that
+   the callback got the frames, not that the deferred render closure sees the
+   updated State. The later popup change can invalidate deferred content
+   without refreshing the owning view's captured initial State. This explains
+   why the popup branch never mounts even though state and anchors are logged.
+   The custom preference-gated path was introduced in 4fdefd4; the later AX
+   container and hit-shape changes left this dependency pattern intact.
+   Falsifier: the unchanged late-presentation hosted regression still fails
+   after making the owning view read these inputs unconditionally.
+2. **Popup Observation invalidation with willSet/didSet (secondary).** The
+   property is observable and its cancellation/state transition runs; working
+   drawer/radial branches observe store state without a mirrored anchor gate.
+   Explicitly reading popup in the owning body also removes dependence on the
+   deferred closure's observation boundary. No store observer/cancellation code
+   was changed. If the original hosted regression still fails, inspect actual
+   body invalidation and captured inputs before changing input or surfaces.
+3. **Preference reduction/background propagation (lower).** The merging
+   reducer retains sibling frames and the real artifact plus hosted anchor
+   assertions show producer/content/acrylic/root receipt. There is no evidence
+   to justify replacing the reducer or opaque background. A subsequent empty
+   root preference event would support revisiting this hypothesis.
+4. **Popup layout/acrylic/clipping/AX (lowest with current evidence).** These
+   can hide an existing panel but do not explain the absent appearance event.
+   The existing hosted geometry assertions remain the native check for this.
+
+Production change: read settings frames, measured popup size, and popup
+unconditionally in CodaCanvas.body, then pass those values into GeometryReader's
+content. Preference updates now have an explicit dependency on their State
+owner even while no popup is open. No new presentation system or forced refresh
+was added. Modal cancellation guards, Pencil routing, radial geometry, acrylic
+composition, audio/music, diagnostics and exact exporter allowlists are intact.
+
+The original
+`testHostedProductionCanvasReceivesAnchorsAndRendersEverySettingsAction` is
+unchanged, including its timeouts and all appearance/layout assertions. Added
+`testHostedSettingsPresentedBeforeFirstAnchorPassRenderEverySurface` for the
+complementary ordering: each real settings action is requested before mounting
+the production canvas. It requires actual appearance, nonzero bounded geometry
+and placement near the invoking control after the first preference pass.
+Neither hosted test has been executed locally. This is a source-supported
+causal correction awaiting native confirmation, not a claimed native fix pass.
+
+Files changed in this pass only:
+
+- `Sources/CodaApp/EditorViews.swift`
+- `Tests/CodaAudioTests/EditorStoreRegressionTests.swift`
+- `docs/M1-phase4.md`
+
+Actual local checks: `python -m unittest discover -s Tests/Scaffold -p
+'test_*.py' -v` ran 35 tests: 34 passed, one existing symlink test skipped because
+symlink creation is unavailable on this host. `git diff --check` passed.
+`Get-Command swift,xcodebuild,python,py -ErrorAction SilentlyContinue` found only
+Python. No native Swift build/test, simulator, sanitizer, archive or IPA result
+was produced. Existing modified task/roadmap files and unrelated untracked
+files were left alone. No install, staging, commit, push or CI action occurred.
+
+Remaining blockers: Hermes review and native execution of the unchanged red
+regression plus the complementary test; all four real-touch popup/UI geometry
+checks; remaining combined M1 native/sanitizer/archive/unsigned IPA gates; and
+deferred owner iPad Pencil, appearance, listening and feel acceptance. Stop for
+review within M1.
