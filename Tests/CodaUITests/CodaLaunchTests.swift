@@ -209,19 +209,47 @@ final class CodaLaunchTests: XCTestCase {
         app.buttons["drawer.pullTab"].tap()
         XCTAssertTrue(app.buttons["drawer.preset.0"].waitForExistence(timeout: 5))
         let knobs = ["wobble", "warmth", "cutoff", "resonance", "shape", "detune", "glide"]
-        for preset in 0...2 {
-            revealDrawerElement(app.buttons["drawer.preset.\(preset)"], in: app)
-            app.buttons["drawer.preset.\(preset)"].tap()
-            func find(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
-                if node.identifier == identifier { return node }
-                for child in node.children {
-                    if let match = find(identifier, in: child) { return match }
-                }
-                return nil
+        let drawer = app.descendants(matching: .any)["editor.synthDrawer"].firstMatch
+        let scroll = app.scrollViews["drawer.synthScroll"]
+        var state = try drawer.snapshot()
+        func find(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
+            if node.identifier == identifier { return node }
+            for child in node.children {
+                if let match = find(identifier, in: child) { return match }
             }
+            return nil
+        }
+        func reveal(_ identifier: String) throws -> XCUIElementSnapshot {
+            // Geometry/presence share one recursive snapshot until a real UI mutation.
+            // Each revealed dial gets one live AX hit test after snapshot-based reveal.
+            for attempt in 0...8 {
+                let viewport = try XCTUnwrap(find("drawer.synthScroll", in: state))
+                let target = find(identifier, in: state)
+                if let target, viewport.frame.contains(target.frame) {
+                    XCTAssertTrue(viewport.frame.contains(target.frame),
+                                  "Drawer control must be fully visible: \(identifier)")
+                    return state
+                }
+                guard attempt < 8 else { break }
+                let above = target.map { $0.frame.minY < viewport.frame.minY } ?? false
+                // Keep navigation in outer padding, away from the actual dials.
+                scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: above ? 0.2 : 0.85))
+                    .press(forDuration: 0.05, thenDragTo:
+                        scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: above ? 0.85 : 0.2)))
+                state = try drawer.snapshot()
+            }
+            XCTFail("Drawer control must be scrollable into view: \(identifier)")
+            return state
+        }
+        for preset in 0...2 {
+            _ = try reveal("drawer.preset.\(preset)")
+            let button = app.buttons["drawer.preset.\(preset)"]
+            XCTAssertTrue(button.isHittable)
+            button.tap()
+            state = try drawer.snapshot()
             for knob in knobs {
-                revealDrawerElement(app.descendants(matching: .any)["drawer.knob.dial.\(knob)"].firstMatch, in: app)
-                let snapshot = try app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.snapshot()
+                let snapshot = try reveal("drawer.knob.dial.\(knob)")
+                XCTAssertTrue(app.descendants(matching: .any)["drawer.knob.dial.\(knob)"].firstMatch.isHittable)
                 let control = find("drawer.knob.\(knob)", in: snapshot)
                 let dial = find("drawer.knob.dial.\(knob)", in: snapshot)
                 let dot = find("drawer.knob.dot.\(knob)", in: snapshot)
@@ -245,7 +273,8 @@ final class CodaLaunchTests: XCTestCase {
             }
         }
         let dial = app.descendants(matching: .any)["drawer.knob.dial.cutoff"].firstMatch
-        revealDrawerElement(dial, in: app)
+        _ = try reveal("drawer.knob.dial.cutoff")
+        XCTAssertTrue(dial.isHittable)
         let readout = app.staticTexts["drawer.knob.readout.cutoff"]
         let before = readout.label
         let center = dial.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))

@@ -172,6 +172,26 @@ class ScreenshotExportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual({p.name for p in (source / "output").iterdir()}, set(names))
 
+    def test_knob_timeout_diagnostic_exports_only_exact_name_or_xctest_alias(self):
+        expected = "M1-diagnostic-testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks.png"
+        self.assertIn(expected, exporter.DIAGNOSTICS)
+        alias = f"{pathlib.Path(expected).stem}_0_2C2D39DE-950D-46B0-AE8C-789285A26CA6.png"
+        for name in (expected, alias):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                source = pathlib.Path(temporary)
+                destination = source / "output"
+                entries = [self.make_attachment(source, name, 0)]
+                entries.append(self.make_attachment(source, f"{pathlib.Path(expected).stem}_latest.png", 1))
+                (source / "manifest.json").write_text(json.dumps(entries))
+                result = self.run_export(source, destination, "--allow-missing-review")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual([p.name for p in destination.iterdir()], [expected])
+                self.assertEqual((destination / expected).read_bytes(), b"\x89PNG\r\n\x1a\nfixture")
+                # A diagnostic alone must still fail the five-image success gate.
+                result = self.run_export(source, destination)
+                self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(exporter.matches_expected_label(f"prefix-{alias}", expected))
+
     def test_repeated_exact_review_name_still_fails_instead_of_selecting_a_payload(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = pathlib.Path(temporary)

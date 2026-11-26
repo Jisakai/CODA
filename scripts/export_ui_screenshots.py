@@ -31,6 +31,7 @@ DIAGNOSTICS = tuple(
         "testPrimaryRadialScreenshotFixture",
         "testSettingsIconCenterAndPaddingPresentProductionPopups",
         "testEverySettingsPopupStaysNearItsOwnInvokingControl",
+        "testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks",
     )
 )
 SETTINGS_DIAGNOSTICS = tuple(
