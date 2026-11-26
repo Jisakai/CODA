@@ -121,10 +121,12 @@ struct CodaCanvas: View {
                             Color.clear.preference(key: PopupSizeKey.self, value: measured.size)
                         } }
                         .modifier(AcrylicPanel(store: store))
-                        .offset(x: frame.minX, y: frame.minY)
+                        // Observe the panel inside the transform: an observer
+                        // outside offset sees its untranslated layout wrapper.
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("editor.root")) } action: {
                             store.recordPopupFrame($0, popup: popup)
                         }
+                        .offset(x: frame.minX, y: frame.minY)
                         .onAppear { store.recordUIEvent("popup.appear.\(popup.rawValue)") }
                         .onDisappear { store.recordUIEvent("popup.disappear.\(popup.rawValue)") }
                         .zIndex(20)

@@ -69,11 +69,45 @@ final class EditorStoreRegressionTests: XCTestCase {
             let frame = try XCTUnwrap(store.uiPopupFrames[surface])
             XCTAssertGreaterThan(frame.width, 0)
             XCTAssertGreaterThan(frame.height, 0)
+            XCTAssertGreaterThan(frame.minX, 0, "Measure the translated panel, not the layout wrapper")
             XCTAssertTrue(window.bounds.contains(frame))
             XCTAssertGreaterThanOrEqual(frame.minY, anchor.maxY)
             XCTAssertLessThan(frame.minY - anchor.maxY, 48)
             XCTAssertGreaterThanOrEqual(anchor.midX, frame.minX - 24)
             XCTAssertLessThanOrEqual(anchor.midX, frame.maxX + 24)
+            if surface == .tempo {
+                // Widen the preceding key capsule while this popup stays open.
+                // Compare independent measured deltas, never the layout solver.
+                let movedAnchor = expectation(description: "Tempo anchor moved with key label")
+                let movedPanel = expectation(description: "Open tempo panel followed its anchor")
+                var receivedMovedAnchor = false
+                var receivedMovedPanel = false
+                store.uiEventObserver = { event in
+                    if event.hasPrefix("anchors.root"),
+                       let updated = store.uiAnchorFrames["root"]?[surface],
+                       updated.minX > anchor.minX + 1, !receivedMovedAnchor {
+                        receivedMovedAnchor = true
+                        movedAnchor.fulfill()
+                    }
+                    if event.hasPrefix("popup.geometry.\(surface.rawValue)"),
+                       let updated = store.uiPopupFrames[surface],
+                       updated.minX > frame.minX + 1, !receivedMovedPanel {
+                        receivedMovedPanel = true
+                        movedPanel.fulfill()
+                    }
+                }
+                store.setKey(tonic: 1, mode: store.key.mode)
+                host.view.layoutIfNeeded()
+                await fulfillment(of: [movedAnchor, movedPanel], timeout: 5)
+                let updatedAnchor = try XCTUnwrap(store.uiAnchorFrames["root"]?[surface])
+                let updatedFrame = try XCTUnwrap(store.uiPopupFrames[surface])
+                XCTAssertEqual(store.popup, surface)
+                XCTAssertGreaterThan(updatedFrame.minX - frame.minX, 1)
+                XCTAssertEqual(updatedFrame.minX - frame.minX,
+                               updatedAnchor.minX - anchor.minX, accuracy: 1)
+                XCTAssertEqual(updatedFrame.minY, frame.minY, accuracy: 1)
+                XCTAssertTrue(window.bounds.contains(updatedFrame))
+            }
             let disappeared = expectation(description: "Production popup removed: \(surface)")
             store.uiEventObserver = { event in
                 if event == "popup.disappear.\(surface.rawValue)" { disappeared.fulfill() }
@@ -128,6 +162,7 @@ final class EditorStoreRegressionTests: XCTestCase {
             let frame = try XCTUnwrap(store.uiPopupFrames[surface])
             XCTAssertGreaterThan(frame.width, 0)
             XCTAssertGreaterThan(frame.height, 0)
+            XCTAssertGreaterThan(frame.minX, 0, "Measure the translated panel, not the layout wrapper")
             XCTAssertTrue(window.bounds.contains(frame))
             XCTAssertGreaterThanOrEqual(frame.minY, anchor.maxY)
             XCTAssertLessThan(frame.minY - anchor.maxY, 48)
