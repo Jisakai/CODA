@@ -179,6 +179,11 @@ static void test_performance() {
     pthread_mutex_t mutex;
     require(pthread_mutex_init(&mutex,nullptr)==0,"calibration mutex initialization");
     os_unfair_lock unfair=OS_UNFAIR_LOCK_INIT;
+    // Initialize allocation TLS and the real lock entry points before measuring.
+    volatile bool *allocationFlag=&count_allocations;
+    *allocationFlag=false; // observable access cannot be optimized past lock_begin
+    pthread_mutex_lock(&mutex);pthread_mutex_unlock(&mutex);
+    os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);
     coda_test_lock_begin();count_allocations=true;
     pthread_mutex_lock(&mutex);pthread_mutex_unlock(&mutex);count_allocations=false;coda_test_lock_end();
     const auto mutexCount=coda_test_lock_count();

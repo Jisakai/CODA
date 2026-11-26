@@ -3,7 +3,7 @@
 #include <memory>
 // Included by the existing native executable; every render uses its calibrated
 // allocation/deallocation hooks and existing finite-output/failure assertions.
-static void fillPerformanceCycle(CodaPerformanceCycle &v,uint64_t c,double rate,bool up=false) {
+static void fillPerformanceCycle(CodaPerformanceCycle &v,uint64_t c,double rate=400.137,bool up=false) {
     v.cycle_index=c;v.count=0;
     v.sample_origin=uint64_t(std::round(double(c*16)*rate));
     v.sample_count=uint64_t(std::round(double((c+1)*16)*rate))-v.sample_origin;
@@ -16,19 +16,19 @@ static void fillPerformanceCycle(CodaPerformanceCycle &v,uint64_t c,double rate,
     }
     for(unsigned i=0;i<12;++i) {auto e=v.events[i];e.kind=0;e.sample_offset=int64_t(v.sample_count);v.events[v.count++]=e;}
 }
-static CodaPerformanceCycle performanceCycle(uint64_t c=0,double rate=400.137,bool up=false) {
-    CodaPerformanceCycle v{};fillPerformanceCycle(v,c,rate,up);return v;
+static std::unique_ptr<CodaPerformanceCycle> performanceCycle(uint64_t c=0,double rate=400.137,bool up=false) {
+    auto v=std::make_unique<CodaPerformanceCycle>();fillPerformanceCycle(*v,c,rate,up);return v;
 }
-static CodaPerformancePlan performancePlan(bool up=false) {
-    CodaPerformancePlan p{};p.playback_revision=1;p.samples_per_step=400.137;
-    p.length=16;p.playing=1;p.looping=1;p.initial_cycle=performanceCycle(0,p.samples_per_step,up);return p;
+static std::unique_ptr<CodaPerformancePlan> performancePlan(bool up=false) {
+    auto p=std::make_unique<CodaPerformancePlan>();p->playback_revision=1;p->samples_per_step=400.137;
+    p->length=16;p->playing=1;p->looping=1;fillPerformanceCycle(p->initial_cycle,0,p->samples_per_step,up);return p;
 }
 static CodaPerformanceStatus performanceStatus(CodaTransport *t) {
     CodaPerformanceStatus s{};coda_transport_performance_status(t,&s);return s;
 }
-static void performanceTransport() {
+[[gnu::noinline]] static void performanceTransport() {
     for(bool up:{false,true}) {
-        Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan(up));auto &p=*pStorage;uint64_t g=0;
+        Owner o;auto pStorage=performancePlan(up);auto &p=*pStorage;uint64_t g=0;
         check(coda_transport_publish_performance(o.t,&p,&g)==1 && g,"performance publish assigns generation");
         run(o.t,7);check(status(o.t).delivered==0,"spread first sample exact");
         for(unsigned i=0;i<12;++i) {
@@ -44,7 +44,7 @@ static void performanceTransport() {
             }
             check(found,"newly delivered instance found in actual DSP");
         }
-        auto cStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(1,p.samples_per_step,!up));auto &c=*cStorage;
+        auto cStorage=performanceCycle(1,p.samples_per_step,!up);auto &c=*cStorage;
         check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"different cycle refill");
         const auto boundary=p.initial_cycle.sample_count;run(o.t,uint32_t(boundary-status(o.t).clock));
         run(o.t,1);check(status(o.t).delivered==24 && performanceStatus(o.t).cycle==1,"wrap exact terminal releases");
@@ -54,7 +54,7 @@ static void performanceTransport() {
         auto s=performanceStatus(o.t);check(s.underrun && s.underruns==1 && s.next_requested_cycle==2,"missing cycle pauses with observable underrun");
         const auto delivered=status(o.t).delivered;run(o.t,87);
         check(status(o.t).delivered==delivered && performanceStatus(o.t).underruns==1,"underrun releases once");
-        c=performanceCycle(2,p.samples_per_step,up);
+        fillPerformanceCycle(c,2,p.samples_per_step,up);
         check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"late exact cycle accepted");
         run(o.t,10);check(!performanceStatus(o.t).underrun && performanceStatus(o.t).cycle==2 && status(o.t).delivered==delivered+1,"late refill resumes sample spacing");
         check(coda_transport_prepare(o.t,8000),"performance repeated prepare");
@@ -62,8 +62,8 @@ static void performanceTransport() {
         auto old=g;check(coda_transport_publish_performance(o.t,&p,&g)==1 && g>old,"generation survives prepare");
     }
 }
-static void performanceTransitions() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;uint64_t g=0;
+[[gnu::noinline]] static void performanceTransitions() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;uint64_t g=0;
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"transition initial");run(o.t,100);
     CodaPerformanceVoiceDiagnostic before[12]{};coda_transport_inspect_performance(o.t,before);
     p.playing=0;++p.playback_revision;
@@ -85,12 +85,12 @@ static void performanceTransitions() {
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"seek flat reconstruction");run(o.t,1);
     check(status(o.t).step==1 && status(o.t).delivered==120,"seek retires and restores exact current notes");
     const auto old=g;auto legacy=plan();check(coda_transport_publish(o.t,&legacy)==1,"performance to legacy shared ordering");run(o.t,1);
-    auto cStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(1));auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,old,&c)==-1,"legacy switch rejects old producer generation");
+    auto cStorage=performanceCycle(1);auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,old,&c)==-1,"legacy switch rejects old producer generation");
     check(performanceStatus(o.t).generation==0,"legacy mode visible");
 }
-static void performanceRetriggerAndAudio() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;p.looping=0;p.initial_cycle.count=4;
-    auto e=performanceCycle().events[0];e.sample_offset=0;e.attack_mode=0;e.owner.instance=41;
+[[gnu::noinline]] static void performanceRetriggerAndAudio() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;p.looping=0;p.initial_cycle.count=4;
+    auto e=p.initial_cycle.events[0];e.sample_offset=0;e.attack_mode=0;e.owner.instance=41;
     p.initial_cycle.events[0]=e;e.kind=0;e.sample_offset=21;p.initial_cycle.events[1]=e;
     e.kind=1;e.owner.instance=42;p.initial_cycle.events[2]=e;
     e.kind=0;e.sample_offset=50;p.initial_cycle.events[3]=e;uint64_t g=0;
@@ -104,7 +104,7 @@ static void performanceRetriggerAndAudio() {
     auto staleStorage=std::make_unique<CodaPerformancePlan>(p);auto &stale=*staleStorage;stale.initial_cycle.events[3].owner.instance=41;
     check(coda_transport_publish_performance(o.t,&stale,&g)==-1,"stale old off cannot release replacement");
     // Actual production render audio responds to effective velocity, retaining base.
-    Owner a,b;auto paStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &pa=*paStorage;auto pbStorage=std::make_unique<CodaPerformancePlan>(pa);auto &pb=*pbStorage;
+    Owner a,b;auto paStorage=performancePlan();auto &pa=*paStorage;auto pbStorage=std::make_unique<CodaPerformancePlan>(pa);auto &pb=*pbStorage;
     for(uint32_t i=0;i<pb.initial_cycle.count;++i) pb.initial_cycle.events[i].effective_velocity=.8f;
     uint64_t ga=0,gb=0;check(coda_transport_publish_performance(a.t,&pa,&ga)==1 && coda_transport_publish_performance(b.t,&pb,&gb)==1,"audio payload plans");
     float aa[256]{},bb[256]{};count_allocations=true;
@@ -118,8 +118,8 @@ static void performanceRetriggerAndAudio() {
     double ea=0,eb=0;for(unsigned i=0;i<256;++i) {ea+=double(aa[i])*aa[i];eb+=double(bb[i])*bb[i];}
     check(ea>0 && eb>ea && allocation_count==0 && deallocation_count==0,"effective velocity changes actual transport audio without render heap work");
 }
-static void performanceAdmission() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;uint64_t g=999;
+[[gnu::noinline]] static void performanceAdmission() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;uint64_t g=999;
     auto badStorage=std::make_unique<CodaPerformancePlan>(p);auto &bad=*badStorage;bad.initial_cycle.events[0].owner.activation=1;
     check(coda_transport_publish_performance(o.t,&bad,&g)==-1 && g==999,"caller runtime identity rejected atomically");
     bad=p;bad.initial_cycle.events[0].base_velocity=NAN;
@@ -145,20 +145,20 @@ static void performanceAdmission() {
         coda_transport_publish_performance(o.t,&p,nullptr)==-1,"null contracts");
     for(int i=0;i<3;++i) check(coda_transport_publish_performance(o.t,&p,&g)==1,"performance config queue bound");
     const auto saved=g;check(coda_transport_publish_performance(o.t,&p,&g)==0 && g==saved,"full output unchanged");
-    auto cStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(1));auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,g-1,&c)==1,"pending retained generation has independent refill lane");
+    auto cStorage=performanceCycle(1);auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,g-1,&c)==1,"pending retained generation has independent refill lane");
     check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"cycle one queued");
     check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==-1,"duplicate cycle rejected");
-    for(uint64_t i=2;i<=3;++i) {c=performanceCycle(i);check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"small cycle queue capacity");}
-    c=performanceCycle(4);check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==0,"cycle queue full atomic");
+    for(uint64_t i=2;i<=3;++i) {fillPerformanceCycle(c,i);check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"small cycle queue capacity");}
+    fillPerformanceCycle(c,4);check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==0,"cycle queue full atomic");
     run(o.t,uint32_t(p.initial_cycle.sample_count+1));
     check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==0,"active slot retained until next consumer ack");
-    run(o.t,uint32_t(performanceCycle(1).sample_count));
+    run(o.t,uint32_t(performanceCycle(1)->sample_count));
     check(coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"same full cycle retry succeeds without admission mutation");
     // Tiny positive Float is valid (Double conversion policy is session-owned).
     auto tinyStorage=std::make_unique<CodaPerformancePlan>(p);auto &tiny=*tinyStorage;++tiny.position_revision;for(uint32_t i=0;i<tiny.initial_cycle.count;++i) tiny.initial_cycle.events[i].base_velocity=tiny.initial_cycle.events[i].effective_velocity=std::numeric_limits<float>::min();
     check(coda_transport_publish_performance(o.t,&tiny,&g)==1,"tiny positive velocity admitted");run(o.t,1);
     // Dense actual 3072-event cycle, twelve held notes, many repeated ranks.
-    check(coda_transport_prepare(o.t,8000),"dense prepare");p=performancePlan();p.initial_cycle.count=0;
+    check(coda_transport_prepare(o.t,8000),"dense prepare");p=*performancePlan();p.initial_cycle.count=0;
     for(unsigned group=0;group<128;++group) {
         for(unsigned r=0;r<12;++r) {CodaPerformanceEvent e{};e.owner.instance=group*12+r+1;e.harmonic_token=1;
             e.sample_offset=group*40;e.kind=1;e.pitch=uint8_t(48+r);e.voice_rank=uint8_t(r);e.base_velocity=e.effective_velocity=.5f;
@@ -170,8 +170,8 @@ static void performanceAdmission() {
     run(o.t,5121);check(status(o.t).delivered==3072,"3072 actual delivered exact lifecycle");
 }
 
-static void performanceConcurrentRefill() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;p.initial_cycle.count=0;uint64_t g=0;
+[[gnu::noinline]] static void performanceConcurrentRefill() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;p.initial_cycle.count=0;uint64_t g=0;
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"concurrent performance initial");
     std::atomic<bool> done{false};
     std::thread producer([&] {
@@ -187,17 +187,17 @@ static void performanceConcurrentRefill() {
     while(!done.load()) run(o.t,257);
     producer.join();
     while(performanceStatus(o.t).cycle<16) run(o.t,257);
-    run(o.t,uint32_t(performanceCycle(16).sample_count+1));
+    run(o.t,uint32_t(performanceCycle(16)->sample_count+1));
     check(status(o.t).delivered==16*24 && performanceStatus(o.t).generation==g,
         "concurrent immutable cycle payload survives slot reclamation with exact deliveries");
 }
 
-static void performanceAbsoluteOrigins() {
+[[gnu::noinline]] static void performanceAbsoluteOrigins() {
     for(double rate:{400.02,400.04,44100.*60./137.3/4.,96000.*60./123.7/4.}) {
-        Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;p.samples_per_step=rate;
-        p.initial_cycle=performanceCycle(12345,rate);uint64_t g=0;
+        Owner o;auto pStorage=performancePlan();auto &p=*pStorage;p.samples_per_step=rate;
+        fillPerformanceCycle(p.initial_cycle,12345,rate);uint64_t g=0;
         check(coda_transport_publish_performance(o.t,&p,&g)==1,"awkward tempo absolute nonzero initial cycle");
-        auto cStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(12346,rate));auto &c=*cStorage;
+        auto cStorage=performanceCycle(12346,rate);auto &c=*cStorage;
         check(p.initial_cycle.sample_origin+p.initial_cycle.sample_count==c.sample_origin &&
             coda_transport_enqueue_performance_cycle(o.t,g,&c)==1,"absolute rounding shared consecutive boundary");
         run(o.t,8);check(status(o.t).delivered==1 && performanceStatus(o.t).cycle==12345,"large absolute origin maps to exact current audio offset");
@@ -207,24 +207,24 @@ static void performanceAbsoluteOrigins() {
     }
 }
 
-static void performanceNonzeroSeekAndConfiguration() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;p.samples_per_step=400.02;
-    p.initial_cycle=performanceCycle(1,p.samples_per_step);p.position_revision=1;p.seek_step=9;
+[[gnu::noinline]] static void performanceNonzeroSeekAndConfiguration() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;p.samples_per_step=400.02;
+    fillPerformanceCycle(p.initial_cycle,1,p.samples_per_step);p.position_revision=1;p.seek_step=9;
     // round(25*400.02)-round(16*400.02)=3601, versus local round(9*400.02)=3600.
     const auto local=uint64_t(std::round(25*p.samples_per_step))-p.initial_cycle.sample_origin;
     check(local==3601,"regression fixture exposes one sample absolute rounding");
-    p.initial_cycle.count=2;auto e=performanceCycle().events[0];e.sample_offset=int64_t(local+2);
+    p.initial_cycle.count=2;auto e=p.initial_cycle.events[0];e.sample_offset=int64_t(local+2);
     p.initial_cycle.events[0]=e;e.kind=0;e.sample_offset=int64_t(local+4);p.initial_cycle.events[1]=e;
     uint64_t g=0;check(coda_transport_publish_performance(o.t,&p,&g)==1,"nonzero absolute seek accepted");
     run(o.t,2);check(status(o.t).delivered==0,"seek leaves exact two sample gap");
     run(o.t,1);check(status(o.t).delivered==1,"nonzero seek onset exact absolute rounding");
     p.playing=0;++p.playback_revision;
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"pause later cycle");run(o.t,1);
-    auto wrongStorage=std::make_unique<CodaPerformancePlan>(p);auto &wrong=*wrongStorage;wrong.initial_cycle=performanceCycle(0,p.samples_per_step);const auto saved=g;
+    auto wrongStorage=std::make_unique<CodaPerformancePlan>(p);auto &wrong=*wrongStorage;fillPerformanceCycle(wrong.initial_cycle,0,p.samples_per_step);const auto saved=g;
     check(coda_transport_publish_performance(o.t,&wrong,&g)==1 && g!=saved,"wrong-cycle update queued asynchronously");
     run(o.t,1);check(performanceStatus(o.t).rejected_generation==g && performanceStatus(o.t).generation==saved,
         "consumer rejects wrong cycle without changing active generation");
-    p.samples_per_step=401.137;p.initial_cycle=performanceCycle(1,p.samples_per_step);p.initial_cycle.count=0;
+    p.samples_per_step=401.137;fillPerformanceCycle(p.initial_cycle,1,p.samples_per_step);p.initial_cycle.count=0;
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"paused later cycle tempo update");run(o.t,1);
     check(performanceStatus(o.t).cycle==1 && status(o.t).step==9 && !status(o.t).playing,"tempo preserves paused later cycle position");
     p.playing=1;++p.playback_revision;
@@ -236,13 +236,13 @@ static void performanceNonzeroSeekAndConfiguration() {
 }
 
 // Queue at the exact end before the consumer advances; no observer admits it.
-static void performanceBoundaryRejection() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;uint64_t active=0,pending=0;
+[[gnu::noinline]] static void performanceBoundaryRejection() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;uint64_t active=0,pending=0;
     check(coda_transport_publish_performance(o.t,&p,&active)==1,"race initial queued");
-    auto nextStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(1));auto &next=*nextStorage;check(coda_transport_enqueue_performance_cycle(o.t,active,&next)==1,"active refill before pending");
+    auto nextStorage=performanceCycle(1);auto &next=*nextStorage;check(coda_transport_enqueue_performance_cycle(o.t,active,&next)==1,"active refill before pending");
     run(o.t,uint32_t(p.initial_cycle.sample_count));
     auto replacementStorage=std::make_unique<CodaPerformancePlan>(p);auto &replacement=*replacementStorage;replacement.playing=0;++replacement.playback_revision;
-    replacement.samples_per_step=401.137;replacement.initial_cycle=performanceCycle(0,replacement.samples_per_step);
+    replacement.samples_per_step=401.137;fillPerformanceCycle(replacement.initial_cycle,0,replacement.samples_per_step);
     check(coda_transport_publish_performance(o.t,&replacement,&pending)==1,"boundary stale snapshot queues");
     auto pendingRefill=std::make_unique<CodaPerformanceCycle>();fillPerformanceCycle(*pendingRefill,2,400.137);
     check(coda_transport_enqueue_performance_cycle(o.t,active,pendingRefill.get())==1,"prior ACTIVE refill while replacement pending");
@@ -251,20 +251,20 @@ static void performanceBoundaryRejection() {
         "consumer boundary rejection never replays cycle zero");
     check(status(o.t).playing && status(o.t).playback_revision==1 && status(o.t).delivered==36,
         "rejected pause tempo preserves revisions and current notes");
-    auto cStorage=std::make_unique<CodaPerformanceCycle>(performanceCycle(3));auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,active,&c)==1,"old active refill after rejection");
+    auto cStorage=performanceCycle(3);auto &c=*cStorage;check(coda_transport_enqueue_performance_cycle(o.t,active,&c)==1,"old active refill after rejection");
     check(coda_transport_enqueue_performance_cycle(o.t,pending,&c)==-1,"rejected lane retired safely");
-    replacement.initial_cycle=performanceCycle(1,replacement.samples_per_step);
+    fillPerformanceCycle(replacement.initial_cycle,1,replacement.samples_per_step);
     check(coda_transport_publish_performance(o.t,&replacement,&pending)==1,"same cumulative pause tempo retry");run(o.t,1);
     check(performanceStatus(o.t).applied_generation==pending && !status(o.t).playing && status(o.t).playback_revision==2,
         "retry consumes cumulative pause only on application");
     replacement.playing=1;++replacement.playback_revision;++replacement.position_revision;replacement.seek_step=9;
-    replacement.initial_cycle=performanceCycle(3,replacement.samples_per_step);
+    fillPerformanceCycle(replacement.initial_cycle,3,replacement.samples_per_step);
     check(coda_transport_publish_performance(o.t,&replacement,&pending)==1,"explicit cumulative seek resume");run(o.t,1);
     check(status(o.t).playing && status(o.t).step==9 && performanceStatus(o.t).cycle==3,"seek explicitly authorizes cycle selection");
     check(coda_transport_enqueue_performance_cycle(o.t,active,&c)==-1,"old active retired after apply and slot reuse");
 }
-static void performanceConcurrentReconfiguration() {
-    Owner o;auto pStorage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*pStorage;uint64_t initial=0;
+[[gnu::noinline]] static void performanceConcurrentReconfiguration() {
+    Owner o;auto pStorage=performancePlan();auto &p=*pStorage;uint64_t initial=0;
     check(coda_transport_publish_performance(o.t,&p,&initial)==1,"threaded reconfig initial");run(o.t,100);
     std::atomic<bool> done{false};
     std::thread producer([&] {
@@ -297,9 +297,9 @@ static void performanceConcurrentReconfiguration() {
     check(status(o.t).delivered>12 && status(o.t).failures==0,"real notes survive concurrent configuration and lane retirement");
 }
 
-static void performanceModeAbsoluteRounding() {
-    for(double rate:{400.137,400.02}) {
-        Owner o;auto storage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*storage;
+[[gnu::noinline]] static void performanceModeAbsoluteRounding() {
+    for(double rate:{400.137,400.021}) {
+        Owner o;auto storage=performancePlan();auto &p=*storage;
         constexpr uint64_t cycle=12345;
         fillPerformanceCycle(p.initial_cycle,cycle,p.samples_per_step);p.initial_cycle.count=0;
         uint64_t local=1;
@@ -318,13 +318,14 @@ static void performanceModeAbsoluteRounding() {
         const auto position=rate==p.samples_per_step?p.initial_cycle.sample_origin+local:
             uint64_t(std::round((double(cycle*16)+double(local)/p.samples_per_step)*rate));
         const auto onset=uint64_t(std::round(double(cycle*16+4)*rate));
+        check(onset>position,"fractional mode onset remains ahead of converted position");
         check(coda_transport_publish(o.t,&legacy)==1,"fractional performance to legacy queues");
         run(o.t,uint32_t(onset-position));
         check(status(o.t).cycle==cycle && status(o.t).delivered==0,"mode transition has no one-sample early phase drift");
         run(o.t,1);check(status(o.t).delivered==1,"mode transition onset exact after unchanged timing or rate change");
     }
 }
-static void performanceModePhase() {
+[[gnu::noinline]] static void performanceModePhase() {
     performanceModeAbsoluteRounding();
     for(bool changeRange:{false,true}) {
         Owner o;auto legacy=plan(400);uint64_t g=0;
@@ -350,7 +351,7 @@ static void performanceModePhase() {
     }
     Owner o;auto legacy=plan(400);uint64_t g=0;
     check(coda_transport_publish(o.t,&legacy)==1,"legacy endpoint initial");run(o.t,6400);
-    auto storage=std::make_unique<CodaPerformancePlan>(performancePlan());auto &p=*storage;
+    auto storage=performancePlan();auto &p=*storage;
     p.samples_per_step=400;fillPerformanceCycle(p.initial_cycle,0,400);
     check(coda_transport_publish_performance(o.t,&p,&g)==1,"stale endpoint queues");run(o.t,1);
     check(performanceStatus(o.t).rejected_generation==g && performanceStatus(o.t).required_cycle==1,
