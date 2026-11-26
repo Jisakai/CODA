@@ -54,6 +54,15 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 - Use minimal GitHub workflow permissions and avoid exposing secrets to untrusted pull-request code.
 - If a secret is accidentally exposed, stop publication and notify the owner; deleting it in a later commit does not revoke it or remove it from history.
 
+### M1 drawer layout confirmation - November 26, 2026
+- **Status:** DECIDED by the owner.
+- **Exact owner quote:** "keep the empty half current version that empty place will get the ai later on"
+- Preserve the current drawer layout documented in `docs/M1-phase4.md`: it covers the strip and roll from below the timeline to the viewport bottom; the empty upper half is reserved for future AI, and the lower-half synth scrolls independently.
+- This decision explicitly supersedes contrary original below-chord-strip/full-height-synth interpretations for this issue.
+- No AI implementation or M1b work is authorized. Physical iPad/Pencil/audio checks and final M1 owner approval remain pending; this confirmation does not constitute overall M1 acceptance.
+- The unchanged existing verified native-green IPA may be reused without CI solely for this confirmation.
+- **Source:** Owner decision on Kanban task `t_4f929ac3`, November 26, 2026.
+
 ## PROPOSED and OPEN defaults adopted
 
 ### M0 — Scope and provisional toolchain
