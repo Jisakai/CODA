@@ -23,7 +23,7 @@ class ReviewExportShellTests(unittest.TestCase):
         if cls.bash is None:
             raise unittest.SkipTest("Bash is required to execute the workflow shell regression")
 
-    def run_export_step(self, outcome, exporter_status=0):
+    def run_export_step(self, outcome, exporter_status=0, lane="ui-a"):
         # Execute the actual workflow body; no Apple tools or filesystem writes needed.
         mocks = """
 mkdir() { :; }
@@ -39,7 +39,7 @@ python3() {
             return subprocess.run(
                 [self.bash, "--noprofile", "--norc", "-c", mocks + self.script],
                 cwd=temporary,
-                env={**os.environ, "M1_TEST_OUTCOME": outcome,
+                env={**os.environ, "M1_TEST_OUTCOME": outcome, "CI_LANE": lane,
                      "EXPORTER_STATUS": str(exporter_status)},
                 capture_output=True, text=True,
             )
@@ -70,6 +70,15 @@ python3() {
         for outcome in ("success", "failure"):
             with self.subTest(outcome=outcome):
                 result = self.run_export_step(outcome, exporter_status=23)
+                self.assertEqual(result.returncode, 23, result.stderr)
+
+    def test_second_shard_exports_available_diagnostics_but_propagates_failure(self):
+        for outcome in ("success", "failure"):
+            with self.subTest(outcome=outcome):
+                result = self.run_export_step(outcome, lane="ui-b")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines()[-1], "--allow-missing-review")
+                result = self.run_export_step(outcome, exporter_status=23, lane="ui-b")
                 self.assertEqual(result.returncode, 23, result.stderr)
 
 

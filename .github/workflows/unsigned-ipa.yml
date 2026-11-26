@@ -13,13 +13,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  native:
     runs-on: xcode-27
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
+      - name: Start lane timer
+        shell: bash
+        run: echo "CI_LANE_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
 
       - name: Assert the required Apple toolchain
         shell: bash
@@ -124,6 +129,71 @@ jobs:
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             python3 scripts/run_native_test.py build/generated/transport/transport_tests_sanitized
 
+      - name: Collect native report
+        run: |
+          mkdir -p build/artifacts/native
+          cp build/generated/dsp/DSP-verification.txt build/artifacts/native/
+      - name: Record exact producer provenance
+        run: python3 scripts/ci_evidence.py record native build/artifacts/native
+      - name: Upload internal evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coda-internal-native
+          path: build/artifacts/native/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Summarize lane elapsed time
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: echo "Lane total $(( $(date +%s) - CI_LANE_START ))s" >> "$GITHUB_STEP_SUMMARY"
+
+  simulator:
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [unit, ui-a, ui-b]
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Start lane timer
+        shell: bash
+        run: echo "CI_LANE_START=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Assert the required Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d "$DEVELOPER_DIR" ]]; then
+            echo "Expected Xcode 27.2 at $DEVELOPER_DIR; the xcode-27 image changed." >&2
+            exit 1
+          fi
+          xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          if [[ "$xcode_version" != "27.2" || "$sdk_version" != "27.2" ]]; then
+            echo "Required Xcode/iOS SDK: 27.2/27.2; found $xcode_version/$sdk_version." >&2
+            echo "Update the pinned runner and minimum deployment target only after verifying Apple's current stable toolchain." >&2
+            exit 1
+          fi
+          printf 'Xcode %s; iOS SDK %s\n' "$xcode_version" "$sdk_version" | tee build-toolchain.txt
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen --version | tee xcodegen-version.txt
+
+      - name: Generate the Xcode project
+        run: |
+          mkdir -p build/generated
+          xcodegen generate --spec project.yml
+          mkdir -p build/artifacts
+
       - name: Prepare exact iPadOS 27.2 simulator destination
         shell: bash
         run: |
@@ -141,27 +211,39 @@ jobs:
           if [[ "$state" != 'Booted' ]]; then
             xcrun simctl boot "$udid"
           fi
-          xcrun simctl bootstatus "$udid" -b
+          echo "$udid" > build/generated/simulator-udid
+          # Continue boot while test compilation runs.
 
       - name: Run combined M1 music, audio, input and UI suite
         id: m1-tests
         shell: bash
-        # Cold simulator app launch exceeded 60s; keep per-test timeouts bounded.
-        run: >-
-          xcodebuild test
-          -project coda.xcodeproj
-          -scheme coda
-          -test-timeouts-enabled YES
-          -default-test-execution-time-allowance 180
-          -maximum-test-execution-time-allowance 240
-          -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.2'
-          -resultBundlePath build/generated/coda-m1-tests.xcresult
-          CODE_SIGNING_ALLOWED=NO
-
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          python3 scripts/ci_evidence.py select '${{ matrix.lane }}' > build/generated/test-selection.txt
+          set --
+          while IFS= read -r selection; do set -- "$@" "$selection"; done < build/generated/test-selection.txt
+          xcodebuild build-for-testing -configuration Debug -project coda.xcodeproj -scheme coda \
+            -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.2' \
+            -derivedDataPath build/DerivedData "$@" CODE_SIGNING_ALLOWED=NO
+          echo "Compile: $((SECONDS-start))s" >> "$GITHUB_STEP_SUMMARY"
+          udid="$(cat build/generated/simulator-udid)"
+          xcrun simctl bootstatus "$udid" -b
+          start=$SECONDS
+          xcodebuild test-without-building -configuration Debug -project coda.xcodeproj -scheme coda \
+            -derivedDataPath build/DerivedData \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 180 \
+            -maximum-test-execution-time-allowance 240 \
+            -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=27.2' \
+            -resultBundlePath build/generated/coda-m1-tests.xcresult \
+            "$@" CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/generated/tests.log
+          echo "Runtime: $((SECONDS-start))s" >> "$GITHUB_STEP_SUMMARY"
       - name: Export only named M1 review screenshots
-        if: ${{ !cancelled() && steps.m1-tests.outcome != 'skipped' }}
+        if: ${{ !cancelled() && matrix.lane != 'unit' && steps.m1-tests.outcome != 'skipped' }}
         shell: bash
         env:
+          CI_LANE: ${{ matrix.lane }}
           M1_TEST_OUTCOME: ${{ steps.m1-tests.outcome }}
         run: |
           set -euo pipefail
@@ -170,7 +252,7 @@ jobs:
             --path build/generated/coda-m1-tests.xcresult \
             --output-path build/generated/ui-attachments
           set --
-          if [[ "$M1_TEST_OUTCOME" != "success" ]]; then
+          if [[ "$M1_TEST_OUTCOME" != "success" || "${CI_LANE:-ui-a}" == "ui-b" ]]; then
             set -- --allow-missing-review
           fi
           python3 scripts/export_ui_screenshots.py \
@@ -178,10 +260,10 @@ jobs:
             --destination build/artifacts/ui-screenshots "$@"
 
       - name: Upload named M1 UI diagnostics even after test failure
-        if: ${{ !cancelled() && steps.m1-tests.outcome != 'skipped' }}
+        if: ${{ !cancelled() && matrix.lane != 'unit' && steps.m1-tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coda-m1-ui-diagnostics
+          name: coda-m1-ui-diagnostics-${{ matrix.lane }}
           path: |
             build/generated/ui-attachments/manifest.json
             build/artifacts/ui-screenshots/M1-empty-editor.png
@@ -223,9 +305,86 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Collect bounded simulator evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts/evidence
+          cp build/generated/tests.log build/artifacts/evidence/tests.log
+          if [[ '${{ matrix.lane }}' != unit ]]; then
+            for file in build/artifacts/ui-screenshots/*; do
+              if [[ -f "$file" ]]; then cp "$file" build/artifacts/evidence/; fi
+            done
+          fi
+      - name: Record exact producer provenance
+        run: python3 scripts/ci_evidence.py record ${{ matrix.lane }} build/artifacts/evidence --log build/generated/tests.log
+      - name: Upload internal evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coda-internal-${{ matrix.lane }}
+          path: build/artifacts/evidence/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve test log after failure
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coda-test-log-${{ matrix.lane }}
+          path: build/generated/tests.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Summarize lane elapsed time
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: echo "Lane total $(( $(date +%s) - CI_LANE_START ))s" >> "$GITHUB_STEP_SUMMARY"
+
+  archive:
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Start lane timer
+        shell: bash
+        run: echo "CI_LANE_START=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Assert the required Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d "$DEVELOPER_DIR" ]]; then
+            echo "Expected Xcode 27.2 at $DEVELOPER_DIR; the xcode-27 image changed." >&2
+            exit 1
+          fi
+          xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          if [[ "$xcode_version" != "27.2" || "$sdk_version" != "27.2" ]]; then
+            echo "Required Xcode/iOS SDK: 27.2/27.2; found $xcode_version/$sdk_version." >&2
+            echo "Update the pinned runner and minimum deployment target only after verifying Apple's current stable toolchain." >&2
+            exit 1
+          fi
+          printf 'Xcode %s; iOS SDK %s\n' "$xcode_version" "$sdk_version" | tee build-toolchain.txt
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen --version | tee xcodegen-version.txt
+
+      - name: Generate the Xcode project
+        run: |
+          mkdir -p build/generated
+          xcodegen generate --spec project.yml
+          mkdir -p build/artifacts
+
       - name: Archive unsigned device app
         run: >-
           xcodebuild archive
+          -configuration Release
           -project coda.xcodeproj
           -scheme coda
           -destination 'generic/platform=iOS'
@@ -246,6 +405,49 @@ jobs:
             --ios-sdk-version "$sdk_version" \
             --xcodegen-version "$xcodegen_version"
 
+      - name: Record exact producer provenance
+        run: python3 scripts/ci_evidence.py record archive build/artifacts
+      - name: Upload internal evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coda-internal-archive
+          path: build/artifacts/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Summarize lane elapsed time
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: echo "Lane total $(( $(date +%s) - CI_LANE_START ))s" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: [native, simulator, archive]
+    if: ${{ !cancelled() && needs.native.result == 'success' && needs.simulator.result == 'success' && needs.archive.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Start lane timer
+        shell: bash
+        run: echo "CI_LANE_START=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: coda-internal-*
+          path: incoming
+      - name: Verify exact-run provenance before publication
+        env:
+          LANE_RESULTS: '{"native":"${{ needs.native.result }}","unit":"${{ needs.simulator.result }}","ui-a":"${{ needs.simulator.result }}","ui-b":"${{ needs.simulator.result }}","archive":"${{ needs.archive.result }}"}'
+        run: python3 scripts/ci_evidence.py verify incoming "$LANE_RESULTS"
+      - name: Assemble verified final delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/artifacts/review-source
+          cp incoming/coda-internal-archive/App.ipa incoming/coda-internal-archive/App-verification.txt build/artifacts/
+          cp incoming/coda-internal-native/DSP-verification.txt build/artifacts/
+          cp incoming/coda-internal-ui-a/*.png build/artifacts/review-source/
+          python3 scripts/export_ui_screenshots.py --source build/artifacts/review-source --destination build/artifacts/ui-screenshots
       - name: Upload only the IPA and verification report
         if: ${{ success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -254,7 +456,7 @@ jobs:
           path: |
             build/artifacts/App.ipa
             build/artifacts/App-verification.txt
-            build/generated/dsp/DSP-verification.txt
+            build/artifacts/DSP-verification.txt
             build/artifacts/ui-screenshots/M1-empty-editor.png
             build/artifacts/ui-screenshots/M1-four-bar-fixture.png
             build/artifacts/ui-screenshots/M1-synth-drawer.png

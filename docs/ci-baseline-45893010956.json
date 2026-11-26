@@ -1,0 +1,773 @@
+{
+  "run": 45893010956,
+  "sha": "6a9a4dfd3dd742c88e72b38d7c3170b1029ed30a",
+  "job_seconds": 1170,
+  "step_seconds": {
+    "Set up job": 1,
+    "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683": 1,
+    "Assert the required Apple toolchain": 5,
+    "Install XcodeGen": 5,
+    "Generate the Xcode project": 0,
+    "Verify scaffold and font metadata": 3,
+    "Build and test portable DSP core": 10,
+    "Build and run DSP sanitizers": 8,
+    "Test production transport": 3,
+    "Test production transport sanitizers": 5,
+    "Prepare exact iPadOS 27.2 simulator destination": 129,
+    "Run combined M1 music, audio, input and UI suite": 895,
+    "Export only named M1 review screenshots": 9,
+    "Upload named M1 UI diagnostics even after test failure": 3,
+    "Archive unsigned device app": 66,
+    "Package and verify App.ipa": 8,
+    "Upload only the IPA and verification report": 2,
+    "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683": 0,
+    "Complete job": 14
+  },
+  "runtime_cases": [
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testActualSessionPlayPauseAndChordMuteControls",
+      "seconds": 51.623
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testCaptureNormalizationAppliesOrientationWithoutForcingLandscape",
+      "seconds": 0.423
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testChordMuteCenterAndPaddingRemainTappableInBothStates",
+      "seconds": 40.394
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testDrawerAndAllThreeProductionPresetsAreReachable",
+      "seconds": 71.182
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testEdgePositionedAllQualityRadialScreenshotFixture",
+      "seconds": 19.846
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testEmptyEditorScreenshotAttachment",
+      "seconds": 18.989
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testEverySettingsPopupStaysNearItsOwnInvokingControl",
+      "seconds": 29.918
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testFingerMusicRegionTapDoesNotEditOrCreateHistory",
+      "seconds": 21.733
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testFourBarSeededFixtureScreenshotAttachment",
+      "seconds": 18.093
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testKeyboardRowsStayBelowChromeAndFollowSemitoneRegister",
+      "seconds": 18.222
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks",
+      "seconds": 103.191
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testLaunchShowsEmptyEditorAndLocksLandscape",
+      "seconds": 34.885
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testPrimaryRadialScreenshotFixture",
+      "seconds": 20.975
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testSettingsIconCenterAndPaddingPresentProductionPopups",
+      "seconds": 36.17
+    },
+    {
+      "class": "codaUITests.CodaLaunchTests",
+      "method": "testSnapShowsBothFullLabelsInsideOriginalGutterCell",
+      "seconds": 21.769
+    },
+    {
+      "class": "CodaMusicTests.ChordSuggestionTests",
+      "method": "testAdditiveSuggestionMetadataNeverRemovesAnExistingPitchClass",
+      "seconds": 0.014
+    },
+    {
+      "class": "CodaMusicTests.ChordSuggestionTests",
+      "method": "testAdditiveSuggestionsExtendTheExistingTriadAndRemainAtomicEdits",
+      "seconds": 0.058
+    },
+    {
+      "class": "CodaMusicTests.ChordSuggestionTests",
+      "method": "testExistingSuggestionsUseVocabularyPreserveRootAndSlashAndExcludeCurrent",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaMusicTests.ChordSuggestionTests",
+      "method": "testNextChordsFollowKeyAndFunctionWithExtendedQualities",
+      "seconds": 0.019
+    },
+    {
+      "class": "CodaMusicTests.MusicModelTests",
+      "method": "testBundledVocabularyExamplesFamiliesAndStableIDs",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.MusicModelTests",
+      "method": "testEveryVocabularyQualityCanBeVoicedAndValidatedAtEveryRoot",
+      "seconds": 0.403
+    },
+    {
+      "class": "CodaMusicTests.MusicModelTests",
+      "method": "testProgressionValidatesBoundsOverlapIDsAndIdentity",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.MusicModelTests",
+      "method": "testRejectsInvalidChordPitchesAndSpansWithoutIntegerOverflow",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.MusicModelTests",
+      "method": "testRejectsMalformedVocabularyAndInvalidMetadata",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testBlockChordsBarBoundariesSortedVoiceMatchingAndOffBeforeOn",
+      "seconds": 0.017
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testConsecutiveFractionalCyclesShareAbsoluteOriginWithoutLoopRoundingDrift",
+      "seconds": 0.007
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testEachOffsetComesFromAbsoluteGridWithoutAccumulatedRounding",
+      "seconds": 0.202
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testNonzeroLoopClipsSustainsAndExplicitlyReleasesAtLoopEnd",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testRejectsInvalidTempoRateLoopAndUnrepresentableOrCollapsedTiming",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.NoteEventCompilerTests",
+      "method": "testSilentSpansAndEmptyLoopDoNotCreateNotes",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testAllTenConvertedLevelsEditRenderBaseAndReadoutRemainIdentical",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testContinuousChuckEditRetainsIDAndEmptyPatternIsNotAbsentRegion",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testDuplicateRequiresFreshRegionAndAllOccupiedStrokeIDs",
+      "seconds": 0.009
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testFailureNoOpAndPreviewPreserveStateAndRedoThenRealEditClearsRedo",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testFinalCandidateAllowsIntermediateOverlapAndDimensionChange",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testFinalOverlapOutOfBoundsCrossRegionIDsAndMissingTargetsRejectAtomically",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternEditorTests",
+      "method": "testPreviewAndCompleteUndoRedoRestoreSettingsSlotsRangesIDsAndBarCount",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testAbsoluteCycleRoundingOnceIncludingJitterAtAllRatesAndAwkwardTempos",
+      "seconds": 0.169
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testChuckDampsAtFirstRetainedOnsetAfterOrdinaryCollisionWinners",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testChuckInterruptsUnfinishedSpreadCancelsPendingOlderNotesAndDampsOnce",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testChuckPendingOnsetExactlyAtDampingAndSubsequentChuckGateClip",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testChuckTightContinuousTinyPositiveVelocityAndPerNoteAdjustedGate",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testDensestMixedValidatedPlanRetainsEveryInstanceAndReplaysTwelveHeld",
+      "seconds": 0.127
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testExactErrorsForInvalidInputsOverflowPrecisionBoundaryAndCollapsedGates",
+      "seconds": 0.052
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testFullyCoalescedChuckHasNoDampingOrCollapsedGateRejection",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testLooseDeterministicVersionedStableIdentityBoundsSharedJitterAndVariation",
+      "seconds": 0.026
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testLooseEarlyClampingAndVelocityEndpointsAndTightHasExactlyZeroVariations",
+      "seconds": 0.084
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testNewChuckCancelsUnfinishedOlderChuckAndClippedChuckDoesNotDamp",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testOppositeDirectionsSwingSpreadCollisionKeepsLatestNominalAndHasNoStaleOffs",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testProductionCapacityAdmissionExactBoundariesOneOverAnd3072EventReplay",
+      "seconds": 0.012
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testRoundedCollisionsCoalesceBeforeNonpositiveLifetimeAndCapacityChecks",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testSwingOnlyOddEighthsAndLateOnsetsRespectPatternLoopChordBoundaries",
+      "seconds": 0.025
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testTerminalOffsShareBoundaryWithNextCycleOnsAndLocalTokensAreNotGenerations",
+      "seconds": 0.048
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerAdversarialTests",
+      "method": "testTwelvePitchBoundaryAndThirteenthRejectedWithoutTruncation",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testActualPopRockPresetDataRepeatsEightSlotPhaseWithDirectionalOnsets",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testAdjacentCoverageIsDistinctOwnershipAndLoopDoesNotRestartPhaseAtChord",
+      "seconds": 0.006
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testAllTenArrowLevelsThroughActualEditorToCompilerAndNonzeroScope",
+      "seconds": 0.019
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testCheckedDimensionMismatchPrecedesEveryOtherErrorAndLegacyDelegation",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testEmptySlotsSustainAndAppliedAllEmptyIsNotAbsentEvenWithoutChords",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testMixedCoverageClipsBlocksEnteringHasNoAttackAndExitRestoresPointEight",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testNoCoverageDelegatesExactlyIncludingNonzeroLoopAndCycleErrors",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testOddChordChangesRestsAndAbsoluteBarPhaseSelectNominalChord",
+      "seconds": 0.01
+    },
+    {
+      "class": "CodaMusicTests.PatternEventCompilerTests",
+      "method": "testUpDownOrderingRankOrdinalZeroDefaultAndMaximumTotalSpread",
+      "seconds": 0.014
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testAllTenLevelsShareLengthBaseAndPercentageReadout",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testBarRangesRejectOverflowAndInvalidBounds",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testChuckRetainsContinuousSizeAndTinyPositiveBaseVelocity",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testHalfOpenRangesAllowTouchingAndSortButRejectOverlapAndOutsideArrangement",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testLengthConversionAbsenceEndpointsTiesClampsAndExtremes",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testPopRockIsReusableEightSlotDataWithExplicitOccupiedIdentities",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testRegionsRequireEightSlotsAndNonemptyUniqueIDsInSeparateNamespaces",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testScopeDividesGridStepsAndPreservesAbsoluteStart",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.PatternModelTests",
+      "method": "testSettingsDefaultsBoundariesNonfiniteAndLooseMetadata",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.ProgressionEditorTests",
+      "method": "testAddResizeSwapDuplicateCopyPasteDeleteAndUndoRedo",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaMusicTests.ProgressionEditorTests",
+      "method": "testAuditionCopyAndNoOpNeverChangeHistoryAndNewEditClearsRedo",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.ProgressionEditorTests",
+      "method": "testBatchMayTemporarilyOverlapButFinalStateMustNotOverlap",
+      "seconds": 0.006
+    },
+    {
+      "class": "CodaMusicTests.ProgressionEditorTests",
+      "method": "testFailedTransactionIsAtomicAndKeepsRedo",
+      "seconds": 0.047
+    },
+    {
+      "class": "CodaMusicTests.ProgressionEditorTests",
+      "method": "testRootOnlyAndQualityOnlySwapPreserveNeighborsAndUsePreviousVoicing",
+      "seconds": 0.005
+    },
+    {
+      "class": "CodaMusicTests.VoiceLeadingSolverTests",
+      "method": "testAllSlashPitchClassesStayLowestAndRespectRegister",
+      "seconds": 0.014
+    },
+    {
+      "class": "CodaMusicTests.VoiceLeadingSolverTests",
+      "method": "testCloseDropTwoAndOpenCandidatesAreDistinctAndStable",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaMusicTests.VoiceLeadingSolverTests",
+      "method": "testInvalidAndImpossibleRegistersAndPrecedingInputThrow",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaMusicTests.VoiceLeadingSolverTests",
+      "method": "testPrecedingVoicingChangesInitialCostAndZeroCostTiesAreStable",
+      "seconds": 0.006
+    },
+    {
+      "class": "CodaMusicTests.VoiceLeadingSolverTests",
+      "method": "testViterbiMatchesExhaustiveOptimumAndBeatsGreedyOnGeneratedInputs",
+      "seconds": 0.149
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testBarrelRollDeadZoneAndFivePercentDetents",
+      "seconds": 0.007
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testChordStripHitTestingDistinguishesResizeEdgeEmptyBarsAndGutter",
+      "seconds": 0.008
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testChromeExclusionAcrossEdgesCornersAndEveryBandExtent",
+      "seconds": 3.978
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testCurvedBackingIsContinuousAndPillsHaveRoundCapsWithNonselectableGlassGaps",
+      "seconds": 0.044
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testEmptyChordStartsRemainBarConstrainedAndPartialBarsAreUnavailable",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testEveryMusicMutationIsRejectedForFingerAndAcceptedForPencil",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testEveryProductionVocabularyQualityIsReachableOnItsFamilyRing",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testFanSweepTiltAdaptivePlacementAndBoundedCornerFallback",
+      "seconds": 1.605
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testHoldMenuUsesVisibleClampedRowsAndRejectsDividersAndOutside",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testInfeasibleFanDoesNotReturnAnOverlappingPlacement",
+      "seconds": 0.021
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testOnlyExactFingerMultiTapCountsProduceShortcuts",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testPagingReachesEveryOptionExactlyOnceAndWraps",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testPopupLayoutAnchorsEachSourceAndFitsTheViewport",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testRadialActionsKeepSwapAndQualitySelectionSeparateAndDisableUnavailablePaste",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testRadialPreviewDraftDoesNotEditProgressionOrHistory",
+      "seconds": 0.011
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testRadialRingBoundariesAngleSlotsAndCenterDeadZone",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testRoundedAllChromeCornersRespectDisplacementBeforeScalePreference",
+      "seconds": 0.07
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testRoundedPaintedPerimetersFitEveryEdgeAndChromeAtPrimaryRootAndAllExtents",
+      "seconds": 4.916
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testSectorCentersReachableAndOutsideSweepAndRenderedGapsCancel",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testToolIconsKeepStableAccessibleNames",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testTopCenterChromeFallbackRetainsCanonicalDownwardTiltAndFeasibleTipAnchor",
+      "seconds": 0.106
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testTopCenterFanUsesExactCounterClockwiseDownwardTiltAtTheTip",
+      "seconds": 0.014
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testViewportSharesStepAndPitchCoordinatesAtExactEdges",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testVisibleKeyboardIncludesEverySemitoneAndRejectsOffscreenRows",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaInteractionTests.EditorInputModelTests",
+      "method": "testZoomKeepsAnchorAndPanClampsBothAxes",
+      "seconds": 0.001
+    },
+    {
+      "class": "AudioAdapterTests",
+      "method": "testActualSourceNodeOfflineRenderAndRepeatedTeardown",
+      "seconds": 1.2
+    },
+    {
+      "class": "AudioAdapterTests",
+      "method": "testPerformancePublicationLifecycleAndActualOfflineAudio",
+      "seconds": 0.09
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testAllFamilyRingChoicesDispatchTheirOriginalProductionIdentity",
+      "seconds": 0.801
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testDraggingChordBodyDoesNotMoveItAndRightEdgeStillResizesOnce",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testDrawerCoversStripAndRollButCannotEditCoveredMusic",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testEveryPresetControlUsesProductionDefaultsAndSharedControlsSurvive",
+      "seconds": 0.009
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testEveryRootIsReachableThroughRealPagedSwapWithoutIntermediateEdits",
+      "seconds": 0.327
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testExplicitRoundedContoursContainReportedCapTipsInAllThreeConsumers",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testFingerControlsCannotCreatePencilFeedbackEvents",
+      "seconds": 0.003
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testHostedProductionCanvasReceivesAnchorsAndRendersEverySettingsAction",
+      "seconds": 1.964
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testHostedSettingsPresentedBeforeFirstAnchorPassRenderEverySurface",
+      "seconds": 0.411
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testInitialRollRegisterContainsProductionVoicingAndEveryVisiblePitchLabel",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testInitialSqueezeReleaseAndStationaryHoverCannotActivateClampedTools",
+      "seconds": 0.038
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testOuterExtensionAndAllKeepOriginalRoot",
+      "seconds": 0.032
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testPencilCoordinatorImplementsTheActualOptionalSqueezeSelector",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testPreviewCancellationSurvivesMailboxPressureAndRestoresPlayback",
+      "seconds": 0.06
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testProductionHoverUsesRoundedPillsAndCancelsOnExposedBackingInEveryMode",
+      "seconds": 0.033
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testProductionSqueezeAndLeftEdgeScreenshotFanKeepCompletePathsBelowChrome",
+      "seconds": 0.72
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRadialHoverActuallyAuditionsAndCancellationPreservesRedo",
+      "seconds": 0.303
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRadialSectorBoundsFitAcrossModesAndOrientationFreezesDuringSelection",
+      "seconds": 0.147
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRapidChoicesCoalesceAndSuspensionInvalidatesQueuedPreview",
+      "seconds": 0.301
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRenderedCurvedPillsMatchHitTestingAcrossTheirWidthCapsAndScale",
+      "seconds": 4.158
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRootAndQualitySwapIsOneTransactionAndCancelPreservesRedo",
+      "seconds": 0.063
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testRoundedCapSubdivisionSeamsKeepNativeContainmentParity",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testScrolledKnobFramesDriveRollResetAndVisibleClipping",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSettingsPopupBlocksMusicAndCanvasNavigationIngress",
+      "seconds": 0.001
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSettingsPresentationCancelsDeleteAndStalePencilOrSqueezeReleasePreservesHistory",
+      "seconds": 0.163
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSettingsPresentationCancelsPendingPreviewAndHoldWork",
+      "seconds": 0.698
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSettingsPresentationCancelsResizeHoldAndKnobResetDrafts",
+      "seconds": 0.002
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSharedAcrylicCompositesIdenticallyOverContrastingBackdrops",
+      "seconds": 0.13
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testSlowAndFastEdgePansOpenAndCloseWithoutPanningCanvas",
+      "seconds": 0.004
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testStalePreviewCancelCannotStopNewExplicitAuditionOrReopenSuspendedSession",
+      "seconds": 0.029
+    },
+    {
+      "class": "CodaAudioTests.EditorStoreRegressionTests",
+      "method": "testVisibleHoldRowsDispatchCopyDuplicateDeleteAndOutsideCancels",
+      "seconds": 0.013
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testInactiveScrubAndCoalescedPositionCommands",
+      "seconds": 0.06
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testInactiveValidationAndControlCapacityAreTransactional",
+      "seconds": 0.02
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testNaturalCompletionConfigurationAndExplicitPlayIntent",
+      "seconds": 1.24
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testOfflinePauseResumeRetainsFractionalStepThroughConfiguration",
+      "seconds": 0.016
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testProductionLifecycleRoutingRejectsStartupAndStaleNotifications",
+      "seconds": 0.075
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testQueueFullPendingSnapshotRetainsStopAndLatestSeek",
+      "seconds": 0.01
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testRealCompilerSessionAndEngineWithoutEditingAuditionHistory",
+      "seconds": 0.052
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testRejectedRequestsPreserveStateHistoryAndPendingPlan",
+      "seconds": 0.01
+    },
+    {
+      "class": "CodaAudioTests.MusicSessionTests",
+      "method": "testSuccessfulChangesDuringActualOfflineRendering",
+      "seconds": 0.011
+    }
+  ]
+}
