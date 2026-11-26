@@ -209,6 +209,51 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testExplicitRoundedContoursContainReportedCapTipsInAllThreeConsumers() {
+        // Exact native failure coordinates, including the first and last reports.
+        let cases: [(direction: Double, count: Int, slot: Int, scale: Double, degree: Int)] = [
+            (-.pi, 2, 0, 0.8, 179),
+            (.pi / 2, 4, 3, 1, 149)
+        ]
+        for sample in cases {
+            let arc = RadialGeometry.pill(slot: sample.slot, count: sample.count,
+                radius: 132, thickness: 48, direction: sample.direction)
+            let localPath = arc.path()
+            var moves = 0
+            var closes = 0
+            var curves = 0
+            localPath.applyWithBlock { pointer in
+                switch pointer.pointee.type {
+                case .moveToPoint: moves += 1
+                case .closeSubpath: closes += 1
+                case .addCurveToPoint: curves += 1
+                default: break
+                }
+            }
+            XCTAssertEqual(moves, 1, "One connected filled pill contour")
+            XCTAssertEqual(closes, 1, "The filled contour must close explicitly")
+            XCTAssertGreaterThanOrEqual(curves, 6, "Retain curved sides and semicircular caps")
+            let angle = Double(sample.degree) * .pi / 180 + 0.001
+            let local = CGPoint(x: cos(angle) * 132, y: sin(angle) * 132)
+            let capCenter = CGPoint(x: cos(arc.end) * arc.radius, y: sin(arc.end) * arc.radius)
+            XCTAssertLessThan(hypot(local.x - capCenter.x, local.y - capCenter.y), arc.thickness / 2,
+                              "Reported points are inside the round cap, not on its boundary")
+            let center = CGPoint(x: 156 * sample.scale, y: 156 * sample.scale)
+            let point = CGPoint(x: center.x + local.x * sample.scale,
+                                y: center.y + local.y * sample.scale)
+            let placed = arc.path(center: center, scale: sample.scale)
+            let rendered = RingSlotShape(count: sample.count, index: sample.slot,
+                radius: 132, thickness: 48, direction: sample.direction, scale: sample.scale)
+                .path(in: CGRect(origin: .zero, size: CGSize(width: 312 * sample.scale,
+                                                           height: 312 * sample.scale)))
+            XCTAssertTrue(localPath.contains(local, using: .winding))
+            XCTAssertTrue(placed.contains(point, using: .winding))
+            XCTAssertTrue(rendered.cgPath.contains(point, using: .winding))
+            XCTAssertTrue(rendered.contains(point, eoFill: false))
+        }
+    }
+
+    @MainActor
     func testProductionHoverUsesRoundedPillsAndCancelsOnExposedBackingInEveryMode() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)

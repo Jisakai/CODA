@@ -315,12 +315,25 @@ public struct RadialArc: Equatable, Sendable {
     public let end: Double
 
     public func path(center: CGPoint = .zero, scale: Double = 1) -> CGPath {
-        let line = CGMutablePath()
-        guard radius > 0, thickness > 0, end > start, scale > 0 else { return line }
-        line.addArc(center: .zero, radius: radius, startAngle: start, endAngle: end, clockwise: false)
-        let outline = line.copy(strokingWithWidth: thickness, lineCap: .round, lineJoin: .round, miterLimit: 1)
-        // Bake the placement into the filled CGPath before bridging to SwiftUI.
-        // Both consumers retain the stroke outline's winding and round caps.
+        let outline = CGMutablePath()
+        let halfWidth = thickness / 2
+        guard radius > halfWidth, thickness > 0, end > start, scale > 0 else { return outline }
+        // One explicit closed contour, rather than a stroked-centerline result.
+        // Both hit testing and SwiftUI receive these same filled arc/cap elements.
+        let startCenter = CGPoint(x: cos(start) * radius, y: sin(start) * radius)
+        let endCenter = CGPoint(x: cos(end) * radius, y: sin(end) * radius)
+        outline.move(to: CGPoint(x: cos(start) * (radius + halfWidth),
+                                 y: sin(start) * (radius + halfWidth)))
+        outline.addArc(center: .zero, radius: radius + halfWidth,
+                       startAngle: start, endAngle: end, clockwise: false)
+        outline.addArc(center: endCenter, radius: halfWidth,
+                       startAngle: end, endAngle: end + .pi, clockwise: false)
+        outline.addArc(center: .zero, radius: radius - halfWidth,
+                       startAngle: end, endAngle: start, clockwise: true)
+        outline.addArc(center: startCenter, radius: halfWidth,
+                       startAngle: start + .pi, endAngle: start + 2 * .pi, clockwise: false)
+        outline.closeSubpath()
+        // Bake placement into the canonical filled geometry before bridging.
         var transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: center.x, ty: center.y)
         return outline.copy(using: &transform)!
     }

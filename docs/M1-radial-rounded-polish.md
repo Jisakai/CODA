@@ -1,5 +1,32 @@
 # M1 radial rounded-arc polish
 
+## Second bounded correction - November 26, 2026
+
+Against supplied HEAD `7472bab76dcdbef439176437a3ac7c7d5f51c7cd`; Hermes reviews and runs native verification. This is attempt 2 of 3, not M1b implementation. Hermes launched the actual Codex CLI with explicit `-c model_provider="xingchi" -m gpt-6.1-sol` arguments; provider-side routing is not independently observable.
+
+### Evidence and diagnosis
+
+Targeted inspection of `C:/Users/jisak/AppData/Local/hermes/cache/scratch/t_e9d9f394-native-failure.log` confirms **exactly 81 assertion failures**, all `EditorStoreRegressionTests.swift:200`, all SwiftUI `Path.contains(point, eoFill: false)` returning false against true. The adjacent placed CGPath and SwiftUI-bridged CGPath assertions have no failures. Every failure has offset zero and radius 132. There is exactly one failed point for each direction/count/slot/scale combination (three directions, 2+3+4 slots, three scales). Every point is **0.942704220487 degrees before its un-inset slot end**, including the first degree-179 and last degree-149 examples. This identifies the ending round-cap tip region, rather than a general placement, fill-rule or radial-width mismatch. The comparison of logged coordinates/angles is log analysis only, not a Swift geometry execution or Python replacement for native tests.
+
+The source representation was a centerline `CGMutablePath.addArc`, converted by `copy(strokingWithWidth:lineCap:.round,lineJoin:.round,...)`, then affine-copied before bridging to SwiftUI. The preceding retry already made both CGPath checks agree with local hit testing. The remaining evidence isolates the discrepancy to SwiftUI containment on that returned path. It does **not** reveal CoreGraphics' private stroke representation, SwiftUI's containment algorithm, or prove a private-framework root cause. Those internals were not observed on this Windows host. Changing the public construction route is a bounded correction hypothesis requiring native validation.
+
+### Exact correction and coverage
+
+`Sources/CodaInteraction/EditorInputModel.swift`, `RadialArc.path`, now constructs **one explicit closed filled contour**: outer concentric arc from start to end; semicircular end cap centered on the original centerline endpoint; inner concentric arc back to start; semicircular start cap; close. Outer/inner radii are radius plus/minus half-thickness, and both caps have radius half-thickness. Opposite traversal of the inner arc preserves the filled annular strip. These remain native curved path elements, not polygonal wedges or flattened samples. The nondegenerate contour requires radius greater than half-thickness, true for every production ring/pill; invalid/collapsed dimensions return an empty path. The existing explicit scale/translation remains applied before SwiftUI bridging. Rendering and local/placed hit testing still consume this one production method; no SwiftUI-only workaround or alternate hit envelope was introduced. This also retains the continuous rounded backing, curved overlaid pills, insets, gaps and placement envelope. CoreGraphics may approximate its arc elements internally; no bit-identical stroke tessellation claim is made.
+
+`Tests/CodaAudioTests/EditorStoreRegressionTests.swift` adds `testExplicitRoundedContoursContainReportedCapTipsInAllThreeConsumers`: the exact first and last failed sampling parameters; an independent strict check that each point lies inside its ending cap circle; one move/one close and at least six cubic elements; local, placed, bridged CGPath and SwiftUI containment assertions. The original full-grid samples and every three-way diagnostic assertion remain unchanged. Existing round-cap/perimeter, corner and unreachable-placement regressions remain. `maximumDisplacement = 180` and both feasibility guards are unchanged; no thresholds, tolerances, skips, sampling or displacement limits were relaxed.
+
+### Checks and remaining gate
+
+- `python -m unittest discover -s Tests/Scaffold -p 'test_*.py' -v`: **35 tests, 34 passed, 1 existing symlink-capability skip**. Synthetic IPA fixture output is not a native build.
+- `git diff --check`: passed, with LF/CRLF conversion warnings. Reviewed the focused production/test diff and read back the changed content.
+- `Get-Command swift,xcodebuild,xcrun,xcodegen -ErrorAction SilentlyContinue`: none available. New Swift was not compiled or executed locally. No native output was fabricated.
+- Prior CI run **45858703982** is a failed run; the supplied interaction/UI/music and DSP/sanitizer passes do not establish the new contour passes. Hermes must run native XCTest, including the unchanged full containment grid and new focused test, the required sanitizer gates, and produce/review new primary/All pixels. No new screenshots, green native result or visual acceptance are claimed here.
+- Only the production path, native regression file and this report were edited in this attempt. Preserved the dirty task/decisions/roadmap/M1b brief, untracked M1b foundation and unrelated files. No dependencies, project/config changes, staging, commits, push, CI, packaging or owner installation gate.
+- M1b and M2 are not implemented. Preserve the reserved drawer upper half/no AI. Future M1b contract remains exactly ten levels 1...10 = editing-height tenths = 10...100% base velocity, identical render/store/base playback/live v10...v100; zero absent; no MIDI-127 roundtrip or 90% multiplier; continuous chuck size. Native plus new-pixel radial gates precede any M1b work; no intermediate IPA/install/owner approval is required.
+
+Stop for Hermes review. The explicit contour is implemented and reviewable; resolution of the SwiftUI-only discrepancy remains unverified until native execution.
+
 ## First corrective retry — November 26, 2026
 
 Bounded correction against HEAD `7934c8910536be7c238ff82e59a02602beb77a2e`. Hermes owns review/release. This retry does not implement M1b.
