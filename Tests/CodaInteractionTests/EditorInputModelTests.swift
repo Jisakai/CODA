@@ -259,6 +259,23 @@ final class EditorInputModelTests: XCTestCase {
         }
     }
 
+    func testRoundedAllChromeCornersRespectDisplacementBeforeScalePreference() throws {
+        let size = CGSize(width: 1376, height: 1032)
+        for tip in [CGPoint.zero, CGPoint(x: size.width, y: 0)] {
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                outerRadius: 284, minimumY: 72, capRadius: 24))
+            XCTAssertLessThan(placement.scale, 1, "Chrome corners require the smaller feasible fan")
+            XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+            let box = RadialGeometry.bounds(direction: placement.direction,
+                radius: 284 * placement.scale, capRadius: 24 * placement.scale)
+                .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+            XCTAssertTrue(CGRect(x: 8, y: 80, width: size.width - 16, height: size.height - 88).contains(box))
+        }
+        XCTAssertNil(RadialGeometry.placement(tip: CGPoint(x: -1000, y: -1000),
+            viewport: size, outerRadius: 284, minimumY: 72, capRadius: 24),
+            "No feasible fan may escape the displacement limit")
+    }
+
     func testPopupLayoutAnchorsEachSourceAndFitsTheViewport() {
         let viewport = CGSize(width: 1194, height: 834)
         for x in [10.0, 50, 140, 250, 1150] {

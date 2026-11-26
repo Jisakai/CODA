@@ -1127,8 +1127,7 @@ struct RadialArcShape: Shape {
     var scale: Double = 1
 
     func path(in rect: CGRect) -> Path {
-        Path(arc.path()).applying(CGAffineTransform(scaleX: scale, y: scale)
-            .concatenating(CGAffineTransform(translationX: rect.midX, y: rect.midY)))
+        Path(arc.path(center: CGPoint(x: rect.midX, y: rect.midY), scale: scale))
     }
 }
 

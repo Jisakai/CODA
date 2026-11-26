@@ -314,11 +314,15 @@ public struct RadialArc: Equatable, Sendable {
     public let start: Double
     public let end: Double
 
-    public func path(center: CGPoint = .zero) -> CGPath {
+    public func path(center: CGPoint = .zero, scale: Double = 1) -> CGPath {
         let line = CGMutablePath()
-        guard radius > 0, thickness > 0, end > start else { return line }
-        line.addArc(center: center, radius: radius, startAngle: start, endAngle: end, clockwise: false)
-        return line.copy(strokingWithWidth: thickness, lineCap: .round, lineJoin: .round, miterLimit: 1)
+        guard radius > 0, thickness > 0, end > start, scale > 0 else { return line }
+        line.addArc(center: .zero, radius: radius, startAngle: start, endAngle: end, clockwise: false)
+        let outline = line.copy(strokingWithWidth: thickness, lineCap: .round, lineJoin: .round, miterLimit: 1)
+        // Bake the placement into the filled CGPath before bridging to SwiftUI.
+        // Both consumers retain the stroke outline's winding and round caps.
+        var transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: center.x, ty: center.y)
+        return outline.copy(using: &transform)!
     }
 }
 
@@ -329,6 +333,7 @@ public enum RadialGeometry {
     public static let slotGap = 0.015
     public static let pillInset = 4.0 // exposed glass around each curved choice
     public static let minimumScale = 0.8
+    public static let maximumDisplacement = 180.0
     private static let fittingScales = [1.0, 0.9, minimumScale]
 
     public static func angle(forSlot slot: Int, count: Int, direction: Double = defaultDirection) -> Double {
@@ -443,7 +448,11 @@ public enum RadialGeometry {
                 guard box.width <= available.width, box.height <= available.height else { continue }
                 let x = min(available.maxX - box.maxX, max(available.minX - box.minX, tip.x))
                 let y = min(available.maxY - box.maxY, max(available.minY - box.minY, tip.y))
-                let cost = hypot(x - tip.x, y - tip.y) + (1 - scale) * outerRadius + distance(direction)
+                let displacement = hypot(x - tip.x, y - tip.y)
+                // Feasibility precedes preferences: an unscaled candidate must
+                // never beat a smaller fitting menu by exceeding the tip limit.
+                guard displacement <= maximumDisplacement else { continue }
+                let cost = displacement + (1 - scale) * outerRadius + distance(direction)
                 if cost < bestCost {
                     bestCost = cost
                     best = RadialPlacement(origin: CGPoint(x: x, y: y), direction: direction, scale: scale)

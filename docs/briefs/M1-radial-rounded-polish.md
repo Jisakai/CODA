@@ -6,6 +6,8 @@ Owner: "I believe M1 is final I havent tested myself but it looks pretty much fi
 This supersedes historical M1b prohibitions: M1 is accepted for progression, physical testing has NOT occurred. Finish this visual correction first; M1b implementation is authorized subsequently, M2+ is not. Preserve current drawer and its reserved empty upper half; no AI work.
 
 ## Read and implement only this slice
+
+Latest owner delivery cadence (November 26, 2026): "no need to new install new ipa until end of M1b". Preserve radial native regressions, sanitizers and actual primary/All screenshot/pixel review. Once those gates pass, proceed directly into authorized M1b without intermediate installation or an owner IPA approval gate. Defer archive/IPA packaging and delivery to M1b completion where practical; incidental existing-CI artifacts are not a separate release. Final reviewed exact-head M1b unsigned IPA and direct verification remain required. Physical testing is not claimed; M2 remains gated.
 Read AGENTS.md, SPEC §7.4, docs/DESIGN.md §3.8, DECISIONS_LOG.md, current production radial geometry/rendering/hit tests and existing regression/screenshot tests. This brief supersedes active instructions in .codex_task.md for this bounded work. Hermes orchestrates/reviews; actual Codex CLI writes code.
 
 Implement CONTINUOUS dark-glass curved backing for each visible radial ring, with ROUND START AND END caps. Place overlaid rounded pill choices FOLLOWING THE ARC, not disconnected wedge sectors with squared ends or a straight row. Preserve current theme, radii/spacing scale, existing labels/icons, selected/dimmed/disabled states and current tool behavior. Owner's latest visual instruction supersedes earlier segmented-slot visuals only.

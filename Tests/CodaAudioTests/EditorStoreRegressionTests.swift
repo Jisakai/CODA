@@ -182,14 +182,23 @@ final class EditorStoreRegressionTests: XCTestCase {
                     for slot in 0..<count {
                         let path = RingSlotShape(count: count, index: slot, radius: radius,
                             thickness: thickness, direction: direction, scale: scale).path(in: bounds)
+                        let arc = RadialGeometry.pill(slot: slot, count: count, radius: radius,
+                            thickness: thickness, direction: direction)
+                        let placed = arc.path(center: CGPoint(x: bounds.midX, y: bounds.midY), scale: scale)
                         for degree in 0..<360 {
                             let angle = Double(degree) * .pi / 180 + 0.001
                             for offset in [-25.0, -17, 0, 17, 25] {
                                 let local = CGPoint(x: cos(angle) * (radius + offset), y: sin(angle) * (radius + offset))
                                 let point = CGPoint(x: bounds.midX + local.x * scale, y: bounds.midY + local.y * scale)
-                                XCTAssertEqual(path.contains(point),
-                                    RadialGeometry.slot(at: local, count: count, radius: radius,
-                                        thickness: thickness, direction: direction) == slot)
+                                let expected = RadialGeometry.slot(at: local, count: count, radius: radius,
+                                    thickness: thickness, direction: direction) == slot
+                                let context = "direction=\(direction) count=\(count) slot=\(slot) scale=\(scale) degree=\(degree) offset=\(offset) local=\(local) placed=\(point)"
+                                XCTAssertEqual(placed.contains(point, using: .winding), expected,
+                                    "CGPath placement: \(context)")
+                                XCTAssertEqual(path.cgPath.contains(point, using: .winding), expected,
+                                    "SwiftUI bridge: \(context)")
+                                XCTAssertEqual(path.contains(point, eoFill: false), expected,
+                                    "SwiftUI containment: \(context)")
                             }
                         }
                         XCTAssertFalse(path.contains(CGPoint(x: bounds.midX, y: bounds.midY)))

@@ -1,5 +1,35 @@
 # M1 radial rounded-arc polish
 
+## First corrective retry — November 26, 2026
+
+Bounded correction against HEAD `7934c8910536be7c238ff82e59a02602beb77a2e`. Hermes owns review/release. This retry does not implement M1b.
+
+### Actual native evidence and pixels
+
+Inspected the failed-step log for run **45851896022** and both supplied 2752 × 2064 native PNGs, including enlarged crops of their menu regions. That run compiled but failed the two new radial methods: six displacement assertions at approximately **190.1920797087537 > 180**, and **81** rendered-path/shared-hit mismatches (`false` versus `true`). The reported 15 UI and 25 music methods passed; this run did not produce an IPA. It does not satisfy the radial geometry gate.
+
+The actual primary PNG shows two uninterrupted curved dark bands, rounded backing starts/ends and four curved inset choices per band. Swap, duplicate, copy and delete icons follow the inner curve; Cm9, Cm11, Cm6 and the grid icon follow the outer curve. The All PNG shows three continuous rounded bands, curved pills, bright minor-family text and dimmer major/odd-family text with paging arrows at the lower ends. Exposed backing bridges the pill gaps. In these captures the visible backings sit below the timeline; both menus cover parts of chord-strip content and pitch-gutter labels, and the All menu obscures part of the second chord label. No yellow or wedge-sector presentation is visible. These observations establish the rounded visual treatment in these two images only, not hit parity, all-edge fitting, or hardware input correctness. They are pre-retry images; no corrected-build pixels exist locally.
+
+### Cause, correction and remaining uncertainty
+
+- **Proven placement defect:** fallback used `displacement + scalePenalty + angularPenalty` without an absolute displacement feasibility guard. Thus a candidate outside 180 pt remained eligible to beat smaller candidates. Fallback now rejects displacement above the unchanged **180 pt** limit before scoring. Existing rotation/scale preferences and all coverage remain. A focused actual XCTest additionally covers the two top/chrome All corners, requires scaled placement within 180 pt and the original conservative bounds, and rejects an unreachable remote tip.
+- **Bounds retained:** `outerRadius - capRadius` is the outer centerline radius; expansion by capRadius encloses the round stroke caps. Including the origin is conservative but also encloses smaller concentric rings and the center dot. Removing the origin or ignoring caps would undercut that guarantee; neither is necessary to enforce the missing absolute limit. No bounds relaxation was made.
+- **Render-path trace:** production creates an increasing-angle, `clockwise: false` centerline, then CoreGraphics strokes it with round caps/joins to produce the filled outline. Hit testing consumes that CGPath in local coordinates with the default nonzero winding rule. Rendering previously bridged the outline into SwiftUI `Path` *before* applying scale concatenated with translation. That transform is intended to map `p` to `scale * p + center`; positive scales do not intentionally change winding, and neither caller requests even-odd fill. The native log lacks sampled coordinates and intermediate path results, so it does **not** prove an arc-winding, fill-rule, or SwiftUI-internal cause for the 81 differences.
+- **Narrow render correction, native confirmation required:** `RadialArc.path(center:scale:)` now strokes in the same canonical local coordinates and explicitly bakes the affine coefficients `(scale, 0, 0, scale, center.x, center.y)` into the filled CGPath before creating SwiftUI `Path`. `RadialArcShape` no longer applies a SwiftUI-side transform. This removes the differing transform route while retaining the exact stroke outline, cap geometry and winding. This is a targeted correction to the observed comparison boundary, **not a locally proven explanation or resolution of the 81 mismatches**.
+- The existing full 360° width/cap/scale parity grid and center-dead-zone assertions remain. Each sample now separately compares placed CGPath containment, SwiftUI's bridged CGPath containment and SwiftUI Path containment against the original shared local hit result, with direction/count/slot/scale/degree/offset/local/placed coordinates in failure messages. This will distinguish affine/path-bridge/containment failures in the replacement native run. No tolerances, thresholds, skips or sample coverage were weakened.
+
+### Exact changed files and executed checks
+
+Only `Sources/CodaInteraction/EditorInputModel.swift`, `Sources/CodaApp/EditorViews.swift`, `Tests/CodaInteractionTests/EditorInputModelTests.swift`, `Tests/CodaAudioTests/EditorStoreRegressionTests.swift` and this report were changed by this retry.
+
+- `python -m unittest discover -s Tests/Scaffold -p 'test_*.py' -v`: **35 run, 34 passed, 1 existing symlink-capability skip**. No Python geometry replica was created or used. Synthetic IPA fixture output is not an app build.
+- `git diff --check`: passed, with existing LF/CRLF warnings on pre-existing planning files.
+- `Get-Command swift,xcodebuild,xcrun,xcodegen -ErrorAction SilentlyContinue`: none available. Changed Swift has **not** been compiled or executed here. Native parity, exact corner scaling and replacement screenshots remain unknown pending Hermes's replacement native CI. No green-build, IPA or physical-test claim.
+- Preserved the pre-existing dirty task/decisions/roadmap/M1b brief files and unrelated untracked fonts, IDEA/review files and M1b foundation brief. No staging, commits, pushes, CI/config/credential access, drawer work or M1b code.
+- Future immutable M1b handoff only: arrow levels exactly 1...10 represent 10...100% editing height and identical stored/base playback/render/live velocities v10...v100; zero is absent; no MIDI-127 roundtrip or 90% multiplier; retain top/bottom directions, Pencil tap-remove and continuous chuck size. No implementation in this retry.
+
+Stop for Hermes review. A replacement native run must pass actual XCTest/sanitizer gates and produce corrected primary/All screenshots for actual pixel review before M1b implementation. Latest owner delivery cadence: "no need to new install new ipa until end of M1b". No radial-only IPA delivery, intermediate installation or owner approval gate is requested. Defer archive/packaging/delivery to M1b completion where practical; existing CI may produce incidental artifacts. Final reviewed exact-head M1b unsigned IPA and direct verification remain required. Physical testing is unclaimed; M2 remains gated.
+
 Implemented November 26, 2026, under `docs/briefs/M1-radial-rounded-polish.md` and its latest owner authorization. This slice stops before M1b. Behavior authority remains SPEC §7.4; the owner's continuous-backing/rounded-pill instruction supersedes only the older segmented-slot presentation in DESIGN §3.8.
 
 ## Actual prior-image observations
