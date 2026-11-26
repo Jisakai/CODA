@@ -286,12 +286,25 @@ int main() {
     pthread_mutex_t calibrationMutex;check(pthread_mutex_init(&calibrationMutex,nullptr)==0,"lock calibration init");
     os_unfair_lock unfair=OS_UNFAIR_LOCK_INIT;
     coda_test_lock_begin();pthread_mutex_lock(&calibrationMutex);pthread_mutex_unlock(&calibrationMutex);coda_test_lock_end();
-    check(coda_test_lock_count()==1,"real mutex hook exact one");
+    const auto mutexCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("mutex",mutexCount,1,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
     coda_test_lock_begin();os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);coda_test_lock_end();
-    check(coda_test_lock_count()==1,"real unfair hook exact one");
+    const auto unfairCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("unfair",unfairCount,1,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
     coda_test_lock_begin();pthread_mutex_lock(&calibrationMutex);pthread_mutex_unlock(&calibrationMutex);
     os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);coda_test_lock_end();
-    check(coda_test_lock_count()==2,"both real hooks exact two");pthread_mutex_destroy(&calibrationMutex);
+    const auto combinedCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("combined",combinedCount,2,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
+    check(mutexCount==1,"real mutex hook exact one");
+    check(unfairCount==1,"real unfair hook exact one");
+    check(combinedCount==2,"both real hooks exact two");
+    pthread_mutex_destroy(&calibrationMutex);
 #endif
 
     // A stuck production queue/gate fails deterministically instead of hanging CI.

@@ -181,17 +181,30 @@ static void test_performance() {
     os_unfair_lock unfair=OS_UNFAIR_LOCK_INIT;
     coda_test_lock_begin();count_allocations=true;
     pthread_mutex_lock(&mutex);pthread_mutex_unlock(&mutex);count_allocations=false;coda_test_lock_end();
-    require(coda_test_lock_count()==1,"mutex interposition calibration");
+    const auto mutexCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("mutex",mutexCount,1,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
     coda_test_lock_begin();count_allocations=true;
     os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);count_allocations=false;coda_test_lock_end();
-    require(coda_test_lock_count()==1,"unfair lock interposition calibration");
+    const auto unfairCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("unfair",unfairCount,1,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
     coda_test_lock_begin();count_allocations=true;
     const int lockResult=pthread_mutex_lock(&mutex);
     if(lockResult==0)pthread_mutex_unlock(&mutex);
     os_unfair_lock_lock(&unfair);os_unfair_lock_unlock(&unfair);
     count_allocations=false;coda_test_lock_end();
     require(lockResult==0,"combined calibration mutex lock");
-    require(coda_test_lock_count()==2,"both real lock hooks increase render_locks by exactly two");
+    const auto combinedCount=coda_test_lock_count();
+    coda_test_lock_diagnostics("combined",combinedCount,2,
+        reinterpret_cast<const void *>(&pthread_mutex_lock),
+        reinterpret_cast<const void *>(&os_unfair_lock_lock));
+
+    require(mutexCount==1,"mutex interposition calibration");
+    require(unfairCount==1,"unfair lock interposition calibration");
+    require(combinedCount==2,"both real lock hooks increase render_locks by exactly two");
     require(pthread_mutex_destroy(&mutex)==0,"calibration mutex destruction");
 #endif
     std::fprintf(stderr,"DSP calibration complete; ownership\n");test_performance_ownership();

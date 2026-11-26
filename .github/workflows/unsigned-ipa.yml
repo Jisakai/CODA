@@ -85,12 +85,17 @@ jobs:
           ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             python3 scripts/run_native_test.py build/generated/dsp/dsp_tests_sanitized
 
-      - name: Test production transport and sanitizers
+      # Diagnostic lanes run after DSP failure; failures still block release.
+      - name: Test production transport
+        if: ${{ !cancelled() }}
         shell: bash
         timeout-minutes: 6
         run: |
           set -euo pipefail
-          mkdir -p build/generated/transport
+          mkdir -p build/generated/transport build/generated/dsp
+          clang++ -std=c++20 -O2 -Wall -Wextra -pthread -dynamiclib \
+            CodaDSP/tests/lock_hooks.cpp -Wl,-install_name,@rpath/libcoda_lock_hooks.dylib \
+            -o build/generated/dsp/libcoda_lock_hooks.dylib
           clang++ -std=c++20 -O2 -Wall -Wextra -pthread \
             -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
             CodaDSP/src/coda_dsp.cpp Sources/CodaTransport/coda_transport.cpp \
@@ -98,6 +103,17 @@ jobs:
             -L build/generated/dsp -lcoda_lock_hooks -Wl,-rpath,@executable_path/../dsp \
             -o build/generated/transport/transport_tests
           python3 scripts/run_native_test.py build/generated/transport/transport_tests
+
+      - name: Test production transport sanitizers
+        if: ${{ !cancelled() }}
+        shell: bash
+        timeout-minutes: 6
+        run: |
+          set -euo pipefail
+          mkdir -p build/generated/transport build/generated/dsp
+          clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined -fno-omit-frame-pointer -dynamiclib \
+            CodaDSP/tests/lock_hooks.cpp -Wl,-install_name,@rpath/libcoda_lock_hooks_sanitized.dylib \
+            -o build/generated/dsp/libcoda_lock_hooks_sanitized.dylib
           clang++ -std=c++20 -O1 -g -Wall -Wextra -pthread \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I CodaDSP/include -I Sources/CodaTransport/include -I Sources/CodaTransport \
@@ -231,6 +247,7 @@ jobs:
             --xcodegen-version "$xcodegen_version"
 
       - name: Upload only the IPA and verification report
+        if: ${{ success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coda-unsigned-ipa
