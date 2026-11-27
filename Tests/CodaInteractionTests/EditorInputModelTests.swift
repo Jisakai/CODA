@@ -487,8 +487,73 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertEqual(roll.consume(degrees: 7), 0)
         XCTAssertEqual(roll.consume(degrees: 4), 0)
         XCTAssertEqual(roll.consume(degrees: 5), 4.0 / 360.0, accuracy: 1e-9)
-        XCTAssertEqual(roll.consume(degrees: -20), -8.0 / 360.0, accuracy: 1e-9)
+        // The initial dead zone is paid only once, including on reversal.
+        XCTAssertEqual(roll.consume(degrees: -20), -20.0 / 360.0, accuracy: 1e-9)
         XCTAssertEqual(RollDetentTracker.crossed(from: 0.04, to: 0.16), 3)
         XCTAssertEqual(RollDetentTracker.crossed(from: 0.96, to: 1), 1)
+    }
+
+    func testBarrelRollAccumulatesSignedInitialJitterInEitherDirection() {
+        for direction in [-1.0, 1.0] {
+            var roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+            XCTAssertEqual(roll.consume(degrees: direction * 7), 0)
+            XCTAssertEqual(roll.consume(degrees: direction * -4), 0)
+            XCTAssertEqual(roll.consume(degrees: direction * 8), 0)
+            XCTAssertEqual(roll.consume(degrees: direction * 5), direction * 4 / 360, accuracy: 1e-12)
+        }
+    }
+
+    func testBarrelRollExactThresholdEngagesTinyFollowUps() {
+        for direction in [-1.0, 1.0] {
+            var roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+            XCTAssertEqual(roll.consume(degrees: direction * 12), 0)
+            XCTAssertEqual(roll.consume(degrees: direction * 0.001), direction * 0.001 / 360, accuracy: 1e-12)
+            XCTAssertEqual(roll.consume(degrees: direction * -0.0005), direction * -0.0005 / 360, accuracy: 1e-12)
+        }
+    }
+
+    func testBarrelRollPreservesRepeatedSmallMovementAndReversals() {
+        for direction in [-1.0, 1.0] {
+            var roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+            XCTAssertEqual(roll.consume(degrees: direction * 15), direction * 3 / 360, accuracy: 1e-12)
+            for _ in 0..<40 {
+                XCTAssertEqual(roll.consume(degrees: direction * 0.5), direction * 0.5 / 360, accuracy: 1e-12)
+            }
+            XCTAssertEqual(roll.consume(degrees: direction * -1), direction * -1 / 360, accuracy: 1e-12)
+            XCTAssertEqual(roll.consume(degrees: direction * -30), direction * -30 / 360, accuracy: 1e-12)
+            XCTAssertEqual(roll.consume(degrees: direction * 0.25), direction * 0.25 / 360, accuracy: 1e-12)
+        }
+    }
+
+    func testBarrelRollNewAccumulatorRearmsInitialDeadZone() {
+        var roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+        XCTAssertEqual(roll.consume(degrees: 17), 5.0 / 360, accuracy: 1e-12)
+        XCTAssertEqual(roll.consume(degrees: 1), 1.0 / 360, accuracy: 1e-12)
+
+        roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+        XCTAssertEqual(roll.consume(degrees: 7), 0)
+        XCTAssertEqual(roll.consume(degrees: 4), 0)
+        XCTAssertEqual(roll.consume(degrees: 2), 1.0 / 360, accuracy: 1e-12)
+    }
+
+    func testBarrelRollIgnoresNonfiniteDeltasBeforeAndAfterActivation() {
+        var roll = BarrelRollAccumulator(deadZoneDegrees: 12)
+        XCTAssertEqual(roll.consume(degrees: 7), 0)
+        for invalid in [Double.nan, .infinity, -.infinity] {
+            XCTAssertEqual(roll.consume(degrees: invalid), 0)
+        }
+        XCTAssertEqual(roll.consume(degrees: 4), 0)
+        XCTAssertEqual(roll.consume(degrees: 2), 1.0 / 360, accuracy: 1e-12)
+        for invalid in [Double.nan, .infinity, -.infinity] {
+            XCTAssertEqual(roll.consume(degrees: invalid), 0)
+            XCTAssertEqual(roll.consume(degrees: 0.25), 0.25 / 360, accuracy: 1e-12)
+        }
+    }
+
+    func testBarrelRollZeroDeadZonePreservesEveryFiniteDelta() {
+        var roll = BarrelRollAccumulator(deadZoneDegrees: 0)
+        for delta in [0.0, 0.001, 1, -0.5, 360, -360, 0] {
+            XCTAssertEqual(roll.consume(degrees: delta), delta / 360, accuracy: 1e-12)
+        }
     }
 }

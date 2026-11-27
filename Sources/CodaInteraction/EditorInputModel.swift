@@ -562,10 +562,11 @@ public struct RadialSwapDraft: Equatable, Sendable {
 }
 
 /// Barrel roll accumulator. It discards the initial hand-motion dead zone and
-/// returns normalized knob movement after it is crossed.
+/// then returns every subsequent delta as normalized knob movement.
 public struct BarrelRollAccumulator: Sendable {
     public let deadZoneDegrees: Double
     private var accumulatedDegrees = 0.0
+    private var isEngaged = false
 
     public init(deadZoneDegrees: Double = 12) {
         self.deadZoneDegrees = max(0, deadZoneDegrees)
@@ -573,8 +574,10 @@ public struct BarrelRollAccumulator: Sendable {
 
     public mutating func consume(degrees: Double) -> Double {
         guard degrees.isFinite else { return 0 }
+        if isEngaged { return degrees / 360 }
         accumulatedDegrees += degrees
         guard abs(accumulatedDegrees) >= deadZoneDegrees else { return 0 }
+        isEngaged = true
         let direction = accumulatedDegrees >= 0 ? 1.0 : -1.0
         let effective = accumulatedDegrees - direction * deadZoneDegrees
         accumulatedDegrees = 0

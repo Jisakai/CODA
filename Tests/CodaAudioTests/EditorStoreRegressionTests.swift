@@ -1272,6 +1272,86 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testBarrelRollRemainsContinuousAcrossAngleWrapAndReversal() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.drawerOpen = true
+        let frame = CGRect(x: store.rootSize.width - 200, y: store.synthTop + 80, width: 42, height: 42)
+        let at = CGPoint(x: frame.midX, y: frame.midY)
+        store.knobFrames = [.cutoff: frame]
+        store.setValue(0.4, for: .cutoff)
+        let initial = store.value(for: .cutoff)
+
+        store.pencilHover(at: at, rollAngle: 350 * .pi / 180)
+        for angle in [355.0, 359] {
+            store.pencilHover(at: at, rollAngle: angle * .pi / 180)
+            XCTAssertEqual(store.value(for: .cutoff), initial, accuracy: 1e-6)
+        }
+        // Crossing 360 degrees preserves direction and pays the dead zone once.
+        store.pencilHover(at: at, rollAngle: 3 * .pi / 180)
+        let excess = 13 - CodaDesignTokens.Input.barrelDeadZoneDegrees
+        XCTAssertEqual(store.value(for: .cutoff), initial + excess / 360, accuracy: 1e-6)
+        for angle in [4.0, 5, 6] {
+            store.pencilHover(at: at, rollAngle: angle * .pi / 180)
+            XCTAssertEqual(store.value(for: .cutoff), initial + (excess + angle - 3) / 360, accuracy: 1e-6)
+        }
+        for invalid in [Double.nan, .infinity, -.infinity] {
+            store.pencilHover(at: at, rollAngle: invalid)
+            XCTAssertEqual(store.value(for: .cutoff), initial + (excess + 3) / 360, accuracy: 1e-6)
+        }
+        // Reverse across the same wrap without rearming the jitter allowance.
+        store.pencilHover(at: at, rollAngle: 359 * .pi / 180)
+        XCTAssertEqual(store.value(for: .cutoff), initial + (excess - 4) / 360, accuracy: 1e-6)
+    }
+
+    @MainActor
+    func testBarrelRollLifecycleResetsRearmDeadZoneAndAngleBaseline() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.drawerOpen = true
+        let frame = CGRect(x: store.rootSize.width - 200, y: store.synthTop + 80, width: 42, height: 42)
+        let at = CGPoint(x: frame.midX, y: frame.midY)
+        let otherFrame = frame.offsetBy(dx: 70, dy: 0)
+        let other = CGPoint(x: otherFrame.midX, y: otherFrame.midY)
+        store.knobFrames = [.cutoff: frame, .resonance: otherFrame]
+        let excess = 30 - CodaDesignTokens.Input.barrelDeadZoneDegrees
+
+        for reset in ["hoverEnd", "touchCancellation", "leaveKnob", "missingAngle", "targetChange"] {
+            store.clearRollTracking()
+            store.setValue(0.4, for: .cutoff)
+            store.setValue(0.4, for: .resonance)
+            let initial = store.value(for: .cutoff)
+            if reset == "touchCancellation" { store.pencilTouchBegan(at: at) }
+            store.pencilHover(at: at, rollAngle: 0)
+            store.pencilHover(at: at, rollAngle: .pi / 6)
+            let engaged = store.value(for: .cutoff)
+            XCTAssertEqual(engaged, initial + excess / 360, accuracy: 1e-6, reset)
+            switch reset {
+            case "hoverEnd": store.clearRollTracking() // Production hover-end ingress.
+            case "touchCancellation": store.pencilTouchCancelled()
+            case "leaveKnob": store.pencilHover(at: .zero, rollAngle: 0)
+            case "missingAngle": store.pencilHover(at: at, rollAngle: nil)
+            default:
+                let otherInitial = store.value(for: .resonance)
+                store.pencilHover(at: other, rollAngle: .pi / 2)
+                XCTAssertEqual(store.value(for: .resonance), otherInitial, accuracy: 1e-6)
+                store.pencilHover(at: other, rollAngle: 2 * .pi / 3)
+                XCTAssertEqual(store.value(for: .resonance), otherInitial + excess / 360, accuracy: 1e-6)
+            }
+            // A distant new baseline must neither jump nor inherit activation.
+            for angle in [-150.0, -143, -139] {
+                store.pencilHover(at: at, rollAngle: angle * .pi / 180)
+                XCTAssertEqual(store.value(for: .cutoff), engaged, accuracy: 1e-6, reset)
+            }
+            store.pencilHover(at: at, rollAngle: -137 * .pi / 180)
+            let resumed = engaged + (13 - CodaDesignTokens.Input.barrelDeadZoneDegrees) / 360
+            XCTAssertEqual(store.value(for: .cutoff), resumed, accuracy: 1e-6, reset)
+            store.pencilHover(at: at, rollAngle: -136 * .pi / 180)
+            XCTAssertEqual(store.value(for: .cutoff), resumed + 1.0 / 360, accuracy: 1e-6, reset)
+        }
+    }
+
+    @MainActor
     func testEveryPresetControlUsesProductionDefaultsAndSharedControlsSurvive() throws {
         let store = try makeStore()
         defer { store.session?.suspend() }
