@@ -7,6 +7,28 @@ import CodaNative
 
 final class MusicSessionTests: XCTestCase {
     @MainActor
+    func testBootstrapTwoLegacySnapshotsDeliverBeforeRetainedSeek() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        try session.play()
+        try session.setTempo(137.3)
+        let queued = session.planDiagnostics.pending
+        try session.setLoop(LoopSpan(start: 16, bars: 1), enabled: true)
+        XCTAssertEqual(session.planDiagnostics.pending, queued, "Third bootstrap snapshot must remain desired")
+        XCTAssertTrue(session.planDiagnostics.desired)
+        try session.setLoop(LoopSpan(bars: 2), enabled: true)
+        try session.seek(step: 10)
+        _ = try session.renderOffline(frames: 1, pumping: false)
+        XCTAssertEqual(session.status().delivered, 4, "Intermediate legacy chord must actually sound")
+        try session.setControls(session.controls)
+        _ = try session.renderOffline(frames: 1)
+        XCTAssertEqual(session.status().step, 10)
+        XCTAssertEqual(session.status().delivered, 12)
+        XCTAssertEqual(session.status().failures, 0)
+    }
+
+    @MainActor
     func testLaterCycleRestartSurvivesConfigurationAndRejectedPredecessor() throws {
         for rejectPredecessor in [false, true] {
             let session = try makeSession()

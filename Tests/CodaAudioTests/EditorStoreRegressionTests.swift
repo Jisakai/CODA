@@ -712,6 +712,252 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testPatternPencilLiftIsOneUnifiedUndoAndClosingRetainsPlayback() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+        let start = CGPoint(x: 100, y: store.patternFrame.minY)
+        let end = CGPoint(x: 100, y: start.y + store.patternFrame.height * 0.4)
+        store.pencilTouchBegan(at: start)
+        store.pencilTouchMoved(to: end)
+        XCTAssertNotNil(store.patternPreview)
+        XCTAssertTrue(session.patterns.regions.isEmpty, "Preview cannot edit history")
+        store.pencilTouchEnded(at: end)
+        let retained = session.patterns
+        let region = try XCTUnwrap(retained.regions.first)
+        XCTAssertEqual(region.range, try PatternDefaults.defaultScope.resolve(loop: session.loop, barCount: retained.barCount))
+        let stroke = try XCTUnwrap(region.slots.compactMap { $0 }.first)
+        XCTAssertEqual(stroke.content, .arrow(direction: .down, level: try ArrowLevel(4)))
+        XCTAssertEqual(stroke.baseVelocity, 0.4)
+        XCTAssertTrue(store.canUndo)
+        try session.play()
+        store.endPatternEditing()
+        XCTAssertTrue(session.playing)
+        XCTAssertEqual(session.patterns, retained)
+        store.beginPatternEditing()
+        XCTAssertEqual(session.patterns, retained)
+        try session.undo()
+        XCTAssertTrue(session.patterns.regions.isEmpty, "Exactly one undo removes the whole gesture")
+        XCTAssertTrue(store.canRedo)
+        try session.redo()
+        XCTAssertEqual(session.patterns, retained)
+    }
+
+    @MainActor
+    func testPatternCancelNoopAndFingerNavigationPreserveRedo() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let start = CGPoint(x: 100, y: store.patternFrame.minY)
+        func draw(_ fraction: CGFloat) {
+            let end = CGPoint(x: start.x, y: start.y + store.patternFrame.height * fraction)
+            store.pencilTouchBegan(at: start)
+            store.pencilTouchMoved(to: end)
+            store.pencilTouchEnded(at: end)
+        }
+        store.beginPatternEditing()
+        draw(0.4)
+        draw(0.8)
+        try session.undo()
+        let retained = session.patterns
+        XCTAssertTrue(store.canRedo)
+        draw(0.4)
+        XCTAssertEqual(session.patterns, retained)
+        XCTAssertTrue(store.canRedo, "Same content retains IDs and redo")
+        store.pencilTouchBegan(at: start)
+        store.pencilTouchMoved(to: CGPoint(x: 100, y: start.y + 200))
+        store.pencilTouchCancelled()
+        store.pencilTouchEnded(at: start)
+        XCTAssertEqual(session.patterns, retained)
+        XCTAssertTrue(store.canRedo)
+        XCTAssertTrue(store.beginFingerNavigation(at: CGPoint(x: 400, y: 400)))
+        store.routeFingerPan(from: CGPoint(x: 400, y: 400), to: CGPoint(x: 390, y: 400), translation: CGPoint(x: -10, y: 0))
+        XCTAssertEqual(session.patterns, retained)
+        XCTAssertTrue(store.canRedo)
+    }
+
+    @MainActor
+    func testPatternTapRemovesAndBottomDragEditsDirectionWithStableIdentity() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        let top = CGPoint(x: 100, y: store.patternFrame.minY)
+        let bottom = CGPoint(x: 100, y: store.patternFrame.maxY - 1)
+        store.pencilTouchBegan(at: top)
+        store.pencilTouchEnded(at: CGPoint(x: 100, y: top.y + store.patternFrame.height * 0.3))
+        let original = try XCTUnwrap(session.patterns.regions.first)
+        let slot = try XCTUnwrap(original.slots.firstIndex { $0 != nil })
+        let identity = original.slots[slot]?.id
+        store.pencilTouchBegan(at: bottom)
+        store.pencilTouchEnded(at: CGPoint(x: 100, y: bottom.y - store.patternFrame.height * 0.7))
+        XCTAssertEqual(session.patterns.regions.first?.slots[slot]?.id, identity)
+        XCTAssertEqual(session.patterns.regions.first?.slots[slot]?.content,
+                       .arrow(direction: .up, level: try ArrowLevel(7)))
+        let blank = CGPoint(x: 100, y: store.patternFrame.minY + 10)
+        let retained = session.patterns
+        store.pencilTouchBegan(at: blank); store.pencilTouchEnded(at: blank)
+        XCTAssertEqual(session.patterns, retained, "Blank space in an occupied column cannot remove the stroke")
+        let geometry = try XCTUnwrap(store.patternGeometry(bar: 0, slot: slot))
+        let hit = CGPoint(x: geometry.start.x, y: (geometry.start.y + geometry.end.y) / 2)
+        store.pencilTouchBegan(at: hit); store.pencilTouchEnded(at: hit)
+        XCTAssertNil(session.patterns.regions.first?.slots[slot])
+        try session.undo()
+        XCTAssertEqual(session.patterns.regions.first?.slots[slot]?.id, identity)
+    }
+
+    @MainActor
+    func testRenderedChuckHitsRetainOwnerAcrossColumnsAndOverlaps() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        store.updatePatternSettings(preset: true)
+        let region = try XCTUnwrap(session.patterns.regions.first)
+        try session.editPatterns([.resize(id: region.id, range: try PatternBarRange(start: 0, length: 1))])
+        // Isolate two adjacent large rings; later Canvas paint wins overlaps.
+        for slot in 0..<8 {
+            try session.editPatterns([.removeStroke(id: region.id, slot: slot)])
+        }
+        try session.editPatterns([.setStroke(id: region.id, slot: 3,
+            content: .chuck(try ChuckSize(0.6)), newStrokeID: "large-chuck")])
+        for zoom in [1.0, 2.0] {
+            store.viewport = EditorViewport(horizontalZoom: zoom, horizontalOffset: 20)
+            let geometry = try XCTUnwrap(store.patternGeometry(bar: 0, slot: 3))
+            let radius = try XCTUnwrap(geometry.radius)
+            for angle in [0.0, Double.pi / 4, Double.pi / 2, -Double.pi / 4] {
+                let hit = CGPoint(x: geometry.start.x + radius * cos(angle), y: geometry.start.y + radius * sin(angle))
+                XCTAssertEqual(store.patternHitTarget(at: hit), PatternStrokeTarget(bar: 0, slot: 3))
+                store.pencilTouchBegan(at: hit); store.pencilTouchEnded(at: hit)
+                XCTAssertNil(session.patterns.regions.first?.slots[3])
+                try session.undo()
+                XCTAssertEqual(session.patterns.regions.first?.slots[3]?.id, "large-chuck")
+            }
+            let xHit = CGPoint(x: geometry.start.x + radius * 0.4, y: geometry.start.y + radius * 0.4)
+            store.pencilTouchBegan(at: xHit)
+            store.pencilTouchEnded(at: CGPoint(x: xHit.x, y: xHit.y + store.patternFrame.height * 0.1))
+            XCTAssertEqual(session.patterns.regions.first?.slots[3]?.id, "large-chuck")
+            let edited = try XCTUnwrap(session.patterns.regions.first?.slots[3])
+            if case .arrow = edited.content {} else { XCTFail("Drag must edit the hit owner") }
+            try session.undo()
+            XCTAssertNil(store.patternHitTarget(at: CGPoint(x: geometry.start.x + radius * 0.5, y: geometry.start.y)))
+        }
+        let geometry = try XCTUnwrap(store.patternGeometry(bar: 0, slot: 3))
+        try session.editPatterns([.setStroke(id: region.id, slot: 4,
+            content: .chuck(try ChuckSize(0.6)), newStrokeID: "top-chuck")])
+        let next = try XCTUnwrap(store.patternGeometry(bar: 0, slot: 4))
+        let overlap = CGPoint(x: (geometry.start.x + next.start.x) / 2,
+                              y: geometry.start.y + (next.start.x - geometry.start.x) / 2)
+        XCTAssertTrue(geometry.contains(overlap)); XCTAssertTrue(next.contains(overlap))
+        XCTAssertEqual(store.patternHitTarget(at: overlap), PatternStrokeTarget(bar: 0, slot: 4))
+        store.pencilTouchBegan(at: overlap); store.pencilTouchEnded(at: overlap)
+        XCTAssertNotNil(session.patterns.regions.first?.slots[3])
+        XCTAssertNil(session.patterns.regions.first?.slots[4])
+    }
+
+    @MainActor
+    func testPatternTransientCancellationOnDoneDrawerGeometryAndInactivity() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let cancellations: [() -> Void] = [
+            { store.endPatternEditing() },
+            { store.openDrawer(true) },
+            { store.setRootSize(CGSize(width: 1300, height: 900)) },
+            { store.pencilTouchCancelled() },
+            { store.popup = .tempo }
+        ]
+        for cancel in cancellations {
+            store.popup = nil; store.drawerOpen = false
+            store.beginPatternEditing()
+            let start = CGPoint(x: 100, y: store.patternFrame.minY + 10)
+            let end = CGPoint(x: 100, y: start.y + 200)
+            let beforeUndo = store.canUndo
+            store.pencilTouchBegan(at: start); store.pencilTouchMoved(to: end)
+            cancel()
+            XCTAssertNil(store.patternPreview)
+            store.pencilTouchEnded(at: end)
+            XCTAssertTrue(session.patterns.regions.isEmpty)
+            XCTAssertEqual(store.canUndo, beforeUndo)
+        }
+    }
+
+    @MainActor
+    func testCancelledPatternLiftNeverAuditionsOrCreatesChordStripMusic() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        try session.edit([.resize(id: "a", start: 0, length: 15)])
+        try session.undo()
+        for occupied in [true, false] {
+            for context in 0..<4 {
+                store.popup = nil; store.drawerOpen = false
+                store.beginPatternEditing()
+                let before = session.editor.progression
+                let patterns = session.patterns
+                let available = session.available
+                store.pencilTouchBegan(at: CGPoint(x: 100, y: store.patternFrame.minY + 5))
+                store.pencilTouchMoved(to: CGPoint(x: 100, y: store.patternFrame.midY))
+                switch context {
+                case 0: store.viewport = EditorViewport(horizontalZoom: store.viewport.horizontalZoom == 1 ? 2 : 1)
+                case 1: store.endPatternEditing()
+                case 2: store.popup = .tempo; store.popup = nil
+                default: store.pencilTouchCancelled()
+                }
+                let step = occupied ? 4.0 : 20.0
+                let lift = CGPoint(x: 56 + store.viewport.x(forStep: step, in: Double(store.contentWidth)), y: store.stripTop + 30)
+                store.pencilTouchEnded(at: lift)
+                XCTAssertEqual(session.editor.progression, before)
+                XCTAssertEqual(session.patterns, patterns)
+                XCTAssertEqual(session.available, available, "Stale lift must not start audition hardware")
+                XCTAssertTrue(session.canRedo)
+            }
+        }
+    }
+
+    @MainActor
+    func testPatternDrawerAndOverlayControlsExcludedBeforeAdmission() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing(); store.openDrawer(true)
+        let x = store.rootSize.width - store.drawerWidth / 2
+        let knob = CGPoint(x: x, y: store.synthTop + 50)
+        store.knobFrames[.warmth] = CGRect(x: x-20, y: knob.y-20, width: 40, height: 40)
+        for point in [knob, CGPoint(x: x, y: store.rollTop + 10)] {
+            XCTAssertFalse(store.acceptsPencilLocation(point))
+            store.pencilTouchBegan(at: point); store.pencilTouchEnded(at: point)
+        }
+        store.openDrawer(false)
+        let control = CGPoint(x: store.patternControlsFrame.midX, y: store.patternControlsFrame.midY)
+        XCTAssertFalse(store.acceptsPencilLocation(control))
+        store.pencilTouchBegan(at: control); store.pencilTouchEnded(at: control)
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+    }
+
+    @MainActor
+    func testRollSqueezePatternOptionIsReachableAndDoneRetainsPlayback() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        try session.play()
+        store.openSqueeze(at: CGPoint(x: 400, y: store.patternFrame.midY))
+        XCTAssertEqual(store.radialRings().first?.1, ["Pattern"])
+        let option = try point(store, ring: .inner, slot: 0)
+        store.pencilHover(at: option, rollAngle: nil)
+        store.finishSqueeze(at: option)
+        XCTAssertTrue(store.patternEditing)
+        store.updatePatternSettings(preset: true)
+        let retained = session.patterns
+        XCTAssertEqual(retained.regions.first?.slots.compactMap { $0 }.count, 6)
+        store.endPatternEditing()
+        XCTAssertEqual(session.patterns, retained)
+        XCTAssertTrue(session.playing)
+    }
+
+    @MainActor
     private func makeStore(uiDiagnosticsEnabled: Bool = false) throws -> CodaEditorStore {
         let vocabulary = try ChordVocabulary.load(in: Bundle(for: Self.self))
         let session = try MusicSession(vocabulary: vocabulary, offline: true)

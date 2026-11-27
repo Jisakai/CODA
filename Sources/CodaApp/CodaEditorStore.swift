@@ -93,14 +93,23 @@ final class CodaEditorStore {
         didSet { recordUIEvent("popup.state \(oldValue?.rawValue ?? "nil")->\(popup?.rawValue ?? "nil")") }
     }
     var detailsVisible = false
-    var drawerOpen = false
+    var drawerOpen = false { willSet { if newValue != drawerOpen { pencilTouchCancelled() } } }
     var fxExpanded = false
-    var chromeHidden = false
+    var chromeHidden = false { willSet { if newValue != chromeHidden { pencilTouchCancelled() } } }
     var showTempoEditor = false
     var tempoDraft = "124"
     var key = MusicDefaults.key
     var rootSize = CGSize(width: 1366, height: 1024)
-    var viewport = EditorViewport(topMIDI: CodaDesignTokens.Geometry.pianoRollTopMIDI)
+    var viewport = EditorViewport(topMIDI: CodaDesignTokens.Geometry.pianoRollTopMIDI) {
+        willSet { if newValue != viewport { cancelPatternInput() } }
+    }
+    private(set) var patternEditing = false
+    private(set) var patternPreview: PatternGestureValue?
+    @ObservationIgnored private var patternGesture = PatternGestureInterpreter()
+    @ObservationIgnored private var patternGestureWasActive = false
+    @ObservationIgnored private var discardPencilLift = false
+    private var patternSqueezeMenu = false
+    var patternControlsFrame: CGRect { CGRect(x: max(patternFrame.minX, rootSize.width - 500), y: rollTop + 8, width: min(492, patternFrame.width), height: 48) }
     var selectedRegionID: String?
     var hoveredRegionID: String?
     var hoveredStep: Int?
@@ -187,8 +196,8 @@ final class CodaEditorStore {
     }
 
     var regions: [ChordRegion] { session?.editor.progression.regions ?? [] }
-    var canUndo: Bool { session?.editor.canUndo ?? false }
-    var canRedo: Bool { session?.editor.canRedo ?? false }
+    var canUndo: Bool { session?.canUndo ?? false }
+    var canRedo: Bool { session?.canRedo ?? false }
     var tempo: Double { session?.tempo ?? MusicDefaults.tempo }
     var looping: Bool { session?.looping ?? true }
     var loop: LoopSpan { session?.loop ?? (try! LoopSpan()) }
@@ -215,6 +224,7 @@ final class CodaEditorStore {
 
     func setRootSize(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        if size != rootSize, patternGestureWasActive { pencilTouchCancelled() }
         rootSize = size
         if !hasActivePencilTouch, var state = radial {
             guard let placement = menuPlacement(state.anchor, mode: state.mode) else {
@@ -572,14 +582,136 @@ final class CodaEditorStore {
         session?.vocabulary.ring(family) ?? []
     }
 
+    func patternControlExcludes(_ point: CGPoint) -> Bool {
+        patternEditing && ((drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop)
+        || patternControlsFrame.contains(point))
+    }
+
+    func patternGeometry(bar: Int, slot: Int, preview: PatternGestureValue? = nil) -> PatternStrokeGeometry? {
+        let content: PatternStroke.Content?
+        if let preview, preview.bar == bar, preview.slot == slot {
+            switch preview.content {
+            case .remove: content = nil
+            case .arrow(let down, let level): content = .arrow(direction: down ? .down : .up, level: try! ArrowLevel(level))
+            case .chuck(let size): content = .chuck(try! ChuckSize(size))
+            }
+        } else { content = session?.patterns.regions.first { ($0.range.start..<$0.range.end).contains(bar) }?.slots[slot]?.content }
+        guard let content else { return nil }
+        let x = patternFrame.minX + viewport.x(forStep: Double(bar * 16 + slot * 2 + 1), in: Double(patternFrame.width))
+        switch content {
+        case .arrow(let direction, let level): return PatternStrokeGeometry(x: x, frame: patternFrame, down: direction == .down, fraction: level.normalizedLength)
+        case .chuck(let size): return PatternStrokeGeometry(x: x, frame: patternFrame, down: true, fraction: size.normalizedSize, chuck: true)
+        }
+    }
+
+    /// Reverse Canvas paint order: the last painted visible stroke owns overlaps.
+    func patternHitTarget(at point: CGPoint) -> PatternStrokeTarget? {
+        guard patternFrame.contains(point), !patternControlExcludes(point) else { return nil }
+        for bar in (0..<(viewport.totalSteps / 16)).reversed() {
+            for slot in (0..<8).reversed() {
+                if patternGeometry(bar: bar, slot: slot)?.contains(point) == true {
+                    return PatternStrokeTarget(bar: bar, slot: slot)
+                }
+            }
+        }
+        return nil
+    }
+
+    var currentPatternSettings: PatternSettings {
+        session?.patterns.regions.first { ($0.range.start..<$0.range.end).contains(loop.start / 16) }?.settings ?? (try! PatternSettings())
+    }
+
+    func updatePatternSettings(swing: Double? = nil, loose: Bool? = nil, spread: Double? = nil, preset: Bool = false) {
+        guard let session else { return }
+        do {
+            let range = try PatternDefaults.defaultScope.resolve(loop: session.loop, barCount: session.patterns.barCount)
+            let old = session.patterns.regions.first { ($0.range.start..<$0.range.end).contains(range.start) }
+            let previous = try old?.settings ?? PatternSettings()
+            let settings = try PatternSettings(swing: swing ?? previous.swing,
+                humanize: loose.map { $0 ? .loose : .tight } ?? previous.humanize,
+                spreadMilliseconds: spread ?? previous.spreadMilliseconds, looseSeed: previous.looseSeed)
+            if preset {
+                let region = try PatternPreset.popRock.instantiate(id: old?.id ?? UUID().uuidString, range: old?.range ?? range,
+                    occupiedStrokeIDs: (0..<6).map { _ in UUID().uuidString }, settings: settings)
+                var edits: [PatternEdit] = old.map { [.delete(id: $0.id)] } ?? []
+                edits.append(.add(region)); try session.editPatterns(edits)
+            } else if let old { try session.editPatterns([.settings(id: old.id, settings)]) }
+            else {
+                let region = try PatternRegion(id: UUID().uuidString, range: range,
+                    slots: [PatternStroke?](repeating: nil, count: 8), settings: settings)
+                try session.editPatterns([.add(region)])
+            }
+        } catch { setError(error) }
+    }
+
+    var patternFrame: CGRect {
+        CGRect(x: CodaDesignTokens.Geometry.pitchGutterWidth, y: rollTop,
+               width: contentWidth, height: max(1, rootSize.height - rollTop))
+    }
+
+    /// Opening is read-only: no empty pattern or history item is created.
+    func beginPatternEditing() {
+        pencilTouchCancelled()
+        patternEditing = true
+    }
+
+    func endPatternEditing() {
+        pencilTouchCancelled()
+        patternEditing = false
+    }
+
+    private func cancelPatternInput() {
+        if patternGestureWasActive { discardPencilLift = true; clearTouch() }
+        patternGesture.cancel()
+        patternGestureWasActive = false
+        patternPreview = nil
+    }
+
+    private func commitPatternGesture(_ value: PatternGestureValue) {
+        guard let session else { return }
+        do {
+            let existing = session.patterns.regions.first { ($0.range.start..<$0.range.end).contains(value.bar) }
+            let content: PatternStroke.Content?
+            switch value.content {
+            case .remove: content = nil
+            case .arrow(let down, let level):
+                content = .arrow(direction: down ? .down : .up, level: try ArrowLevel(level))
+            case .chuck(let size): content = .chuck(try ChuckSize(size))
+            }
+            if let existing {
+                // Replacing equal content retains identity and is a genuine no-op.
+                let edit: PatternEdit = if let content {
+                    .setStroke(id: existing.id, slot: value.slot, content: content,
+                               newStrokeID: existing.slots[value.slot] == nil ? UUID().uuidString : nil)
+                } else { .removeStroke(id: existing.id, slot: value.slot) }
+                try session.editPatterns([edit])
+            } else if let content {
+                let range = try PatternDefaults.defaultScope.resolve(loop: session.loop, barCount: session.patterns.barCount)
+                guard (range.start..<range.end).contains(value.bar) else { return }
+                var slots = [PatternStroke?](repeating: nil, count: PatternDefaults.slotsPerBar)
+                slots[value.slot] = try PatternStroke(id: UUID().uuidString, content: content)
+                let region = try PatternRegion(id: UUID().uuidString, range: range, slots: slots, settings: PatternSettings())
+                try session.editPatterns([.add(region)])
+            }
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
     func pencilTouchBegan(at point: CGPoint) {
-        guard popup == nil else { return }
+        guard popup == nil, !patternControlExcludes(point) else { return }
+        discardPencilLift = false
         lastPencilContactTime = ProcessInfo.processInfo.systemUptime
         lastPencilLocation = point
         touchStart = point
         touchLast = point
         touchMoved = false
         holdTriggered = false
+        if patternEditing, radial == nil, patternFrame.contains(point) {
+            let existing = patternHitTarget(at: point)
+            patternGesture.begin(at: point, device: .pencil, frame: patternFrame, viewport: viewport, existing: existing)
+            patternGestureWasActive = patternGesture.isActive
+            return
+        }
         guard radial == nil, let hit = pencilTarget(at: point) else { return }
         if case .region(let id, true) = hit,
            let region = regions.first(where: { $0.id == id }) {
@@ -595,6 +727,10 @@ final class CodaEditorStore {
         lastPencilContactTime = ProcessInfo.processInfo.systemUptime
         lastPencilLocation = point
         touchLast = point
+        if patternGestureWasActive {
+            patternGesture.move(to: point); patternPreview = patternGesture.preview
+            return
+        }
         guard let start = touchStart else {
             updateRadialHover(at: point)
             return
@@ -622,10 +758,17 @@ final class CodaEditorStore {
     }
 
     func pencilTouchEnded(at point: CGPoint) {
+        if discardPencilLift { discardPencilLift = false; clearTouch(); return }
         guard popup == nil else { return }
         lastPencilLocation = point
         touchLast = point
         holdWork?.cancel(); holdWork = nil
+        if patternGestureWasActive {
+            let result = patternGesture.finish(at: point)
+            cancelPatternInput(); discardPencilLift = false; clearTouch()
+            if let result { commitPatternGesture(result) }
+            return
+        }
         if knobReset != nil {
             if knobResetSelected { commitKnobReset() }
             else { knobReset = nil; knobResetSelected = false }
@@ -657,16 +800,18 @@ final class CodaEditorStore {
             clearTouch()
             return
         }
-        if !touchMoved && !holdTriggered { performPencilTap(at: point) }
+        if touchStart != nil && !touchMoved && !holdTriggered { performPencilTap(at: point) }
         clearTouch()
     }
 
     func pencilTouchCancelled() {
+        cancelPatternInput()
         cancelRadialPreview()
         holdWork?.cancel(); holdWork = nil
         resizeDraft = nil
         holdMenu = nil
         radial = nil
+        patternSqueezeMenu = false
         radialPreview = nil
         knobReset = nil
         knobResetSelected = false
@@ -709,12 +854,13 @@ final class CodaEditorStore {
     }
 
     func acceptsPencilLocation(_ point: CGPoint) -> Bool {
-        guard popup == nil else { return false }
+        guard popup == nil, !patternControlExcludes(point) else { return false }
         return pencilTarget(at: point) != nil || radial != nil || holdMenu != nil
     }
 
     func openSqueeze(at location: CGPoint?) {
         guard popup == nil, let point = location ?? lastPencilLocation else { return }
+        pencilTouchCancelled()
         cancelRadialPreview()
         lastPencilLocation = point
         if let knob = knob(at: point) {
@@ -722,6 +868,15 @@ final class CodaEditorStore {
             return
         }
         guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
+        guard !patternControlExcludes(point) else { return }
+        if patternFrame.contains(point), let placement = menuPlacement(point) {
+            discardPencilLift = false
+            patternSqueezeMenu = true
+            radial = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
+                emptyStart: nil, anchor: point, placement: placement,
+                selectedRing: nil, selectedSlot: nil, draft: nil)
+            return
+        }
         guard let stripHit = stripHit(at: point), let placement = menuPlacement(point) else { return }
         switch stripHit {
         case .region(let id, _):
@@ -738,7 +893,7 @@ final class CodaEditorStore {
         radialPreview = nil
     }
 
-    func closeRadial() { cancelRadialPreview(); radial = nil; radialPreview = nil }
+    func closeRadial() { cancelRadialPreview(); radial = nil; patternSqueezeMenu = false; radialPreview = nil }
 
     var holdMenuLayout: HoldMenuLayout? {
         holdMenu.map { HoldMenuLayout(origin: $0.origin, viewport: rootSize, minimumY: rollTop,
@@ -804,7 +959,7 @@ final class CodaEditorStore {
     }
 
     func beginFingerNavigation(at point: CGPoint) -> Bool {
-        guard popup == nil else { return false }
+        guard popup == nil, !(patternEditing && patternControlsFrame.contains(point)) else { return false }
         fingerPanConsumed = false
         let atEdge = point.x >= rootSize.width - CodaDesignTokens.Input.navigationEdgeWidth
         return point.y >= (atEdge ? drawerTop : rollTop) && (!(drawerOpen && point.x >= rootSize.width - drawerWidth)
@@ -823,6 +978,7 @@ final class CodaEditorStore {
 
     func radialRings() -> [(RadialRing, [String], Double, Double)] {
         guard let radial, let session else { return [] }
+        if patternSqueezeMenu { return [(.inner, ["Pattern"], CodaDesignTokens.EditorSurface.radialInnerRadius, CodaDesignTokens.EditorSurface.radialInnerBand)] }
         let quality = radial.regionID.flatMap { id in regions.first(where: { $0.id == id })?.chord }
         switch radial.mode {
         case .primary:
@@ -862,7 +1018,7 @@ final class CodaEditorStore {
     }
 
     func radialTool(ring: RadialRing, slot: Int) -> ChordTool? {
-        guard ring == .inner, let radial else { return nil }
+        guard !patternSqueezeMenu, ring == .inner, let radial else { return nil }
         let tools: [ChordTool] = radial.context == .existingChord
             ? [.swap, .duplicate, .copy, .delete] : [.paste, .rest]
         return tools.indices.contains(slot) ? tools[slot] : nil
@@ -886,6 +1042,7 @@ final class CodaEditorStore {
 
     func radialSlotEnabled(_ ring: RadialRing, slot: Int) -> Bool {
         guard slot >= 0, let state = radial else { return false }
+        if patternSqueezeMenu { return ring == .inner && slot == 0 }
         switch state.mode {
         case .primary:
             if ring == .inner {
@@ -913,6 +1070,9 @@ final class CodaEditorStore {
             do { try session.edit([.add(region)]) } catch { setError(error) }
         }
         if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-drawer") { drawerOpen = true }
+        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-pattern") {
+            beginPatternEditing(); updatePatternSettings(preset: true)
+        }
         if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-edge")
             || ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-primary") {
             let at = CGPoint(x: 60, y: stripTop + 28)
@@ -1180,7 +1340,7 @@ final class CodaEditorStore {
         state.selectedSlot = hit.1
         radial = state
         radialPreview = radialPreviewText(state)
-        previewRadialChoice(state, hit: hit)
+        if !patternSqueezeMenu { previewRadialChoice(state, hit: hit) }
     }
 
     func cancelRadialPreview() {
@@ -1230,6 +1390,7 @@ final class CodaEditorStore {
     }
 
     private func radialChord(for hit: (RadialRing, Int), state: RadialMenuState) -> Chord? {
+        if patternSqueezeMenu { return nil }
         guard let intent = radialIntent(for: hit, state: state) else { return nil }
         let original = regions.first { $0.id == state.regionID }?.chord
         switch intent {
@@ -1304,6 +1465,12 @@ final class CodaEditorStore {
         guard state.hasNavigated || hypot(point.x - state.anchor.x, point.y - state.anchor.y)
                 >= CodaDesignTokens.Input.holdMoveTolerance else { closeRadial(); return }
         guard let hit = radialHit(at: point, state: state) else { closeRadial(); return }
+        if patternSqueezeMenu {
+            radial = nil; patternSqueezeMenu = false
+            if patternEditing { endPatternEditing() } else { beginPatternEditing() }
+            discardPencilLift = false
+            return
+        }
         guard let intent = radialIntent(for: hit, state: state) else {
             radial = nil
             return

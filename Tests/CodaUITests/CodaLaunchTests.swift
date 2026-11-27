@@ -101,6 +101,18 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
         attachScreenshot(named: "M1-four-bar-fixture", from: app)
+        app.terminate()
+        app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-pattern"]
+        launchAndDescribe(app)
+        let done = app.buttons["pattern.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["pattern.preset"].exists)
+        XCTAssertTrue(app.buttons["pattern.humanize"].exists)
+        attachScreenshot(named: "M1b-pattern-overlay", from: app)
+        done.tap()
+        XCTAssertFalse(done.exists)
+        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
+
     }
 
     @MainActor

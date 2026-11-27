@@ -74,6 +74,7 @@ public final class MusicSession {
     @ObservationIgnored private var desiredPlan: PreparedPlan?
     @ObservationIgnored private var publishedPlan: PreparedPlan?
     @ObservationIgnored private var publishedGeneration: UInt64 = 0
+    @ObservationIgnored private var legacyUnconsumed: [UInt64] = []
     @ObservationIgnored private var activeSource: PerformanceCycleSource?
     @ObservationIgnored private var activeGeneration: UInt64 = 0
     @ObservationIgnored private var pendingControls: [CodaControls] = []
@@ -133,6 +134,7 @@ public final class MusicSession {
         audioObservers.removeAll()
         retry?.cancel(); retry = nil
         desiredPlan = nil; publishedPlan = nil; publishedGeneration = 0
+        legacyUnconsumed.removeAll()
         activeSource = nil; activeGeneration = 0
         pendingControls.removeAll()
         audio.close()
@@ -432,6 +434,14 @@ public final class MusicSession {
     // ACTIVE; only an explicit matching application acknowledges replacement.
     private func pumpPlans() throws {
         let status = audio.performanceStatus()
+        // Native drains legacy snapshots cumulatively. Only an explicit matching
+        // generation ACK retires the facade's bounded publication window.
+        if let acknowledged = legacyUnconsumed.firstIndex(of: status.applied_generation) {
+            legacyUnconsumed.removeFirst(acknowledged + 1)
+        }
+        if let rejected = legacyUnconsumed.firstIndex(of: status.rejected_generation) {
+            legacyUnconsumed.remove(at: rejected)
+        }
         if let pending = publishedPlan {
             if status.applied_generation == publishedGeneration {
                 activeSource = pending.source; activeGeneration = publishedGeneration
@@ -476,7 +486,8 @@ public final class MusicSession {
         // latest cumulative intent. Preserve that pre-pattern behavior. A live
         // performance source still requires an explicit retirement ACK.
         let replacesLegacy = activeSource == nil && publishedPlan?.native != nil && desiredPlan?.native != nil
-        if publishedPlan == nil || replacesLegacy, let desired = desiredPlan {
+        if publishedPlan == nil || replacesLegacy, let desired = desiredPlan,
+           desired.native == nil || legacyUnconsumed.count < 2 {
             var generation: UInt64 = 0
             let result: Int32
             if let performance = desired.performance {
@@ -486,6 +497,7 @@ public final class MusicSession {
             } else { throw AudioSessionError.invalidPlan }
             if result < 0 { throw AudioSessionError.invalidPlan }
             if result == 1 {
+                if desired.native != nil { legacyUnconsumed.append(generation) }
                 publishedPlan = desired; publishedGeneration = generation; desiredPlan = nil
             }
         }

@@ -49,7 +49,7 @@ MUTE_DIAGNOSTICS = (
     "M1-mute-restore-before-assertion.png",
     "M1-mute-restore-AX-before-assertion.txt",
 )
-ALLOWLIST = (*EXPECTED, *DIAGNOSTICS, *SETTINGS_DIAGNOSTICS, *MUTE_DIAGNOSTICS)
+ALLOWLIST = ("M1b-pattern-overlay.png", *EXPECTED, *DIAGNOSTICS, *SETTINGS_DIAGNOSTICS, *MUTE_DIAGNOSTICS)
 
 
 def exported_name(value: str) -> str:
