@@ -113,8 +113,12 @@ final class CodaLaunchTests: XCTestCase {
             XCTAssertEqual(controls.buttons.matching(identifier: identifier).count, 1)
             XCTAssertTrue(controls.buttons[identifier].isHittable)
         }
+        XCTAssertGreaterThanOrEqual(done.frame.height, 44)
         attachScreenshot(named: "M1b-pattern-overlay", from: app)
-        done.tap()
+        done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let controlsClosed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: controls)
+        XCTAssertEqual(XCTWaiter.wait(for: [controlsClosed], timeout: 5), .completed)
         XCTAssertFalse(done.exists)
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
 

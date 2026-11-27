@@ -1301,7 +1301,14 @@ private struct PatternControlsView: View {
                 }).frame(width: 100)
             }.accessibilityIdentifier("pattern.spread")
             Button("Pop Rock") { store.updatePatternSettings(preset: true) }.accessibilityIdentifier("pattern.preset")
-            Button("Done") { store.endPatternEditing() }.accessibilityIdentifier("pattern.done")
+            Button(action: store.endPatternEditing) {
+                Text("Done")
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .contentShape(Capsule())
+            }
+            .accessibilityLabel("Done")
+            .accessibilityIdentifier("pattern.done")
         }
         .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
