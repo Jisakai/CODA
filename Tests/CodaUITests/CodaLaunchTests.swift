@@ -93,7 +93,7 @@ final class CodaLaunchTests: XCTestCase {
     }
 
     @MainActor
-    func testFourBarSeededFixtureScreenshotAttachment() {
+    func testFourBarSeededFixtureScreenshotAttachment() throws {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         app.launchArguments = ["--coda-ui-fixture-four-bar"]
@@ -104,6 +104,8 @@ final class CodaLaunchTests: XCTestCase {
         app.terminate()
         app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-pattern"]
         launchAndDescribe(app)
+        // Keep the named review image even if a later hit-target assertion fails.
+        attachScreenshot(named: "M1b-pattern-overlay", from: app)
         let topBar = app.descendants(matching: .any).matching(identifier: "editor.topBar").firstMatch
         XCTAssertTrue(topBar.waitForExistence(timeout: 10))
         let controls = topBar.descendants(matching: .any).matching(identifier: "pattern.controls").firstMatch
@@ -115,29 +117,84 @@ final class CodaLaunchTests: XCTestCase {
             .matching(identifier: "pattern.swing").firstMatch
         XCTAssertTrue(humanize.waitForExistence(timeout: 5))
         XCTAssertTrue(swing.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch
+        var state = try window.snapshot()
+        // Geometry and content share one cached tree until real input mutates the UI.
+        let diagnosticIDs = ["editor.topBar", "pattern.controls", "pattern.humanize", "pattern.swing",
+                             "pattern.overlay", "editor.regionCount", "editor.undoState", "editor.redoState"]
+        let frames = diagnosticIDs.map { identifier in
+            guard let node = cachedDescendant(identifier, in: state) else { return "\(identifier): absent" }
+            return "\(identifier): type=\(node.elementType.rawValue) frame=\(node.frame) label=\(node.label) value=\(String(describing: node.value))"
+        }.joined(separator: "\n")
+        let diagnostics = XCTAttachment(string: """
+        Pattern controls before hit assertions; window=\(state.frame)
+        Humanize isHittable=\(humanize.isHittable); Swing isHittable=\(swing.isHittable)
+        \(frames)
+        """)
+        diagnostics.name = "M1b-pattern-controls-AX-before-assertion.txt"
+        diagnostics.lifetime = .keepAlways
+        add(diagnostics)
         XCTAssertTrue(humanize.isHittable)
         XCTAssertTrue(swing.isHittable)
-        XCTAssertGreaterThanOrEqual(controls.frame.minX, topBar.frame.midX)
-        XCTAssertLessThanOrEqual(topBar.frame.maxX - controls.frame.maxX, 20)
-        XCTAssertGreaterThanOrEqual(controls.frame.minY, topBar.frame.minY)
-        XCTAssertLessThanOrEqual(controls.frame.maxY, topBar.frame.maxY)
-        let activeLayer = app.descendants(matching: .any)
-            .matching(identifier: "top.activeLayer").firstMatch
-        XCTAssertLessThanOrEqual(activeLayer.frame.maxX, controls.frame.minX)
+        XCTAssertNil(cachedDescendant("pattern.overlay", in: state), "Decorative paint must not be an AX target")
+        let topBarFrame = try XCTUnwrap(cachedDescendant("editor.topBar", in: state)).frame
+        let controlsFrame = try XCTUnwrap(cachedDescendant("pattern.controls", in: state)).frame
+        XCTAssertGreaterThanOrEqual(controlsFrame.minX, topBarFrame.midX)
+        XCTAssertLessThanOrEqual(topBarFrame.maxX - controlsFrame.maxX, 20)
+        XCTAssertGreaterThanOrEqual(controlsFrame.minY, topBarFrame.minY)
+        XCTAssertLessThanOrEqual(controlsFrame.maxY, topBarFrame.maxY)
+        let activeLayer = try XCTUnwrap(cachedDescendant("top.activeLayer", in: state))
+        XCTAssertLessThanOrEqual(activeLayer.frame.maxX, controlsFrame.minX)
         for identifier in ["top.loop", "top.play", "top.chordMute", "top.activeLayer"] {
-            let normalControl = app.descendants(matching: .any)
-                .matching(identifier: identifier).firstMatch
-            XCTAssertTrue(normalControl.exists, "Expected \(identifier) in the top bar")
-            XCTAssertFalse(controls.frame.intersects(normalControl.frame),
+            let normalControl = try XCTUnwrap(cachedDescendant(identifier, in: state),
+                                            "Expected \(identifier) in the top bar")
+            XCTAssertFalse(controlsFrame.intersects(normalControl.frame),
                            "Pattern controls must not cover \(identifier)")
         }
         for identifier in ["pattern.done", "pattern.preset", "pattern.spread"] {
-            XCTAssertFalse(app.descendants(matching: .any)
-                .matching(identifier: identifier).firstMatch.exists,
-                           "Unexpected pattern control \(identifier)")
+            XCTAssertNil(cachedDescendant(identifier, in: state), "Unexpected pattern control \(identifier)")
         }
-        attachScreenshot(named: "M1b-pattern-overlay", from: app)
-        XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
+
+        let retainedIDs = ["editor.regionCount", "editor.undoState", "editor.redoState"]
+            + stride(from: 0, to: 64, by: 16).map { "music.chord.fixture-\($0)" }
+        func musicState(in snapshot: XCUIElementSnapshot) throws -> [String] {
+            try retainedIDs.map { identifier in
+                let node = try XCTUnwrap(cachedDescendant(identifier, in: snapshot))
+                return "\(node.identifier)|\(node.label)|\(String(describing: node.value))"
+            }
+        }
+        let retainedMusic = try musicState(in: state)
+        XCTAssertEqual(cachedDescendant("editor.regionCount", in: state)?.label, "4 chords")
+        XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
+        XCTAssertEqual(cachedDescendant("pattern.swing", in: state)?.value as? String, "0 percent")
+        let origin = window.coordinate(withNormalizedOffset: .zero)
+        for (offset, expected) in [(CGVector(dx: 0.5, dy: 0.5), "Loose"),
+                                   (CGVector(dx: 0.125, dy: 0.5), "Tight")] {
+            let frame = try XCTUnwrap(cachedDescendant("pattern.humanize", in: state)).frame
+            // Absolute coordinate input also exercises the capsule's left padding,
+            // independently of XCTest's automatic element hit-point selection.
+            origin.withOffset(CGVector(dx: frame.minX - state.frame.minX + frame.width * offset.dx,
+                                       dy: frame.minY - state.frame.minY + frame.height * offset.dy)).tap()
+            state = try window.snapshot()
+            XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, expected)
+            XCTAssertEqual(cachedDescendant("pattern.swing", in: state)?.value as? String, "0 percent")
+            XCTAssertEqual(try musicState(in: state), retainedMusic)
+        }
+        let swingFrame = try XCTUnwrap(cachedDescendant("pattern.swing", in: state)).frame
+        let start = CGPoint(x: swingFrame.midX, y: swingFrame.midY)
+        let end = CGPoint(x: start.x, y: start.y - 16)
+        XCTAssertTrue(state.frame.contains(start) && state.frame.contains(end), "Keep both finger endpoints on-screen")
+        XCTAssertTrue(swingFrame.contains(start) && swingFrame.contains(end))
+        origin.withOffset(CGVector(dx: start.x - state.frame.minX, dy: start.y - state.frame.minY))
+            .press(forDuration: 0.1, thenDragTo:
+                origin.withOffset(CGVector(dx: end.x - state.frame.minX, dy: end.y - state.frame.minY)))
+        state = try window.snapshot()
+        let swingValue = try XCTUnwrap(cachedDescendant("pattern.swing", in: state)?.value as? String)
+        let percent = try XCTUnwrap(Int(swingValue.components(separatedBy: " ")[0]))
+        XCTAssertGreaterThan(percent, 0, "Finger lift must commit Swing through the production gesture")
+        XCTAssertLessThanOrEqual(percent, 100)
+        XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
+        XCTAssertEqual(try musicState(in: state), retainedMusic)
     }
 
     @MainActor

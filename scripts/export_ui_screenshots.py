@@ -15,6 +15,7 @@ EXPECTED = (
     "M1-synth-drawer.png",
     "M1-radial-edge-fixture.png",
     "M1-radial-primary-fixture.png",
+    "M1b-pattern-overlay.png",
 )
 MAX_BYTES = 2 * 1024 * 1024
 MAX_TEXT_BYTES = 256 * 1024
@@ -49,7 +50,8 @@ MUTE_DIAGNOSTICS = (
     "M1-mute-restore-before-assertion.png",
     "M1-mute-restore-AX-before-assertion.txt",
 )
-ALLOWLIST = ("M1b-pattern-overlay.png", *EXPECTED, *DIAGNOSTICS, *SETTINGS_DIAGNOSTICS, *MUTE_DIAGNOSTICS)
+PATTERN_DIAGNOSTICS = ("M1b-pattern-controls-AX-before-assertion.txt",)
+ALLOWLIST = (*EXPECTED, *DIAGNOSTICS, *SETTINGS_DIAGNOSTICS, *MUTE_DIAGNOSTICS, *PATTERN_DIAGNOSTICS)
 
 
 def exported_name(value: str) -> str:

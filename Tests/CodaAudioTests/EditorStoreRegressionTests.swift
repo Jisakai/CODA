@@ -978,6 +978,52 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testPatternSettingsCommitOnceAndPreserveChordsAndStrokesThroughHistory() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        let chords = session.editor.progression
+        let beforePattern = session.patterns
+        store.beginPatternEditing()
+        store.updatePatternSettings(preset: true)
+        let seeded = session.patterns
+        let original = try XCTUnwrap(seeded.regions.first)
+        var committed = [seeded]
+
+        store.updatePatternSettings(loose: true)
+        XCTAssertEqual(store.currentPatternSettings.humanize, .loose)
+        committed.append(session.patterns)
+        store.updatePatternSettings(loose: false)
+        XCTAssertEqual(store.currentPatternSettings.humanize, .tight)
+        committed.append(session.patterns)
+        store.updatePatternSettings(swing: 16.0 / 120)
+        XCTAssertEqual(store.currentPatternSettings.swing, 16.0 / 120, accuracy: 0.0001)
+        committed.append(session.patterns)
+
+        for patterns in committed {
+            let region = try XCTUnwrap(patterns.regions.first)
+            XCTAssertEqual(region.id, original.id)
+            XCTAssertEqual(region.range, original.range)
+            XCTAssertEqual(region.slots, original.slots)
+        }
+        // Each control commit is exactly one history transaction, with no
+        // chord edit or lost stroke identity hidden between settings changes.
+        for expected in committed.dropLast().reversed() {
+            store.routeFingerGesture(touchCount: 2, tapCount: 2)
+            XCTAssertEqual(session.patterns, expected)
+            XCTAssertEqual(session.editor.progression, chords)
+        }
+        store.routeFingerGesture(touchCount: 2, tapCount: 2)
+        XCTAssertEqual(session.patterns, beforePattern)
+        XCTAssertEqual(session.editor.progression, chords)
+        for expected in committed {
+            store.routeFingerGesture(touchCount: 3, tapCount: 2)
+            XCTAssertEqual(session.patterns, expected)
+            XCTAssertEqual(session.editor.progression, chords)
+        }
+    }
+
+    @MainActor
     func testPatternStrokeCrossingTopBarControlsCancelsWithoutEditingHistory() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)

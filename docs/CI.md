@@ -1,10 +1,27 @@
 # CODA CI and local native feedback
 
-This workflow change corrects scheduling and release evidence. The same revision
-also carries the separately reviewed owner pattern-control correction. No
-sanitizer, test-timeout, font or orientation gates are weakened.
+The Pattern hit-target correction preserves the deployed five-slot scheduling
+graph and strengthens release evidence. No sanitizer, test-timeout, font,
+orientation, inventory or provenance gates are weakened.
 
 ## Observed baseline
+
+Corrective baseline **46044221930**, attempt **1**, SHA
+`a73cd8c7f06eb139b04c809e0d164648b56be7b1`: combined native+archive, unit
+(174 cases), and UI-B/C/D passed. UI-A failed only the Humanize and Swing
+`isHittable` assertions in `testFourBarSeededFixtureScreenshotAttachment`;
+publication was skipped. Both controls existed with valid top-bar frames.
+The reported AX tree also exposed the decorative `pattern.overlay` Canvas
+over the full root, above the toolbar. Excluding that paint-only Canvas from
+accessibility is the narrowly supported correction, not yet native green proof.
+Both hit assertions remain. The same test captures the named Pattern image
+and bounded control-frame/hit-state AX report before those assertions, then
+uses real center/padding coordinate taps and a 16-point upward finger drag
+whose endpoints stay inside Swing. Cached snapshots check settings and
+retained chord/history readouts after input; a store regression checks exact
+settings transactions, chord content and stroke identity through undo/redo.
+Windows cannot execute the Swift/UI tests; Hermes owns the exact-head native
+retry and screenshot review.
 
 Run **45983067662**, SHA `96d53cdc5ae91688d8af8ba0bf4070728a9ba8f3`, failed
 `ui-a` at `CodaLaunchTests.swift:118`, `XCTAssertFalse(done.exists)`. The other
@@ -93,9 +110,19 @@ archive evidence carry an empty runtime-test list.
 Matrix fail-fast is disabled so independent failures retain diagnostics.
 Per-ref cancellation of superseded runs remains enabled. The bounded named
 PNG/AX diagnostic allowlist is retained, including failure branches. `ui-a`
-strictly requires the five review screenshots on success; other UI shards may
-export available allowlisted diagnostics. Final assembly checks the five
-review images again. Whole `.xcresult` bundles are not uploaded.
+strictly requires six review screenshots on success: the existing
+`M1-empty-editor.png`, `M1-four-bar-fixture.png`, `M1-synth-drawer.png`,
+`M1-radial-edge-fixture.png`, `M1-radial-primary-fixture.png`, plus
+`M1b-pattern-overlay.png`. Other UI shards may export available allowlisted
+diagnostics. The named Pattern image and optional
+`M1b-pattern-controls-AX-before-assertion.txt` report are explicitly included
+in the failure/success diagnostic artifact. Successful UI-A evidence carries
+the Pattern image through its hashed provenance payload to final assembly,
+which strictly checks all six review images again and uploads all six in the
+final artifact. Missing Pattern pixels therefore fail both success gates.
+The exporter retains exact-name/UUID-alias matching, safe paths, the 2 MiB PNG
+limit/signature check, and bounded UTF-8/NUL-free AX reports (256 KiB). Whole
+`.xcresult` bundles are not uploaded.
 
 The archive is published only as the intermediate `coda-internal-archive`
 artifact, which may be visible in a public repository and is not an approved

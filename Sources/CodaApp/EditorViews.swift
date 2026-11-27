@@ -1268,6 +1268,8 @@ private struct PatternOverlayView: View {
         }
         .allowsHitTesting(false)
         .accessibilityIdentifier("pattern.overlay")
+        // Paint only: the root-sized Canvas must not cover the top bar in AX hit testing.
+        .accessibilityHidden(true)
     }
 }
 
