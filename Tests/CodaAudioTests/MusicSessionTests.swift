@@ -7,6 +7,175 @@ import CodaNative
 
 final class MusicSessionTests: XCTestCase {
     @MainActor
+    func testLaterCycleRestartSurvivesConfigurationAndRejectedPredecessor() throws {
+        for rejectPredecessor in [false, true] {
+            let session = try makeSession()
+            defer { session.suspend() }
+            try addChord(to: session)
+            try session.setTempo(120)
+            try session.setLoop(LoopSpan(bars: 1), enabled: true)
+            let pattern = try PatternPreset.popRock.instantiate(id: "restart-cycle",
+                range: PatternBarRange(start: 0, length: 1),
+                occupiedStrokeIDs: (0..<6).map { "restart-cycle-\($0)" },
+                settings: PatternSettings(humanize: .loose))
+            try session.editPatterns([.add(pattern)])
+            try session.play()
+            _ = try session.renderOffline(frames: 1)
+            _ = try session.renderOffline(frames: 95_999, pumping: false)
+            if !rejectPredecessor {
+                _ = try session.renderOffline(frames: 1, pumping: false)
+                XCTAssertEqual(session.status().cycle, 1)
+            }
+            try session.setTempo(120) // unresolved ordinary configuration
+            let predecessor = session.planDiagnostics.pending
+            if rejectPredecessor {
+                _ = try session.renderOffline(frames: 1, pumping: false)
+                XCTAssertEqual(session.planDiagnostics.native.rejected_generation, predecessor)
+                XCTAssertEqual(session.status().cycle, 1)
+            }
+            try session.restart()
+            try session.setTempo(137)
+            for _ in 0..<4 { _ = try session.renderOffline(frames: 1) }
+            XCTAssertEqual(session.status().cycle, 0)
+            XCTAssertEqual(session.status().step, 0)
+            XCTAssertEqual(session.planDiagnostics.native.consumed_position_revision,
+                           session.planDiagnostics.position)
+            XCTAssertEqual(session.planDiagnostics.nextCycle, 3) // cycle one and two refilled from zero
+            XCTAssertNil(session.error)
+        }
+    }
+
+    @MainActor
+    func testNonloopPatternCompletionConfigurationAndRestart() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        try session.setTempo(120)
+        try session.setLoop(LoopSpan(), enabled: false)
+        let pattern = try PatternPreset.popRock.instantiate(id: "finish",
+            range: PatternBarRange(start: 0, length: 1),
+            occupiedStrokeIDs: (0..<6).map { "finish-\($0)" }, settings: PatternSettings())
+        try session.editPatterns([.add(pattern)])
+        try session.play()
+        _ = try session.renderOffline(frames: 480_000)
+        _ = try session.renderOffline(frames: 300_000)
+        let ended = session.status()
+        XCTAssertEqual(ended.playing, 0)
+        try session.setTempo(60)
+        _ = try session.renderOffline(frames: 1)
+        XCTAssertEqual(session.status().playing, 0)
+        XCTAssertEqual(session.status().hash, ended.hash)
+        try session.restart()
+        try session.setTempo(120)
+        _ = session.status()
+        XCTAssertTrue(session.playing)
+        for _ in 0..<3 { _ = try session.renderOffline(frames: 1) }
+        XCTAssertEqual(session.status().playing, 1)
+        XCTAssertEqual(session.status().step, 0)
+        XCTAssertGreaterThan(session.status().delivered, ended.delivered)
+        XCTAssertEqual(session.status().failures, 0)
+        XCTAssertNil(session.error)
+    }
+
+    @MainActor
+    func testPatternAuditionCancellationRestoresAndIgnoresStaleOwner() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        let pattern = try PatternPreset.popRock.instantiate(id: "preview",
+            range: PatternBarRange(start: 0, length: 1),
+            occupiedStrokeIDs: (0..<6).map { "preview-\($0)" }, settings: PatternSettings())
+        try session.editPatterns([.add(pattern)])
+        try session.play()
+        _ = try session.renderOffline(frames: 4096)
+        let history = session.patterns
+        let owner = UUID()
+        try session.auditionPreview(chord: Chord(root: 2, qualityID: "minor7"), owner: owner)
+        _ = try session.renderOffline(frames: 32)
+        let audition = session.status()
+        session.cancelAuditionPreview(owner: UUID())
+        _ = try session.renderOffline(frames: 1)
+        XCTAssertEqual(session.status().delivered, audition.delivered)
+        session.cancelAuditionPreview(owner: owner)
+        _ = try session.renderOffline(frames: 32)
+        XCTAssertGreaterThan(session.status().delivered, audition.delivered)
+        XCTAssertEqual(session.status().playing, 1)
+        XCTAssertEqual(session.patterns, history)
+        XCTAssertEqual(session.status().failures, 0)
+        XCTAssertNil(session.error)
+    }
+
+    @MainActor
+    func testUnresolvedPatternRetainsTwoConfigurationsAndCumulativeSeekPlay() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        try session.setLoop(LoopSpan(bars: 1), enabled: true)
+        let pattern = try PatternPreset.popRock.instantiate(id: "pending",
+            range: PatternBarRange(start: 0, length: 1),
+            occupiedStrokeIDs: (0..<6).map { "pending-\($0)" }, settings: PatternSettings())
+        try session.editPatterns([.add(pattern)])
+        try session.play()
+        let first = session.planDiagnostics.pending
+        XCTAssertGreaterThan(first, 0)
+        XCTAssertEqual(session.planDiagnostics.active, 0) // queued is not applied
+        try session.pause()
+        try session.setTempo(133)
+        try session.seek(step: 7)
+        try session.setTempo(147)
+        try session.play()
+        let intent = session.planDiagnostics
+        XCTAssertEqual(intent.pending, first)
+        XCTAssertTrue(intent.desired)
+        _ = session.status() // stale native playback must not cancel Play
+        XCTAssertTrue(session.playing)
+        for _ in 0..<3 { _ = try session.renderOffline(frames: 1) }
+        XCTAssertEqual(session.status().step, 7)
+        XCTAssertEqual(session.status().playing, 1)
+        XCTAssertEqual(session.status().playback_revision, intent.playback)
+        XCTAssertEqual(session.planDiagnostics.position, intent.position)
+        XCTAssertEqual(session.tempo, 147)
+        XCTAssertFalse(session.planDiagnostics.desired)
+        XCTAssertEqual(session.planDiagnostics.pending, 0)
+        XCTAssertNil(session.error)
+    }
+
+    @MainActor
+    func testOrdinaryCycleRejectionRebuildsWithoutConsumingIntent() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        try session.setTempo(120)
+        try session.setLoop(LoopSpan(bars: 1), enabled: true)
+        let pattern = try PatternPreset.popRock.instantiate(id: "reject",
+            range: PatternBarRange(start: 0, length: 1),
+            occupiedStrokeIDs: (0..<6).map { "reject-\($0)" }, settings: PatternSettings())
+        try session.editPatterns([.add(pattern)])
+        try session.play()
+        _ = try session.renderOffline(frames: 1)
+        let old = session.planDiagnostics.active
+        // Native publishes observations per callback. Advance to the wrap
+        // boundary, then compile against observed cycle zero; admission on the
+        // next sample requires cycle one instead.
+        _ = try session.renderOffline(frames: 95_999, pumping: false)
+        try session.setTempo(120)
+        let pending = session.planDiagnostics.pending
+        let intent = session.planDiagnostics
+        _ = try session.renderOffline(frames: 1, pumping: false)
+        XCTAssertEqual(session.planDiagnostics.native.rejected_generation, pending)
+        XCTAssertEqual(session.planDiagnostics.active, old)
+        try session.setControls(session.controls) // real producer rebuild/publish
+        XCTAssertNotEqual(session.planDiagnostics.pending, pending)
+        _ = try session.renderOffline(frames: 1)
+        XCTAssertEqual(session.planDiagnostics.playback, intent.playback)
+        XCTAssertEqual(session.planDiagnostics.position, intent.position)
+        XCTAssertEqual(session.status().cycle, 1)
+        XCTAssertEqual(session.status().playing, 1)
+        XCTAssertEqual(session.status().failures, 0)
+        XCTAssertNil(session.error)
+    }
+
+    @MainActor
     func testRealCompilerSessionAndEngineWithoutEditingAuditionHistory() throws {
         let vocabulary = try ChordVocabulary.load(in: Bundle(for: Self.self))
         let session = try MusicSession(vocabulary: vocabulary, offline: true)
@@ -42,6 +211,75 @@ final class MusicSessionTests: XCTestCase {
         try session.restart()
         XCTAssertGreaterThan(try session.renderOffline(frames: 4096), 0)
         session.suspend()
+    }
+
+    @MainActor
+    func testSessionPatternPlaybackRefillHistoryAndLegacyTransition() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        try session.setLoop(LoopSpan(bars: 1), enabled: true)
+        let region = try PatternPreset.popRock.instantiate(id: "session-pattern",
+            range: PatternBarRange(start: 0, length: 1),
+            occupiedStrokeIDs: (0..<6).map { "session-stroke-\($0)" },
+            settings: PatternSettings(humanize: .loose))
+        try session.editPatterns([.add(region)])
+        try session.play()
+        var energy = 0.0
+        // Production engine + control producer, repeatedly crossing real cycles.
+        for _ in 0..<700 { energy += try session.renderOffline(frames: 512) }
+        XCTAssertGreaterThan(energy, 0)
+        XCTAssertGreaterThan(session.status().cycle, 1)
+        XCTAssertEqual(session.status().failures, 0)
+        XCTAssertNil(session.error)
+        try session.pause()
+        _ = try session.renderOffline(frames: 512)
+        try session.setTempo(137.3)
+        try session.seek(step: 6)
+        try session.play()
+        for _ in 0..<4 { _ = try session.renderOffline(frames: 512) }
+        try session.editPatterns([.delete(id: region.id)])
+        for _ in 0..<4 { _ = try session.renderOffline(frames: 512) }
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+        XCTAssertNil(session.error)
+        try session.undo() // restore the pattern
+        XCTAssertEqual(session.patterns.regions, [region])
+        try session.undo() // undo pattern insertion before the chord
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+        XCTAssertEqual(session.editor.progression.regions.count, 1)
+        XCTAssertTrue(session.canRedo)
+        try session.editPatterns([])
+        XCTAssertTrue(session.canRedo)
+        XCTAssertThrowsError(try session.editPatterns([.delete(id: "missing")]))
+        XCTAssertTrue(session.canRedo)
+        try session.redo()
+        XCTAssertEqual(session.patterns.regions, [region])
+        let epoch = session.previewEpoch
+        session.suspend()
+        XCTAssertNotEqual(session.previewEpoch, epoch)
+        try session.restart()
+        for _ in 0..<4 { _ = try session.renderOffline(frames: 512) }
+        XCTAssertNil(session.error)
+    }
+
+    @MainActor
+    func testCoveredEmptyPatternIsSilentAndUnifiedUndoRestoresChordState() throws {
+        let session = try makeSession()
+        defer { session.suspend() }
+        try addChord(to: session)
+        let region = try PatternRegion(id: "silent", range: PatternBarRange(start: 0, length: 1),
+            slots: Array(repeating: nil, count: 8), settings: PatternSettings())
+        try session.editPatterns([.add(region)])
+        try session.play()
+        XCTAssertEqual(try session.renderOffline(frames: 4096), 0)
+        XCTAssertEqual(session.status().delivered, 0)
+        try session.undo()
+        try session.undo()
+        XCTAssertTrue(session.editor.progression.regions.isEmpty)
+        try session.redo()
+        XCTAssertEqual(session.editor.progression.regions.count, 1)
+        try session.redo()
+        XCTAssertEqual(session.patterns.regions, [region])
     }
 
     @MainActor

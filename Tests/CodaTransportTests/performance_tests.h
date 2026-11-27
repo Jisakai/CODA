@@ -268,7 +268,7 @@ static CodaPerformanceStatus performanceStatus(CodaTransport *t) {
     check(coda_transport_publish_performance(o.t,&p,&initial)==1,"threaded reconfig initial");run(o.t,100);
     std::atomic<bool> done{false};
     std::thread producer([&] {
-        uint64_t g=initial;
+        uint64_t g=initial, nextRefill=2;
         auto refill=std::make_unique<CodaPerformanceCycle>();
         auto candidate=std::make_unique<CodaPerformancePlan>();
         fillPerformanceCycle(*refill,1,400.137);
@@ -280,16 +280,22 @@ static CodaPerformanceStatus performanceStatus(CodaTransport *t) {
             fillPerformanceCycle(candidate->initial_cycle,state.cycle,candidate->samples_per_step,i%2);
             uint64_t queued=0;
             while(!coda_transport_publish_performance(o.t,candidate.get(),&queued)) std::this_thread::yield();
-            fillPerformanceCycle(*refill,state.cycle+1,400.137);
+            fillPerformanceCycle(*refill,nextRefill,400.137);
             // Real notes for the prior active lane even with replacement pending.
             const int result=coda_transport_enqueue_performance_cycle(o.t,g,refill.get());
             if(result==-1) {
                 const auto ack=performanceStatus(o.t);
-                check(ack.applied_generation>=g,"obsolete or duplicate refill has observable generation history");
-            } else check(result==0 || result==1,"retained lane refill backpressure/success");
+                check(ack.applied_generation==queued || ack.rejected_generation==queued,
+                    "retirement acquire observes replacement application or rejection ACK");
+            } else {
+                check(result==0 || result==1,"retained lane refill backpressure/success");
+                if(result==1) ++nextRefill;
+            }
             do {state=performanceStatus(o.t);std::this_thread::yield();}
             while(state.applied_generation!=queued && state.rejected_generation!=queued);
-            g=state.generation;
+            if(state.applied_generation==queued) {
+                g=queued;nextRefill=candidate->initial_cycle.cycle_index+1;
+            }
         }
         done=true;
     });
@@ -345,7 +351,12 @@ static CodaPerformanceStatus performanceStatus(CodaTransport *t) {
         check(status(o.t).delivered==delivered+4,"pattern restores real held note without beginning replay");
         legacy.samples_per_step=500;legacy.length=changeRange?16:32;legacy.events[3].step=legacy.length;
         legacy.events[4].step=legacy.length;legacy.events[5].step=legacy.length;
-        check(coda_transport_publish(o.t,&legacy)==1,"mode remove pattern queues");run(o.t,1);
+        uint64_t legacyGeneration=0;
+        check(coda_transport_publish_generation(o.t,&legacy,&legacyGeneration)==1 && legacyGeneration>g,
+            "mode remove pattern queues explicit generation");
+        check(performanceStatus(o.t).applied_generation==g,"legacy queue success does not acknowledge retirement");
+        run(o.t,1);
+        check(performanceStatus(o.t).applied_generation==legacyGeneration,"legacy explicit applied acknowledgement");
         check(status(o.t).cycle==2 && status(o.t).step==2 && status(o.t).delivered==delivered+8,
             "pattern to legacy preserves phase and restores real chord across tempo and range");
     }

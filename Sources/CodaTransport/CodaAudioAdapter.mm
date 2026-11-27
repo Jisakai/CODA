@@ -109,6 +109,10 @@ NSError *adapterError(NSString *text) {
     std::lock_guard<std::mutex> lock(_producer);
     return _gate?coda_transport_publish(_gate->transport,plan):-1;
 }
+- (int)publishPlan:(const CodaPlan *)plan generation:(uint64_t *)generation {
+    std::lock_guard<std::mutex> lock(_producer);
+    return _gate?coda_transport_publish_generation(_gate->transport,plan,generation):-1;
+}
 - (int)publishPerformancePlan:(const CodaPerformancePlan *)plan generation:(uint64_t *)generation {
     std::lock_guard<std::mutex> lock(_producer);
     return _gate?coda_transport_publish_performance(_gate->transport,plan,generation):-1;

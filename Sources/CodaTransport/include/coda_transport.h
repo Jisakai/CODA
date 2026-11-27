@@ -43,6 +43,8 @@ typedef struct {
     uint32_t queued;
     uint8_t underrun;
     uint64_t applied_generation, rejected_generation, required_cycle;
+    /* Monotonic render-consumed position command within prepare_epoch. */
+    uint64_t consumed_position_revision;
 } CodaPerformanceStatus;
 typedef struct CodaTransport CodaTransport;
 typedef struct {
@@ -59,6 +61,8 @@ int coda_transport_prepare(CodaTransport *, double sample_rate);
 /* Copies caller POD synchronously. 1 accepted, 0 full, -1 invalid/unprepared.
    Exactly ONE serialized producer. Retry full; caller retains intent. */
 int coda_transport_publish(CodaTransport *, const CodaPlan *);
+/* Same exact legacy payload; returns generation on QUEUED for explicit retirement ACK. */
+int coda_transport_publish_generation(CodaTransport *, const CodaPlan *, uint64_t *);
 /* Same serialized producer and configuration ordering as legacy publication.
    1 = QUEUED, not applied. Consumer compatibility check precedes all mutation.
    Observe applied_generation/rejected_generation; rejection preserves cumulative
@@ -66,7 +70,8 @@ int coda_transport_publish(CodaTransport *, const CodaPlan *);
    same intent. Only a new explicit seek/restart authorizes a cycle reset.
    Output generation changes only on queue success. Full leaves intent intact.
    Each retained generation has its own refill lane; old ACTIVE may be refilled
-   until replacement applies. Retired generations return -1. Status never admits.
+   until replacement applies. Retired generations return -1; acquiring retirement observes the prior
+   applied/rejected ACK publication. Status never admits.
    queued observes active-lane pending cycles; refill sequence is producer-owned. Status fields are
    individually atomic, observational, NOT a coupled transactional snapshot.
    required_cycle may belong to a newer rejection than rejected_generation.

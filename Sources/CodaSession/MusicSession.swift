@@ -30,8 +30,11 @@ private final class AudioObservationTokens {
     deinit { removeAll() }
 }
 
+@MainActor
 private struct PreparedPlan {
     let native: NativePlan?
+    let performance: NativePerformancePlan?
+    let source: PerformanceCycleSource?
     let playbackRevision: UInt64
     let positionRevision: UInt64
     let playing: Bool
@@ -44,6 +47,15 @@ public final class MusicSession {
     public let solver = VoiceLeadingSolver()
     public let suggestions = RuleBasedChordSuggestions()
     public private(set) var editor: ProgressionEditor
+    public private(set) var patterns: PatternArrangement
+    private enum HistoryEntry {
+        case chord
+        case pattern(PatternArrangement, PatternArrangement)
+    }
+    private var undoHistory: [HistoryEntry] = []
+    private var redoHistory: [HistoryEntry] = []
+    public var canUndo: Bool { !undoHistory.isEmpty }
+    public var canRedo: Bool { !redoHistory.isEmpty }
     public private(set) var tempo = MusicDefaults.tempo
     public private(set) var loop: LoopSpan
     public private(set) var looping = true
@@ -59,7 +71,11 @@ public final class MusicSession {
     public private(set) var controls = CodaControls()
     @ObservationIgnored private let audio = CodaAudioAdapter()
     @ObservationIgnored private let offline: Bool
-    @ObservationIgnored private var pendingPlan: NativePlan?
+    @ObservationIgnored private var desiredPlan: PreparedPlan?
+    @ObservationIgnored private var publishedPlan: PreparedPlan?
+    @ObservationIgnored private var publishedGeneration: UInt64 = 0
+    @ObservationIgnored private var activeSource: PerformanceCycleSource?
+    @ObservationIgnored private var activeGeneration: UInt64 = 0
     @ObservationIgnored private var pendingControls: [CodaControls] = []
     @ObservationIgnored private var retry: Task<Void, Never>?
     @ObservationIgnored private let audioObservers = AudioObservationTokens()
@@ -76,6 +92,7 @@ public final class MusicSession {
         self.vocabulary = vocabulary
         self.offline = offline
         editor = ProgressionEditor(try Progression(vocabulary: vocabulary))
+        patterns = try PatternArrangement()
         loop = try LoopSpan()
         coda_dsp_default_controls(0, &controls)
     }
@@ -115,7 +132,8 @@ public final class MusicSession {
         pendingPreviewStop = nil
         audioObservers.removeAll()
         retry?.cancel(); retry = nil
-        pendingPlan = nil
+        desiredPlan = nil; publishedPlan = nil; publishedGeneration = 0
+        activeSource = nil; activeGeneration = 0
         pendingControls.removeAll()
         audio.close()
         available = false; playing = false; renderedPlaying = false
@@ -123,10 +141,16 @@ public final class MusicSession {
         playbackIntent = false; playbackRevision = 0; positionRevision = 0; requestedStep = 0
     }
 
-    public func play() throws { try activate(); try changePlayback(playing: true) }
+    public func play() throws {
+        if !available { try changePlayback(playing: true); try activate() }
+        else { try changePlayback(playing: true) }
+    }
     public func pause() throws { try changePlayback(playing: false) }
     public func stop() throws { try changePlayback(playing: false, seek: 0) }
-    public func restart() throws { try activate(); try changePlayback(playing: true, seek: 0) }
+    public func restart() throws {
+        if !available { try changePlayback(playing: true, seek: 0); try activate() }
+        else { try changePlayback(playing: true, seek: 0) }
+    }
     private func changePlayback(playing value: Bool, seek: Int? = nil) throws {
         let plan = try preparePlan(playing: value, seek: seek)
         commitPlan(plan)
@@ -156,22 +180,33 @@ public final class MusicSession {
         var candidate = editor
         try candidate.apply(edits, vocabulary: vocabulary, solver: solver)
         let plan = try preparePlan(progression: candidate.progression)
+        guard candidate.progression != editor.progression else { return }
         editor = candidate
+        undoHistory.append(.chord); redoHistory.removeAll()
         commitPlan(plan)
     }
-    public func undo() throws {
-        var candidate = editor
-        if candidate.undo() {
-            let plan = try preparePlan(progression: candidate.progression)
-            editor = candidate; commitPlan(plan)
-        }
+    public func editPatterns(_ edits: [PatternEdit]) throws {
+        let next = try PatternEditor(patterns).preview(edits)
+        guard next != patterns else { return }
+        let plan = try preparePlan(arrangement: next)
+        undoHistory.append(.pattern(patterns, next)); redoHistory.removeAll()
+        patterns = next; commitPlan(plan)
     }
-    public func redo() throws {
+    public func undo() throws { try moveHistory(undoing: true) }
+    public func redo() throws { try moveHistory(undoing: false) }
+    private func moveHistory(undoing: Bool) throws {
+        guard let entry = (undoing ? undoHistory : redoHistory).last else { return }
         var candidate = editor
-        if candidate.redo() {
-            let plan = try preparePlan(progression: candidate.progression)
-            editor = candidate; commitPlan(plan)
+        var next = patterns
+        switch entry {
+        case .chord:
+            guard undoing ? candidate.undo() : candidate.redo() else { throw AudioSessionError.invalidPlan }
+        case .pattern(let before, let after): next = undoing ? before : after
         }
+        let plan = try preparePlan(progression: candidate.progression, arrangement: next)
+        if undoing { undoHistory.removeLast(); redoHistory.append(entry) }
+        else { redoHistory.removeLast(); undoHistory.append(entry) }
+        editor = candidate; patterns = next; commitPlan(plan)
     }
     public func audition(regionID: String) throws { try audition(pitches: editor.audition(id: regionID)) }
     public func audition(chord: Chord) throws {
@@ -242,10 +277,21 @@ public final class MusicSession {
 
     /// Bounded integration-test entry point: invokes the actual engine, not a
     /// replacement renderer. Internal so the next UI cannot use it as export.
-    func renderOffline(frames: UInt32) throws -> Double {
+    func renderOffline(frames: UInt32, pumping: Bool = true) throws -> Double {
+        if pumping { pump() }
         var energy = 0.0
         try audio.renderOffline(frames: frames, energy: &energy)
+        if pumping { pump() }
         return energy
+    }
+
+    // Internal observation of the real serialized producer for deterministic
+    // offline interleavings. No status injection or alternate render path.
+    var planDiagnostics: (active: UInt64, pending: UInt64, desired: Bool,
+                          nextCycle: Int64?, playback: UInt64, position: UInt64,
+                          native: CodaPerformanceStatus) {
+        (activeGeneration, publishedGeneration, desiredPlan != nil,
+         activeSource?.nextCycle, playbackRevision, positionRevision, audio.performanceStatus())
     }
 
     private func playbackSpan() throws -> LoopSpan {
@@ -255,7 +301,7 @@ public final class MusicSession {
     private func schedule(seek: Int? = nil) throws {
         commitPlan(try preparePlan(seek: seek))
     }
-    private func preparePlan(progression: Progression? = nil, tempo: Double? = nil,
+    private func preparePlan(progression: Progression? = nil, arrangement: PatternArrangement? = nil, tempo: Double? = nil,
                              loop: LoopSpan? = nil, looping: Bool? = nil,
                              playing: Bool? = nil, seek: Int? = nil) throws -> PreparedPlan {
         let progression = progression ?? editor.progression
@@ -276,16 +322,39 @@ public final class MusicSession {
         // before history/intent changes, even while hardware is inactive.
         guard progression.regions.count <= 128,
               progression.regions.allSatisfy({ $0.pitches.count <= 12 }) else { throw AudioSessionError.capacity }
-        guard audio.sampleRate > 0 else {
-            return PreparedPlan(native: nil, playbackRevision: nextPlayback,
-                positionRevision: nextPosition, playing: playing, step: step)
+        // Validate every candidate before mutating intent/history, even unopened.
+        let rate = audio.sampleRate > 0 ? audio.sampleRate : 48_000
+        let arrangement = arrangement ?? patterns
+        // A queued command is not consumed. Compare only the monotonic native
+        // consumption watermark, never a combination of observational statuses.
+        let unconsumedPosition = nextPosition > audio.performanceStatus().consumed_position_revision
+        let observed: UInt64 = unconsumedPosition ? 0 : audio.transportStatus().cycle
+        guard let cycle = Int64(exactly: observed), cycle < Int64.max else { throw AudioSessionError.capacity }
+        let compilation = try PatternEventCompiler.compile(progression, arrangement: arrangement,
+            tempo: tempo, sampleRate: rate, loop: span, cycleIndex: cycle)
+        let compiled: CompiledLoop
+        switch compilation {
+        case .legacy(let legacy): compiled = legacy
+        case .pattern(let pattern):
+            let source = try PerformanceCycleSource(progression: progression, arrangement: arrangement,
+                tempo: tempo, sampleRate: rate, span: span, initialCycle: cycle)
+            let payload = try NativePerformanceCycle(pattern)
+            let storage = NativePerformancePlan()
+            storage.pointer.pointee.initial_cycle = payload.pointer.pointee
+            storage.pointer.pointee.samples_per_step = rate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
+            storage.pointer.pointee.length = UInt16(span.length)
+            storage.pointer.pointee.playback_revision = nextPlayback
+            storage.pointer.pointee.position_revision = nextPosition
+            storage.pointer.pointee.seek_step = UInt16(step)
+            storage.pointer.pointee.playing = playing ? 1 : 0
+            storage.pointer.pointee.looping = looping ? 1 : 0
+            return PreparedPlan(native: nil, performance: storage, source: source,
+                playbackRevision: nextPlayback, positionRevision: nextPosition, playing: playing, step: step)
         }
-        let compiled = try NoteEventCompiler.compile(progression,
-            tempo: tempo, sampleRate: audio.sampleRate, loop: span)
         guard compiled.events.count <= Int(CODA_PLAN_EVENTS) else { throw AudioSessionError.capacity }
         let storage = NativePlan()
         let plan = storage.pointer
-        plan.pointee.samples_per_step = audio.sampleRate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
+        plan.pointee.samples_per_step = rate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
         plan.pointee.length = UInt16(span.length)
         plan.pointee.playback_revision = nextPlayback
         plan.pointee.position_revision = nextPosition
@@ -303,13 +372,13 @@ public final class MusicSession {
             return true
         }
         guard valid else { throw AudioSessionError.capacity }
-        return PreparedPlan(native: storage, playbackRevision: nextPlayback,
+        return PreparedPlan(native: storage, performance: nil, source: nil, playbackRevision: nextPlayback,
             positionRevision: nextPosition, playing: playing, step: step)
     }
     private func commitPlan(_ plan: PreparedPlan) {
         // Native plan replacement already retires its old audition. Do not let
         // an obsolete cancel command override music owned by this new plan.
-        if plan.native != nil {
+        if plan.native != nil || plan.performance != nil {
             auditionPreviewOwner = nil
             pendingPreviewStop = nil
         }
@@ -318,7 +387,7 @@ public final class MusicSession {
         playbackRevision = plan.playbackRevision
         positionRevision = plan.positionRevision
         requestedStep = plan.step
-        if let native = plan.native { pendingPlan = native }
+        desiredPlan = plan
         if available { pump() }
     }
 
@@ -359,6 +428,80 @@ public final class MusicSession {
         } else { return }
         suspend() // MainActor; never teardown in Apple's internal notification handler.
     }
+    // MainActor is the single serialized producer. A queue success never retires
+    // ACTIVE; only an explicit matching application acknowledges replacement.
+    private func pumpPlans() throws {
+        let status = audio.performanceStatus()
+        if let pending = publishedPlan {
+            if status.applied_generation == publishedGeneration {
+                activeSource = pending.source; activeGeneration = publishedGeneration
+                publishedPlan = nil; publishedGeneration = 0
+            } else if status.rejected_generation == publishedGeneration {
+                if desiredPlan == nil { desiredPlan = pending }
+                publishedPlan = nil; publishedGeneration = 0
+                if let desired = desiredPlan, let source = desired.source, let storage = desired.performance {
+                    // required_cycle is only a hint; native remains admission authority.
+                    let unconsumedPosition = desired.positionRevision > audio.performanceStatus().consumed_position_revision
+                    let observed: UInt64 = unconsumedPosition ? 0 : max(audio.transportStatus().cycle, status.required_cycle)
+                    guard let cycle = Int64(exactly: observed), cycle < Int64.max else { throw AudioSessionError.capacity }
+                    let replacement = try source.compile(cycle: cycle)
+                    storage.pointer.pointee.initial_cycle = replacement.pointer.pointee
+                    let retrySource = try PerformanceCycleSource(progression: source.progression,
+                        arrangement: source.arrangement, tempo: source.tempo, sampleRate: source.sampleRate,
+                        span: source.span, initialCycle: cycle)
+                    desiredPlan = PreparedPlan(native: nil, performance: storage, source: retrySource,
+                        playbackRevision: desired.playbackRevision, positionRevision: desired.positionRevision,
+                        playing: desired.playing, step: desired.step)
+                }
+            }
+        }
+        // Fixed budget, active first, own cursor/POD per generation. Mixed atomic
+        // observations never authorize dropping a cycle or retiring a source.
+        for _ in 0..<2 {
+            if let source = activeSource {
+                let result = try source.refill(audio: audio, generation: activeGeneration,
+                    currentCycle: audio.transportStatus().cycle)
+                if result < 0 {
+                    let fresh = audio.performanceStatus()
+                    guard publishedPlan != nil, fresh.applied_generation == publishedGeneration else {
+                        throw AudioSessionError.invalidPlan
+                    }
+                    // Matching replacement ACK proves this source retired. The
+                    // next pump promotes it before attempting any more refills.
+                    break
+                }
+            }
+        }
+        // Legacy snapshots have no refill source and native drains them to the
+        // latest cumulative intent. Preserve that pre-pattern behavior. A live
+        // performance source still requires an explicit retirement ACK.
+        let replacesLegacy = activeSource == nil && publishedPlan?.native != nil && desiredPlan?.native != nil
+        if publishedPlan == nil || replacesLegacy, let desired = desiredPlan {
+            var generation: UInt64 = 0
+            let result: Int32
+            if let performance = desired.performance {
+                result = audio.publish(performancePlan: performance.pointer, generation: &generation)
+            } else if let native = desired.native {
+                result = audio.publish(plan: native.pointer, generation: &generation)
+            } else { throw AudioSessionError.invalidPlan }
+            if result < 0 { throw AudioSessionError.invalidPlan }
+            if result == 1 {
+                publishedPlan = desired; publishedGeneration = generation; desiredPlan = nil
+            }
+        }
+        if let pending = publishedPlan, let source = pending.source {
+            let result = try source.refill(audio: audio, generation: publishedGeneration,
+                currentCycle: audio.transportStatus().cycle)
+            // -1 is failure until an explicit matching ACK proves retirement.
+            if result < 0 {
+                let fresh = audio.performanceStatus()
+                guard fresh.rejected_generation == publishedGeneration else {
+                    throw AudioSessionError.invalidPlan
+                }
+            }
+        }
+    }
+
     private func pump() {
         guard available else { return }
         if let owner = pendingPreviewStop {
@@ -374,13 +517,8 @@ public final class MusicSession {
                 }
             }
         }
-        if let plan = pendingPlan {
-            let result = audio.publish(plan: plan.pointer)
-            if result != 0 {
-                pendingPlan = nil
-                if result < 0 { error = "Native event plan rejected" }
-            }
-        }
+        do { try pumpPlans() }
+        catch { self.error = String(describing: error) }
         while !pendingControls.isEmpty {
             var next = pendingControls[0]
             let result = audio.publish(controls: &next)
@@ -388,10 +526,11 @@ public final class MusicSession {
             pendingControls.removeFirst()
             if result < 0 { error = "Native controls rejected" }
         }
-        if (pendingPlan != nil || !pendingControls.isEmpty || pendingPreviewStop != nil), retry == nil {
+        if (desiredPlan != nil || publishedPlan != nil || activeSource != nil || !pendingControls.isEmpty || pendingPreviewStop != nil), retry == nil {
+            let epoch = lifecycleEpoch
             retry = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: TransportConfiguration.retryNanoseconds)
-                guard !Task.isCancelled, let self else { return }
+                guard !Task.isCancelled, let self, self.lifecycleEpoch == epoch else { return }
                 self.retry = nil; self.pump()
             }
         }

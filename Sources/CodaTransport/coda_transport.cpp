@@ -64,7 +64,7 @@ struct CodaTransport {
     uint64_t occupied[CODA_PLAN_SLOTS]{};
     std::atomic<uint64_t> retired[CODA_PLAN_SLOTS]{};
     uint32_t queuedSlots[CODA_PLAN_SLOTS]{};
-    std::atomic<uint64_t> outApplied{0},outRejected{0},outRequired{0};
+    std::atomic<uint64_t> outApplied{0},outRejected{0},outRequired{0},outConsumedPosition{0};
     int reserveSlot() {
         unsigned used=0;int free=-1;
         for(unsigned i=0;i<CODA_PLAN_SLOTS;++i) {
@@ -202,11 +202,6 @@ struct CodaTransport {
         bool changed=false;
         if(tail.load(std::memory_order_relaxed)!=h) {
             const auto first=tail.load(std::memory_order_relaxed), candidate=queuedSlots[(h-1)%CODA_PLAN_SLOTS];
-            // Latest cumulative snapshot supersedes every earlier pending one.
-            for(auto q=first;q<h-1;++q) {
-                const auto slot=queuedSlots[q%CODA_PLAN_SLOTS];
-                retired[slot].store(generations[slot],std::memory_order_release);
-            }
             const auto &incoming=plans[candidate];
             const bool explicitPosition=incoming.position_revision>positionRevision;
             const bool restart=incoming.playback_revision>playbackRevision && incoming.playing && completed;
@@ -220,6 +215,11 @@ struct CodaTransport {
                 outRequired.store(required,std::memory_order_relaxed);
                 outRejected.store(generations[candidate],std::memory_order_release);
                 retired[candidate].store(generations[candidate],std::memory_order_release);
+                // Superseded slots share this published outcome; release before tail reuse.
+                for(auto q=first;q<h-1;++q) {
+                    const auto slot=queuedSlots[q%CODA_PLAN_SLOTS];
+                    retired[slot].store(generations[slot],std::memory_order_release);
+                }
                 tail.store(h,std::memory_order_release);
             } else {
             release(); auditioning=false;
@@ -257,6 +257,7 @@ struct CodaTransport {
             if(positionCommand) {
                 cycle=0; position=boundary(p.seek_step<p.length?p.seek_step:p.length-1);
                 positionRevision=p.position_revision; completed=false;
+                outConsumedPosition.store(positionRevision,std::memory_order_release);
             }
             if(playbackCommand) {
                 if(p.playing && completed) {cycle=0; position=0; completed=false;}
@@ -278,9 +279,15 @@ struct CodaTransport {
             origin=position; index=0;
             for(auto &id:regionIDs) id=0;
             // ACK previous slot only AFTER its last access. Retain current slot.
-            if(hadPlan) retired[previous].store(generations[previous],std::memory_order_release);
             outApplied.store(generations[active],std::memory_order_release);
+            // Acquiring retirement must also observe the replacement ACK.
+            if(hadPlan) retired[previous].store(generations[previous],std::memory_order_release);
             if(t>0) outAck.store(t,std::memory_order_release);
+                // Superseded slots share this published outcome; release before tail reuse.
+                for(auto q=first;q<h-1;++q) {
+                    const auto slot=queuedSlots[q%CODA_PLAN_SLOTS];
+                    retired[slot].store(generations[slot],std::memory_order_release);
+                }
             tail.store(h,std::memory_order_release);
             restore=playing; changed=true;
             }
@@ -383,7 +390,7 @@ int coda_transport_prepare(CodaTransport *t,double sr) {
     ++t->epoch;t->activation=0;
     t->performance=false;t->pc=nullptr;t->underruns=0;t->starved=false;
     for(unsigned i=0;i<CODA_PLAN_SLOTS;++i) {t->occupied[i]=0;t->retired[i]=0;t->lanes[i].head=0;t->lanes[i].tail=0;t->lanes[i].producerGeneration=0;}
-    t->outApplied=0;t->outRejected=0;t->outRequired=0;
+    t->outApplied=0;t->outRejected=0;t->outRequired=0;t->outConsumedPosition=0;
     for(auto &on:t->performanceOn) on=false;
     t->outEpoch=t->epoch;t->outGeneration=0;t->outPerformanceCycle=0;t->outRequested=0;t->outUnderruns=0;t->outStarved=0;t->outQueued=0;
     t->head=0; t->tail=0; t->ch=0; t->ct=0; t->ah=0; t->at=0;
@@ -396,6 +403,10 @@ int coda_transport_prepare(CodaTransport *t,double sr) {
     t->prepared=true; return 1;
 }
 int coda_transport_publish(CodaTransport *t,const CodaPlan *p) {
+    uint64_t ignored=0; return coda_transport_publish_generation(t,p,&ignored);
+}
+int coda_transport_publish_generation(CodaTransport *t,const CodaPlan *p,uint64_t *accepted) {
+    if(!accepted) return -1;
     if(!t || !t->prepared || !p || !valid(*p)) return -1;
     const auto h=t->head.load(std::memory_order_relaxed);
     const int available=t->reserveSlot();
@@ -405,7 +416,7 @@ int coda_transport_publish(CodaTransport *t,const CodaPlan *p) {
     t->performanceModes[slot]=false;
     t->generations[slot]=++t->generationCounter;t->occupied[slot]=t->generationCounter;
     t->plans[slot]=*p;t->queuedSlots[h%CODA_PLAN_SLOTS]=slot;
-    t->head.store(h+1,std::memory_order_release); return 1;
+    t->head.store(h+1,std::memory_order_release); *accepted=t->generationCounter; return 1;
 }
 int coda_transport_controls(CodaTransport *t,const CodaControls *c) {
     if(!t || !t->prepared || !c || !validControls(*c)) return -1;
@@ -491,7 +502,7 @@ int coda_transport_enqueue_performance_cycle(CodaTransport *t,uint64_t g,const C
 void coda_transport_performance_status(const CodaTransport *t,CodaPerformanceStatus *s) {
     if(!t || !s) return;
     *s={t->outEpoch.load(),t->outGeneration.load(),t->outPerformanceCycle.load(),t->outRequested.load(),t->outUnderruns.load(),t->outQueued.load(),uint8_t(t->outStarved.load()),
-        t->outApplied.load(std::memory_order_acquire),t->outRejected.load(std::memory_order_acquire),t->outRequired.load()};
+        t->outApplied.load(std::memory_order_acquire),t->outRejected.load(std::memory_order_acquire),t->outRequired.load(),t->outConsumedPosition.load(std::memory_order_acquire)};
 }
 
 void coda_transport_inspect_performance(const CodaTransport *t,CodaPerformanceVoiceDiagnostic out[CODA_DSP_VOICES]) {
