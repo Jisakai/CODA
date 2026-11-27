@@ -106,6 +106,7 @@ final class CodaEditorStore {
     private(set) var patternEditing = false
     private(set) var patternPreview: PatternGestureValue?
     private(set) var patternPencilPosition: CGPoint?
+    private(set) var patternControlsFrame = CGRect.zero
     var patternReadoutLabel: String? {
         guard let preview = patternPreview else { return nil }
         switch preview.content {
@@ -118,7 +119,6 @@ final class CodaEditorStore {
     @ObservationIgnored private var patternGestureWasActive = false
     @ObservationIgnored private var discardPencilLift = false
     private var patternSqueezeMenu = false
-    var patternControlsFrame: CGRect { CGRect(x: max(patternFrame.minX, rootSize.width - 500), y: rollTop + 8, width: min(492, patternFrame.width), height: 48) }
     var selectedRegionID: String?
     var hoveredRegionID: String?
     var hoveredStep: Int?
@@ -196,6 +196,11 @@ final class CodaEditorStore {
         guard uiDiagnosticsEnabled, uiPopupFrames[popup] != frame else { return }
         uiPopupFrames[popup] = frame
         recordUIEvent("popup.geometry.\(popup.rawValue) \(frame)")
+    }
+
+    func recordPatternControlsFrame(_ frame: CGRect) {
+        guard patternControlsFrame != frame else { return }
+        patternControlsFrame = frame
     }
 
     func presentSettings(_ surface: EditorPopup) {
@@ -593,7 +598,7 @@ final class CodaEditorStore {
 
     func patternControlExcludes(_ point: CGPoint) -> Bool {
         patternEditing && ((drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop)
-        || patternControlsFrame.contains(point))
+        || (!patternControlsFrame.isEmpty && patternControlsFrame.contains(point)))
     }
 
     func patternGeometry(bar: Int, slot: Int, preview: PatternGestureValue? = nil) -> PatternStrokeGeometry? {
@@ -661,11 +666,13 @@ final class CodaEditorStore {
     /// Opening is read-only: no empty pattern or history item is created.
     func beginPatternEditing() {
         pencilTouchCancelled()
+        patternControlsFrame = .zero
         patternEditing = true
     }
 
     func endPatternEditing() {
         pencilTouchCancelled()
+        patternControlsFrame = .zero
         patternEditing = false
     }
 

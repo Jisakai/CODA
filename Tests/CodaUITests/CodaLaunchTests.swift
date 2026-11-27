@@ -104,24 +104,40 @@ final class CodaLaunchTests: XCTestCase {
         app.terminate()
         app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-pattern"]
         launchAndDescribe(app)
-        let controls = app.otherElements["pattern.controls"]
+        let topBar = app.descendants(matching: .any).matching(identifier: "editor.topBar").firstMatch
+        XCTAssertTrue(topBar.waitForExistence(timeout: 10))
+        let controls = topBar.descendants(matching: .any).matching(identifier: "pattern.controls").firstMatch
         XCTAssertTrue(controls.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.otherElements.matching(identifier: "pattern.controls").count, 1)
-        let done = controls.buttons["pattern.done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 10))
-        for identifier in ["pattern.humanize", "pattern.preset", "pattern.done"] {
-            XCTAssertEqual(controls.buttons.matching(identifier: identifier).count, 1)
-            XCTAssertTrue(controls.buttons[identifier].isHittable)
+        XCTAssertEqual(topBar.descendants(matching: .any)
+            .matching(identifier: "pattern.controls").count, 1)
+        let humanize = controls.buttons["pattern.humanize"]
+        let swing = controls.descendants(matching: .any)
+            .matching(identifier: "pattern.swing").firstMatch
+        XCTAssertTrue(humanize.waitForExistence(timeout: 5))
+        XCTAssertTrue(swing.waitForExistence(timeout: 5))
+        XCTAssertTrue(humanize.isHittable)
+        XCTAssertTrue(swing.isHittable)
+        XCTAssertGreaterThanOrEqual(controls.frame.minX, topBar.frame.midX)
+        XCTAssertLessThanOrEqual(topBar.frame.maxX - controls.frame.maxX, 20)
+        XCTAssertGreaterThanOrEqual(controls.frame.minY, topBar.frame.minY)
+        XCTAssertLessThanOrEqual(controls.frame.maxY, topBar.frame.maxY)
+        let activeLayer = app.descendants(matching: .any)
+            .matching(identifier: "top.activeLayer").firstMatch
+        XCTAssertLessThanOrEqual(activeLayer.frame.maxX, controls.frame.minX)
+        for identifier in ["top.loop", "top.play", "top.chordMute", "top.activeLayer"] {
+            let normalControl = app.descendants(matching: .any)
+                .matching(identifier: identifier).firstMatch
+            XCTAssertTrue(normalControl.exists, "Expected \(identifier) in the top bar")
+            XCTAssertFalse(controls.frame.intersects(normalControl.frame),
+                           "Pattern controls must not cover \(identifier)")
         }
-        XCTAssertGreaterThanOrEqual(done.frame.height, 44)
+        for identifier in ["pattern.done", "pattern.preset", "pattern.spread"] {
+            XCTAssertFalse(app.descendants(matching: .any)
+                .matching(identifier: identifier).firstMatch.exists,
+                           "Unexpected pattern control \(identifier)")
+        }
         attachScreenshot(named: "M1b-pattern-overlay", from: app)
-        done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        let controlsClosed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: controls)
-        XCTAssertEqual(XCTWaiter.wait(for: [controlsClosed], timeout: 5), .completed)
-        XCTAssertFalse(done.exists)
         XCTAssertEqual(app.staticTexts["editor.regionCount"].label, "4 chords")
-
     }
 
     @MainActor

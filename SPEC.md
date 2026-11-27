@@ -240,8 +240,8 @@ Visual: dark-glass bar, no hard borders (§15). Icons solid, filled, rounded; no
 |---|---|
 | A **pattern** (strum or arpeggio) defines how the chords **below it** are played. Chords themselves hold no strum/arp setting. | DECIDED |
 | The pattern is **not a permanent lane**. It appears as an **overlay on top of the chord view only while tweaking**. | DECIDED |
-| Overlay target: the **big chord piano roll** (the 2 cm strip is too short for velocity-length arrows). | OPEN (recommended: big roll) |
-| How the overlay opens/closes: default is a "Pattern" entry in the chord-roll squeeze menu that toggles it, and a **Done** pill that closes it (`docs/DESIGN.md` §3.7). | OPEN |
+| Overlay target: the **big chord piano roll** (the 2 cm strip is too short for velocity-length arrows). | DECIDED (owner correction) |
+| The current entry/exit interaction is the existing **Pattern** item in the chord-roll squeeze menu, which toggles pattern editing. Other entry/exit details remain unresolved. | OPEN |
 | Grid: **8 eighth-note slots per bar**. Placement is quantized; **no freehand timing**. | DECIDED |
 | **Stroke entry (one Pencil gesture):** touch-down in the **top half** → **downstroke**, arrow drawn from the top downward; touch-down in the **bottom half** → **upstroke**, arrow from the bottom upward. **Drag length = velocity.** | DECIDED |
 | **Chuck (X):** draw a **circular motion**. Circle size sets chuck velocity. The circle must roughly close, so small drags are never read as chucks. | DECIDED (gesture) / PROPOSED (size, closure) |
@@ -249,12 +249,13 @@ Visual: dark-glass bar, no hard borders (§15). Icons solid, filled, rounded; no
 | Dragging from an existing stroke edits its length/direction. | PROPOSED |
 | Empty slot = no new stroke (previous sound rings on). | PROPOSED |
 | Downstroke plays low→high; upstroke plays high→low; chuck is a short percussive dead-string rake synthesized by the engine (works on any preset). | CARRIED |
-| **Swing knob exists** (delays off-beat eighths). Location: per pattern (recommended) vs one global control. | DECIDED (exists) / OPEN (location) |
+| While pattern editing is open, show only **Swing** and the **Tight/Loose** humanize control at the far right of the top bar. Do not show a Pop Rock action or a Done/window control. | DECIDED (owner UI correction) |
+| **Swing knob exists** (delays off-beat eighths); its setting is per pattern. | DECIDED |
 | **Humanize** switch (Tight/Loose): small random timing and velocity variation; also nudges per-note detune/filter so repeated chords never sound identical. Swing (deterministic lilt) and humanize (random) stay separate controls. | DECIDED (humanize) / PROPOSED (extension) |
 | Strum spread (stagger between strings, ~0–60 ms) and humanize ranges (~±3 ms timing, ~±6 velocity) are CARRIED from the blueprint. | CARRIED |
 | Pattern scope: a pattern applies to a **range of bars** (default: the whole loop); starting a new pattern block changes feel from that point. | OPEN (default: whole loop) |
 | Arpeggio definition on the same 8-slot grid (which chord tone each slot plays, up/down/up-down, rate). | OPEN |
-| Preset patterns are expressed in the arrow format (e.g. "Pop Rock 8-beat": D · D U · U D U). | CARRIED |
+| Preset patterns remain data expressed in the arrow format (e.g. "Pop Rock 8-beat": D · D U · U D U); there is no Pop Rock UI action. | CARRIED |
 
 ---
 

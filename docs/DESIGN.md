@@ -175,8 +175,8 @@ Header cell (56 pt, aligned with the gutter): `CHORDS` 10 pt muted + tiny `Poly 
 | Chuck | Drawn by a circular motion; rendered as a ring with an × inside, ring diameter scales with velocity | DECIDED (gesture) / PROPOSED (style) |
 | Live readout | A small capsule near the Pencil shows velocity (`v96`) while drawing | PROPOSED |
 | Remove | Tap a stroke again | DECIDED |
-| Controls | Slim dark-glass capsule pinned top-right inside the overlay: **Swing** knob (28 pt), **Tight/Loose** switch, **Done** pill | DECIDED (controls exist) / OPEN (placement of swing) |
-| Open/close | Default: a "Pattern" entry in the chord-roll squeeze menu toggles the overlay; the **Done** pill closes it | OPEN |
+| Controls | While editing, show only **Swing** and the **Tight/Loose** switch at the far right of the top bar. No Pop Rock action or Done/window. | DECIDED (owner UI correction) |
+| Open/close | The current interaction is the existing "Pattern" item in the chord-roll squeeze menu, which toggles editing. Other entry/exit details remain unresolved. | OPEN |
 
 ### 3.8 Radial menus (squeeze, opens centered on the Pencil tip)
 General: a small 8 pt center dot marks the tip. Each ring is a band of glass slots with 1.5 pt gaps. Slot labels 12 pt 600; icons where clearer. The slot under the Pencil brightens (white 10% overlay) and its label turns primary ink. Selecting happens when the Pencil **lifts on a slot**. Non-hovered rings fade to ~45%. The menu shifts away from screen edges so it never clips. Appear: 100 ms, scale 0.92→1.

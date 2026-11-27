@@ -1,21 +1,25 @@
 {
   "ui-a": [
-    "testCaptureNormalizationAppliesOrientationWithoutForcingLandscape",
-    "testDrawerAndAllThreeProductionPresetsAreReachable",
-    "testEdgePositionedAllQualityRadialScreenshotFixture",
     "testEmptyEditorScreenshotAttachment",
     "testFourBarSeededFixtureScreenshotAttachment",
-    "testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks",
+    "testDrawerAndAllThreeProductionPresetsAreReachable",
+    "testEdgePositionedAllQualityRadialScreenshotFixture",
     "testPrimaryRadialScreenshotFixture"
   ],
   "ui-b": [
+    "testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks",
+    "testFingerMusicRegionTapDoesNotEditOrCreateHistory",
+    "testSnapShowsBothFullLabelsInsideOriginalGutterCell"
+  ],
+  "ui-c": [
     "testActualSessionPlayPauseAndChordMuteControls",
     "testChordMuteCenterAndPaddingRemainTappableInBothStates",
-    "testEverySettingsPopupStaysNearItsOwnInvokingControl",
-    "testFingerMusicRegionTapDoesNotEditOrCreateHistory",
     "testKeyboardRowsStayBelowChromeAndFollowSemitoneRegister",
+    "testCaptureNormalizationAppliesOrientationWithoutForcingLandscape"
+  ],
+  "ui-d": [
+    "testEverySettingsPopupStaysNearItsOwnInvokingControl",
     "testLaunchShowsEmptyEditorAndLocksLandscape",
-    "testSettingsIconCenterAndPaddingPresentProductionPopups",
-    "testSnapShowsBothFullLabelsInsideOriginalGutterCell"
+    "testSettingsIconCenterAndPaddingPresentProductionPopups"
   ]
 }

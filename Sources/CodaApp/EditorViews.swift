@@ -62,10 +62,6 @@ struct CodaCanvas: View {
                     PatternOverlayView(store: store)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .zIndex(3)
-                    PatternControlsView(store: store)
-                        .frame(width: store.patternControlsFrame.width, height: store.patternControlsFrame.height)
-                        .position(x: store.patternControlsFrame.midX, y: store.patternControlsFrame.midY)
-                        .zIndex(3.5)
                 }
 
                 if store.radial != nil, let center = store.radialCenter {
@@ -325,6 +321,16 @@ private struct EditorTopBar: View {
                     .frame(width: 1, height: 1).opacity(0.01)
                     .accessibilityIdentifier("editor.uiDiagnostics")
                     .accessibilityValue(store.uiDiagnosticReport)
+            }
+
+            if store.patternEditing {
+                PatternControlsView(store: store)
+                    .onGeometryChange(for: CGRect.self) {
+                        $0.frame(in: .named("editor.root"))
+                    } action: {
+                        store.recordPatternControlsFrame($0)
+                    }
+                    .onDisappear { store.recordPatternControlsFrame(.zero) }
             }
         }
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
@@ -1268,56 +1274,60 @@ private struct PatternOverlayView: View {
 private struct PatternControlsView: View {
     @Bindable var store: CodaEditorStore
     @State private var swingStart: Double?
+    @State private var swingDraft: Double?
+
+    private var swingValue: Double { swingDraft ?? store.currentPatternSettings.swing }
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: CodaDesignTokens.Geometry.topBarControlGap) {
             VStack(spacing: 1) {
                 ZStack {
                     Circle().stroke(.white.opacity(0.15), lineWidth: 3)
-                    Circle().trim(from: 0, to: swingDraft ?? store.currentPatternSettings.swing)
+                    Circle().trim(from: 0, to: swingValue)
                         .stroke(CodaDesignTokens.Colors.chord, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                    Text("\(Int((swingDraft ?? store.currentPatternSettings.swing) * 100))").font(CodaDesignTokens.Typography.font(size: 8, weight: .bold))
+                    Text("\(Int(swingValue * 100))")
+                        .font(CodaDesignTokens.Typography.font(size: 8, weight: .bold))
                 }
                 .frame(width: 28, height: 28)
-                .contentShape(Circle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    if swingStart == nil { swingStart = store.currentPatternSettings.swing }
-                    let next = min(1, max(0, (swingStart ?? 0) - Double(value.translation.height) / 120))
-                    // Commit on lift; the native knob remains a UI-only control.
-                    swingDraft = next
-                }.onEnded { _ in
-                    if let swingDraft { store.updatePatternSettings(swing: swingDraft) }
-                    swingStart = nil; swingDraft = nil
-                })
                 Text("Swing").font(CodaDesignTokens.Typography.font(size: 8, weight: .medium))
-            }.accessibilityIdentifier("pattern.swing")
-            Button(store.currentPatternSettings.humanize == .tight ? "Tight" : "Loose") {
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if swingStart == nil { swingStart = store.currentPatternSettings.swing }
+                let next = min(1, max(0, (swingStart ?? 0) - Double(value.translation.height) / 120))
+                swingDraft = next
+            }.onEnded { _ in
+                if let swingDraft { store.updatePatternSettings(swing: swingDraft) }
+                swingStart = nil; swingDraft = nil
+            })
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Swing")
+            .accessibilityValue("\(Int(swingValue * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                let delta = direction == .increment ? 0.05 : -0.05
+                store.updatePatternSettings(swing: min(1, max(0, store.currentPatternSettings.swing + delta)))
+            }
+            .accessibilityIdentifier("pattern.swing")
+
+            Button {
                 store.updatePatternSettings(loose: store.currentPatternSettings.humanize == .tight)
-            }.accessibilityIdentifier("pattern.humanize")
-            VStack(spacing: 0) {
-                Text("Spread \(Int(spreadDraft ?? store.currentPatternSettings.spreadMilliseconds)) ms")
-                Slider(value: Binding(get: { spreadDraft ?? store.currentPatternSettings.spreadMilliseconds }, set: { spreadDraft = $0 }), in: 0...60, onEditingChanged: { editing in
-                    if !editing, let spreadDraft { store.updatePatternSettings(spread: spreadDraft); self.spreadDraft = nil }
-                }).frame(width: 100)
-            }.accessibilityIdentifier("pattern.spread")
-            Button("Pop Rock") { store.updatePatternSettings(preset: true) }.accessibilityIdentifier("pattern.preset")
-            Button(action: store.endPatternEditing) {
-                Text("Done")
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
+            } label: {
+                Text(store.currentPatternSettings.humanize == .tight ? "Tight" : "Loose")
+                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                    .padding(.horizontal, 9)
+                    .frame(height: CodaDesignTokens.Geometry.topBarControlHeight)
+                    .background(.white.opacity(0.06), in: Capsule())
                     .contentShape(Capsule())
             }
-            .accessibilityLabel("Done")
-            .accessibilityIdentifier("pattern.done")
+            .accessibilityLabel("Humanize")
+            .accessibilityValue(store.currentPatternSettings.humanize == .tight ? "Tight" : "Loose")
+            .accessibilityIdentifier("pattern.humanize")
         }
-        .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
         .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .background { CodaAcrylic(store: store).clipShape(RoundedRectangle(cornerRadius: 8)) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pattern.controls")
     }
-    @State private var swingDraft: Double?
-    @State private var spreadDraft: Double?
 }

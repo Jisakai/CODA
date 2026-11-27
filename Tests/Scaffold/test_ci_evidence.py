@@ -13,16 +13,53 @@ spec.loader.exec_module(ci)
 
 
 class CIEvidenceTests(unittest.TestCase):
-    def test_exact_disjoint_ui_inventory_and_runtime(self):
+    def test_exact_disjoint_exhaustive_four_way_ui_partition_and_runtime(self):
         groups = ci.partition()
-        self.assertEqual(sum(map(len, groups.values())), 15)
-        self.assertFalse(set(groups['ui-a']) & set(groups['ui-b']))
+        expected = {
+            'ui-a': [
+                'testEmptyEditorScreenshotAttachment',
+                'testFourBarSeededFixtureScreenshotAttachment',
+                'testDrawerAndAllThreeProductionPresetsAreReachable',
+                'testEdgePositionedAllQualityRadialScreenshotFixture',
+                'testPrimaryRadialScreenshotFixture',
+            ],
+            'ui-b': [
+                'testKnobValueCapsulesAreOutsideActualDialsAndFingerDragStillWorks',
+                'testFingerMusicRegionTapDoesNotEditOrCreateHistory',
+                'testSnapShowsBothFullLabelsInsideOriginalGutterCell',
+            ],
+            'ui-c': [
+                'testActualSessionPlayPauseAndChordMuteControls',
+                'testChordMuteCenterAndPaddingRemainTappableInBothStates',
+                'testKeyboardRowsStayBelowChromeAndFollowSemitoneRegister',
+                'testCaptureNormalizationAppliesOrientationWithoutForcingLandscape',
+            ],
+            'ui-d': [
+                'testEverySettingsPopupStaysNearItsOwnInvokingControl',
+                'testLaunchShowsEmptyEditorAndLocksLandscape',
+                'testSettingsIconCenterAndPaddingPresentProductionPopups',
+            ],
+        }
+        self.assertEqual(groups, expected)
+        assigned = [method for methods in groups.values() for method in methods]
+        self.assertEqual(len(assigned), 15)
+        self.assertEqual(len(assigned), len(set(assigned)))
+        self.assertEqual(set(groups), {'ui-a', 'ui-b', 'ui-c', 'ui-d'})
+        self.assertTrue({
+            'testEmptyEditorScreenshotAttachment',
+            'testFourBarSeededFixtureScreenshotAttachment',
+            'testEdgePositionedAllQualityRadialScreenshotFixture',
+            'testPrimaryRadialScreenshotFixture',
+        }.issubset(groups['ui-a']))
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / 'tests.log'
             for lane, methods in groups.items():
                 lines = [f"Test Case '-[codaUITests.CodaLaunchTests {m}]' passed (1.000 seconds)." for m in methods]
                 log.write_text('\n'.join(lines))
                 self.assertEqual(len(ci.runtime(lane, log)), len(methods))
+                log.write_text('\n'.join(lines).replace('codaUITests.CodaLaunchTests', 'codaUITests.UnexpectedTests'))
+                with self.assertRaises(ValueError):
+                    ci.runtime(lane, log)
                 for bad in ('\n'.join(lines[:-1]), '\n'.join(lines + lines[:1]), '\n'.join(lines).replace('passed', 'skipped', 1), '\n'.join(lines).replace('passed', 'failed', 1)):
                     log.write_text(bad)
                     with self.assertRaises(ValueError):
@@ -40,18 +77,46 @@ class CIEvidenceTests(unittest.TestCase):
         with patch.object(ci.json, 'loads', return_value=groups), self.assertRaises(ValueError):
             ci.partition()
 
-    def test_unit_runtime_requires_all_three_native_targets(self):
+    def test_unit_runtime_matches_source_and_rejects_missing_unexpected_duplicate_failed_or_skipped_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / 'tests.log'
-            text = "Test Case '-[CodaMusicTests.MusicTests testExample]' passed (0.001 seconds).\n"
-            for target in ('CodaMusicTests', 'CodaInteractionTests', 'CodaAudioTests'):
-                text += f"Test Suite '{target}.xctest' passed\n"
+            inventory = ci.unit_inventory()
+            text = ''.join(
+                f"Test Case '-[{class_name} {name}]' passed (0.001 seconds).\n"
+                for class_name, name in inventory.elements()
+            )
+            objc_cases = {
+                ('AudioAdapterTests', 'testPerformancePublicationLifecycleAndActualOfflineAudio'),
+                ('AudioAdapterTests', 'testActualSourceNodeOfflineRenderAndRepeatedTeardown'),
+            }
+            self.assertTrue(objc_cases.issubset(inventory))
+            self.assertIn("Test Case '-[AudioAdapterTests testActualSourceNodeOfflineRenderAndRepeatedTeardown]'", text)
             log.write_text(text)
-            self.assertEqual(len(ci.runtime('unit', log)), 1)
-            log.write_text(text + "Test Case '-[CodaMusicTests.MusicTests testSkipped]' skipped.\n")
+            runtime_cases = ci.runtime('unit', log)
+            self.assertEqual(len(runtime_cases), sum(inventory.values()))
+            runtime_ids = {case['id'] for case in runtime_cases}
+            self.assertTrue({f'{class_name}/{method}' for class_name, method in objc_cases}.issubset(runtime_ids))
+            mutations = (
+                '\n'.join(text.splitlines()[1:]),
+                text + "Test Case '-[CodaMusicTests.MusicModelTests testUnexpected]' passed (0.001 seconds).\n",
+                text + text.splitlines(keepends=True)[0],
+                text.replace(" passed ", " skipped ", 1),
+                text.replace(" passed ", " failed ", 1),
+            )
+            for label, changed in zip(('missing', 'unexpected', 'duplicate', 'skipped', 'failed'), mutations):
+                log.write_text(changed)
+                with self.subTest(case=label), self.assertRaises(ValueError):
+                    ci.runtime('unit', log)
+            without_objc = '\n'.join(
+                line for line in text.splitlines() if '-[AudioAdapterTests ' not in line
+            )
+            log.write_text(without_objc)
             with self.assertRaises(ValueError):
                 ci.runtime('unit', log)
-            log.write_text(text.replace("Test Suite 'CodaAudioTests.xctest' passed", ''))
+            wrong_objc_identity = text.replace(
+                '-[AudioAdapterTests ', '-[CodaAudioTests.AudioAdapterTests '
+            )
+            log.write_text(wrong_objc_identity)
             with self.assertRaises(ValueError):
                 ci.runtime('unit', log)
 
@@ -63,6 +128,8 @@ class CIEvidenceTests(unittest.TestCase):
                     ci.verify('not-read-before-gating', {**good, lane: status})
         with self.assertRaises(ValueError):
             ci.verify('not-read-before-gating', {'archive': 'success'})
+        with self.assertRaises(ValueError):
+            ci.verify('not-read-before-gating', {**good, 'unexpected': 'success'})
 
     def test_exact_sha_run_attempt_toolchain_and_payload_provenance(self):
         identity = {'GITHUB_SHA': 'a'*40, 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}
@@ -72,9 +139,26 @@ class CIEvidenceTests(unittest.TestCase):
                 folder = root / f'coda-internal-{lane}'
                 folder.mkdir()
                 (folder / 'payload').write_text(lane)
+                if lane == 'unit':
+                    log_lines = [
+                        f"Test Case '-[{class_name} {method}]' passed (0.001 seconds)."
+                        for class_name, method in ci.unit_inventory().elements()
+                    ]
+                elif lane in ci.UI_LANES:
+                    log_lines = [
+                        f"Test Case '-[codaUITests.CodaLaunchTests {method}]' passed (0.001 seconds)."
+                        for method in ci.partition()[lane]
+                    ]
+                else:
+                    log_lines = []
+                tests = []
+                if lane == 'unit' or lane in ci.UI_LANES:
+                    (folder / 'tests.log').write_text('\n'.join(log_lines) + '\n')
+                    tests = ci.runtime(lane, folder / 'tests.log')
                 evidence = {**identity, 'lane': lane, 'toolchain': 'Xcode 27.2; iOS SDK 27.2',
                             'arch': 'arm64', 'configuration': ci.configuration(lane),
-                            'files': {'payload': ci.digest(folder / 'payload')}}
+                            'tests': tests,
+                            'files': {p.name: ci.digest(p) for p in folder.iterdir() if p.is_file()}}
                 (folder / 'provenance.json').write_text(json.dumps(evidence))
             results = dict.fromkeys(ci.LANES, 'success')
             ci.verify(root, results)
@@ -88,16 +172,75 @@ class CIEvidenceTests(unittest.TestCase):
             (path.parent / 'payload').write_text('tampered')
             with self.assertRaises(ValueError):
                 ci.verify(root, results)
+            (path.parent / 'payload').write_text('archive')
+            unit_path = root / 'coda-internal-unit/provenance.json'
+            unit_original = json.loads(unit_path.read_text())
+            unit_path.write_text(json.dumps({**unit_original, 'tests': []}))
+            with self.assertRaises(ValueError):
+                ci.verify(root, results)
+            unit_path.write_text(json.dumps({key: value for key, value in unit_original.items() if key != 'tests'}))
+            with self.assertRaises(ValueError):
+                ci.verify(root, results)
+            unit_path.write_text(json.dumps(unit_original))
+            unit_folder = unit_path.parent
+            unit_log = unit_folder / 'tests.log'
+            unit_text = unit_log.read_text()
+            unit_log.write_text('')
+            unit_original['files']['tests.log'] = ci.digest(unit_log)
+            unit_path.write_text(json.dumps(unit_original))
+            with self.assertRaises(ValueError):
+                ci.verify(root, results)
+            unit_log.write_text('\n'.join(unit_text.splitlines()[1:]) + '\n')
+            unit_original['files']['tests.log'] = ci.digest(unit_log)
+            unit_path.write_text(json.dumps(unit_original))
+            with self.assertRaises(ValueError):
+                ci.verify(root, results)
+            unit_log.unlink()
+            unit_original['files'].pop('tests.log')
+            unit_path.write_text(json.dumps(unit_original))
+            with self.assertRaises(ValueError):
+                ci.verify(root, results)
 
-    def test_workflow_is_five_mac_producers_with_fail_independent_release_gate(self):
+    def test_workflow_uses_five_runner_slots_with_shortest_ui_shard_delayed(self):
         workflow = (ROOT / '.github/workflows/unsigned-ipa.yml').read_text()
-        self.assertIn('lane: [unit, ui-a, ui-b]', workflow)
+        self.assertEqual(ci.LANES, {'native', 'unit', 'ui-a', 'ui-b', 'ui-c', 'ui-d', 'archive'})
+        immediate = workflow.split('\n  simulator:\n')[1].split('\n  simulator_delayed:\n')[0]
+        delayed = workflow.split('\n  simulator_delayed:\n')[1].split('\n  publish:\n')[0]
+        self.assertIn('lane: [unit, ui-a, ui-b, ui-c]', immediate)
+        self.assertIn('max-parallel: 4', immediate)
+        self.assertNotIn('needs:', immediate)
+        self.assertIn('steps: &simulator-steps', immediate)
+        self.assertIn('needs: [native]', delayed)
+        self.assertIn('lane: [ui-d]', delayed)
+        self.assertIn('steps: *simulator-steps', delayed)
+        self.assertNotIn('always()', delayed)
+        self.assertNotIn('if:', delayed)
+        self.assertIn('name: native + archive', workflow)
+        native = workflow.split('\n  native:\n')[1].split('\n  simulator:\n')[0]
+        self.assertIn('Build and test portable DSP core', native)
+        self.assertIn('Archive unsigned device app', native)
+        self.assertLess(native.index('Build and test portable DSP core'),
+                        native.index('Archive unsigned device app'))
         self.assertIn('fail-fast: false', workflow)
         self.assertIn('cancel-in-progress: true', workflow)
-        self.assertEqual(workflow.count('runs-on: xcode-27'), 3)  # native + 3 matrix + archive
+        self.assertEqual(workflow.count('runs-on: xcode-27'), 3)  # native + four immediate + one delayed
+        self.assertIn('--output-dir build/artifacts/archive', workflow)
+        self.assertIn('record archive build/artifacts/archive', workflow)
+        self.assertIn('path: build/artifacts/archive/', workflow)
+        self.assertIn('path: build/artifacts/native/', workflow)
+        self.assertIn('name: Archive unsigned device app', workflow)
+        self.assertNotIn('\n  archive:\n', workflow)
+        self.assertIn('"$CI_LANE" != "ui-a"', workflow)
+        self.assertIn('incoming/coda-internal-archive/App.ipa', workflow)
+        self.assertIn('incoming/coda-internal-archive/App-verification.txt', workflow)
         release = workflow.split('\n  publish:\n')[1]
-        for lane in ('native', 'simulator', 'archive'):
+        self.assertIn('needs: [native, simulator, simulator_delayed]', release)
+        for lane in ('native', 'simulator', 'simulator_delayed'):
             self.assertIn(f"needs.{lane}.result == 'success'", release)
+        self.assertIn('"archive":"' + '$' + '{{ needs.native.result }}"', release)
+        self.assertIn('"ui-d":"' + '$' + '{{ needs.simulator_delayed.result }}"', release)
+        for lane in ('unit', 'ui-a', 'ui-b', 'ui-c'):
+            self.assertIn(f'"{lane}":"' + '$' + '{{ needs.simulator.result }}"', release)
         self.assertIn('python3 scripts/ci_evidence.py verify incoming', release)
         self.assertEqual(workflow.count('name: coda-unsigned-ipa\n'), 1)
         self.assertNotIn('name: coda-unsigned-ipa\n', workflow.split('\n  publish:\n')[0])

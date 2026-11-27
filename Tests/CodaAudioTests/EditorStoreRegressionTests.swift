@@ -752,7 +752,7 @@ final class EditorStoreRegressionTests: XCTestCase {
                 XCTAssertTrue(session.patterns.regions.isEmpty)
             }
         }
-        // Retain the final upstroke while checking that Done cancels a new draft.
+        // Retain the final upstroke while checking that closing pattern controls cancels a new draft.
         try session.redo()
         let retained = session.patterns
         XCTAssertFalse(retained.regions.isEmpty)
@@ -951,7 +951,7 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testPatternTransientCancellationOnDoneDrawerGeometryAndInactivity() throws {
+    func testPatternTransientCancellationOnToggleDrawerGeometryAndInactivity() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
@@ -978,21 +978,25 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testPatternStrokeCrossingDoneControlsCancelsWithoutEditingHistory() throws {
+    func testPatternStrokeCrossingTopBarControlsCancelsWithoutEditingHistory() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
         try session.undo()
         store.beginPatternEditing()
+        let controlsFrame = recordPatternControlsFrame(on: store)
 
         let start = CGPoint(x: store.patternFrame.minX + 20, y: store.patternFrame.minY + 10)
-        let control = CGPoint(x: store.patternControlsFrame.midX, y: store.patternControlsFrame.midY)
+        let control = CGPoint(x: controlsFrame.midX, y: controlsFrame.midY)
         XCTAssertTrue(store.patternFrame.contains(start))
+        XCTAssertEqual(controlsFrame.minY, 4)
+        XCTAssertLessThanOrEqual(controlsFrame.maxY, store.timelineTop)
+        XCTAssertGreaterThan(controlsFrame.minX, store.rootSize.width / 2)
         XCTAssertTrue(store.patternControlExcludes(control))
         XCTAssertFalse(store.canUndo)
         XCTAssertTrue(store.canRedo)
 
-        // A move event that crosses into the controls cancels the active draft;
+        // Crossing into the measured top-bar target cancels the active draft;
         // lifting there must not create pattern data or replace the redo item.
         store.pencilTouchBegan(at: start)
         store.pencilTouchMoved(to: control)
@@ -1053,11 +1057,13 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testPatternDrawerAndOverlayControlsExcludedBeforeAdmission() throws {
+    func testPatternDrawerAndTopBarControlsExcludedBeforeAdmission() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
-        store.beginPatternEditing(); store.openDrawer(true)
+        store.beginPatternEditing()
+        let controlsFrame = recordPatternControlsFrame(on: store)
+        store.openDrawer(true)
         let x = store.rootSize.width - store.drawerWidth / 2
         let knob = CGPoint(x: x, y: store.synthTop + 50)
         store.knobFrames[.warmth] = CGRect(x: x-20, y: knob.y-20, width: 40, height: 40)
@@ -1066,14 +1072,14 @@ final class EditorStoreRegressionTests: XCTestCase {
             store.pencilTouchBegan(at: point); store.pencilTouchEnded(at: point)
         }
         store.openDrawer(false)
-        let control = CGPoint(x: store.patternControlsFrame.midX, y: store.patternControlsFrame.midY)
+        let control = CGPoint(x: controlsFrame.midX, y: controlsFrame.midY)
         XCTAssertFalse(store.acceptsPencilLocation(control))
         store.pencilTouchBegan(at: control); store.pencilTouchEnded(at: control)
         XCTAssertTrue(session.patterns.regions.isEmpty)
     }
 
     @MainActor
-    func testRollSqueezePatternOptionIsReachableAndDoneRetainsPlayback() throws {
+    func testRollSqueezePatternToggleRetainsPlaybackAndContent() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
@@ -1086,10 +1092,28 @@ final class EditorStoreRegressionTests: XCTestCase {
         XCTAssertTrue(store.patternEditing)
         store.updatePatternSettings(preset: true)
         let retained = session.patterns
+        let chordContent = session.editor.progression
         XCTAssertEqual(retained.regions.first?.slots.compactMap { $0 }.count, 6)
-        store.endPatternEditing()
+        store.openSqueeze(at: CGPoint(x: 400, y: store.patternFrame.midY))
+        XCTAssertEqual(store.radialRings().first?.1, ["Pattern"])
+        let closingOption = try point(store, ring: .inner, slot: 0)
+        store.pencilHover(at: closingOption, rollAngle: nil)
+        store.finishSqueeze(at: closingOption)
+        XCTAssertFalse(store.patternEditing)
         XCTAssertEqual(session.patterns, retained)
+        XCTAssertEqual(session.editor.progression, chordContent)
         XCTAssertTrue(session.playing)
+    }
+
+    @MainActor
+    private func recordPatternControlsFrame(on store: CodaEditorStore) -> CGRect {
+        let width: CGFloat = 120
+        let height = CodaDesignTokens.Geometry.topBarHeight - 8
+        let frame = CGRect(x: store.rootSize.width - CodaDesignTokens.Geometry.topBarHorizontalPadding - width,
+                           y: (CodaDesignTokens.Geometry.topBarHeight - height) / 2,
+                           width: width, height: height)
+        store.recordPatternControlsFrame(frame)
+        return frame
     }
 
     @MainActor

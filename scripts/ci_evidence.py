@@ -9,7 +9,8 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-LANES = {'native', 'unit', 'ui-a', 'ui-b', 'archive'}
+UI_LANES = {'ui-a', 'ui-b', 'ui-c', 'ui-d'}
+LANES = {'native', 'unit', *UI_LANES, 'archive'}
 
 
 def configuration(lane):
@@ -20,17 +21,52 @@ def partition():
     groups = json.loads((ROOT / 'scripts/ui_shards.json').read_text())
     assigned = [name for names in groups.values() for name in names]
     source = []
-    for path in (ROOT / 'Tests/CodaUITests').glob('*.swift'):
+    for path in (ROOT / 'Tests/CodaUITests').rglob('*.swift'):
         source += re.findall(r'func (test\w+)\s*\(', path.read_text())
-    if set(groups) != {'ui-a', 'ui-b'} or Counter(assigned) != Counter(source):
+    if set(groups) != UI_LANES or Counter(assigned) != Counter(source):
         raise ValueError('UI inventory changed: update the disjoint explicit partition')
     if len(assigned) != len(set(assigned)):
         raise ValueError('Duplicate UI assignment')
+    review_fixtures = {
+        'testEmptyEditorScreenshotAttachment',
+        'testFourBarSeededFixtureScreenshotAttachment',
+        'testEdgePositionedAllQualityRadialScreenshotFixture',
+        'testPrimaryRadialScreenshotFixture',
+    }
+    if not review_fixtures.issubset(groups['ui-a']):
+        raise ValueError('All review screenshot fixtures must remain in ui-a')
     return groups
 
 
+def unit_inventory():
+    inventory = Counter()
+    for directory in ('CodaMusicTests', 'CodaInteractionTests', 'CodaAudioTests'):
+        for path in (ROOT / 'Tests' / directory).rglob('*.swift'):
+            text = path.read_text()
+            classes = list(re.finditer(r'(?m)^\s*(?:final\s+)?class\s+(\w+)\s*:', text))
+            for method in re.finditer(r'\bfunc\s+(test\w+)\s*\(', text):
+                owners = [match for match in classes if match.start() < method.start()]
+                if not owners:
+                    raise ValueError(f'Cannot identify XCTest class for {path}:{method.group(1)}')
+                inventory[(f'{directory}.{owners[-1].group(1)}', method.group(1))] += 1
+        for pattern in ('*.m', '*.mm'):
+            for path in (ROOT / 'Tests' / directory).rglob(pattern):
+                text = path.read_text()
+                implementations = re.finditer(r'@implementation\s+(\w+)\b(.*?)@end', text, re.DOTALL)
+                for implementation in implementations:
+                    class_name, body = implementation.groups()
+                    inventory.update(
+                        (class_name, method.group(1))
+                        for method in re.finditer(r'(?m)^\s*-\s*\(void\)\s*(test\w+)\b', body)
+                    )
+    return inventory
+
+
 def runtime(lane, log):
-    text = Path(log).read_text(errors='replace')
+    try:
+        text = Path(log).read_text(errors='replace')
+    except OSError as exc:
+        raise ValueError(f'Missing XCTest runtime log: {log}') from exc
     if re.search(r"Test Case .* (?:failed|skipped)\b|with [1-9][0-9]* tests? skipped", text):
         raise ValueError('Failed or skipped XCTest case in runtime log')
     cases = re.findall(r"Test Case '-\[([^ ]+) (test\w+)\]' (passed|failed|skipped) \(([\d.]+) seconds\)", text)
@@ -41,16 +77,15 @@ def runtime(lane, log):
         raise ValueError('Repeated runtime cases (unexpected retry/duplicate)')
     ui = [m for c, m, _, _ in cases if c.startswith('codaUITests.')]
     if lane.startswith('ui-'):
-        if Counter(ui) != Counter(partition()[lane]) or len(ui) != len(cases):
+        expected = Counter(('codaUITests.CodaLaunchTests', method) for method in partition()[lane])
+        if Counter((c, m) for c, m, _, _ in cases) != expected:
             raise ValueError('Runtime UI inventory differs from assigned shard')
     elif lane == 'unit':
         if ui:
             raise ValueError('UI case leaked into unit lane')
-        # Every source test target remains in the unfiltered scheme; additions
-        # are automatically exercised. Runtime evidence must include each target.
-        for target in ('CodaMusicTests', 'CodaInteractionTests', 'CodaAudioTests'):
-            if f"Test Suite '{target}.xctest' passed" not in text:
-                raise ValueError(f'Missing runtime target: {target}')
+        actual = Counter((c, m) for c, m, _, _ in cases)
+        if actual != unit_inventory():
+            raise ValueError('Runtime unit inventory differs from source test targets')
     return [{'id': i, 'seconds': float(case[3])} for i, case in zip(ids, cases)]
 
 
@@ -83,7 +118,7 @@ def record(lane, directory, log=None):
 
 def verify(directory, results):
     if set(results) != LANES or any(v != 'success' for v in results.values()):
-        raise ValueError('All five lanes must succeed before publication')
+        raise ValueError('All provenance lanes must succeed before publication')
     root = Path(directory)
     for lane in sorted(LANES):
         folder = root / f'coda-internal-{lane}'
@@ -98,12 +133,18 @@ def verify(directory, results):
                   if p.is_file() and p.name != 'provenance.json'}
         if actual != evidence['files'] or not actual:
             raise ValueError('Artifact payload differs from producer manifest')
+        tests = evidence.get('tests')
+        if not isinstance(tests, list):
+            raise ValueError('Missing runtime test inventory')
+        expected_tests = runtime(lane, folder / 'tests.log') if lane == 'unit' or lane in UI_LANES else []
+        if tests != expected_tests:
+            raise ValueError('Recorded runtime test inventory differs from artifact log')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest='command', required=True)
-    p = sub.add_parser('select'); p.add_argument('lane')
+    p = sub.add_parser('select'); p.add_argument('lane', choices=['unit', *sorted(UI_LANES)])
     p = sub.add_parser('record'); p.add_argument('lane', choices=sorted(LANES)); p.add_argument('directory'); p.add_argument('--log')
     p = sub.add_parser('verify'); p.add_argument('directory'); p.add_argument('results')
     args = parser.parse_args()
