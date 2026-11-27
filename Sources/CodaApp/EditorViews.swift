@@ -62,6 +62,9 @@ struct CodaCanvas: View {
                     PatternOverlayView(store: store)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .zIndex(3)
+                        // Apply paint-only semantics outside the layout wrappers too.
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
 
                 if store.radial != nil, let center = store.radialCenter {
@@ -1266,19 +1269,16 @@ private struct PatternOverlayView: View {
                 context.draw(text, at: CGPoint(x: capsule.midX, y: capsule.midY))
             }
         }
-        .allowsHitTesting(false)
         .accessibilityIdentifier("pattern.overlay")
-        // Paint only: the root-sized Canvas must not cover the top bar in AX hit testing.
-        .accessibilityHidden(true)
     }
 }
 
 private struct PatternControlsView: View {
     @Bindable var store: CodaEditorStore
-    @State private var swingStart: Double?
-    @State private var swingDraft: Double?
+    // SwiftUI resets the entire draft on successful lift AND cancellation.
+    @GestureState private var swingDrag: PatternSwingDrag? = nil
 
-    private var swingValue: Double { swingDraft ?? store.currentPatternSettings.swing }
+    private var swingValue: Double { swingDrag?.preview ?? store.currentPatternSettings.swing }
 
     var body: some View {
         HStack(spacing: CodaDesignTokens.Geometry.topBarControlGap) {
@@ -1296,14 +1296,28 @@ private struct PatternControlsView: View {
             }
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                if swingStart == nil { swingStart = store.currentPatternSettings.swing }
-                let next = min(1, max(0, (swingStart ?? 0) - Double(value.translation.height) / 120))
-                swingDraft = next
-            }.onEnded { _ in
-                if let swingDraft { store.updatePatternSettings(swing: swingDraft) }
-                swingStart = nil; swingDraft = nil
-            })
+            .gesture(DragGesture(minimumDistance: 0)
+                .updating($swingDrag) { value, drag, _ in
+                    var next = drag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+                    next.update(verticalTranslation: Double(value.translation.height))
+                    drag = next
+                    if store.uiDiagnosticsEnabled {
+                        store.recordUIEvent("pattern.swing.changed translationY=\(value.translation.height) start=\(next.startValue) draft=\(next.preview)")
+                    }
+                }.onEnded { value in
+                    // GestureState may already have reset. Preview never writes settings,
+                    // so the committed setting is still the baseline in that case.
+                    let retainedDrag = swingDrag
+                    let drag = retainedDrag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+                    let final = drag.valueToCommit(verticalTranslation: Double(value.translation.height))
+                    if let final { store.updatePatternSettings(swing: final) }
+                    if store.uiDiagnosticsEnabled {
+                        store.recordUIEvent("pattern.swing.ended translationY=\(value.translation.height) start=\(drag.startValue) retained=\(retainedDrag != nil) lastDraft=\(String(describing: retainedDrag?.preview)) requested=\(String(describing: final)) committed=\(store.currentPatternSettings.swing) error=\(store.inlineError ?? "nil")")
+                    }
+                })
+            .onChange(of: swingDrag == nil) { _, inactive in
+                if inactive { store.recordUIEvent("pattern.swing.reset committed=\(store.currentPatternSettings.swing)") }
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Swing")
             .accessibilityValue("\(Int(swingValue * 100)) percent")

@@ -126,17 +126,33 @@ final class CodaLaunchTests: XCTestCase {
             guard let node = cachedDescendant(identifier, in: state) else { return "\(identifier): absent" }
             return "\(identifier): type=\(node.elementType.rawValue) frame=\(node.frame) label=\(node.label) value=\(String(describing: node.value))"
         }.joined(separator: "\n")
-        let diagnostics = XCTAttachment(string: """
+        var diagnosticReports = ["""
         Pattern controls before hit assertions; window=\(state.frame)
         Humanize isHittable=\(humanize.isHittable); Swing isHittable=\(swing.isHittable)
         \(frames)
-        """)
-        diagnostics.name = "M1b-pattern-controls-AX-before-assertion.txt"
-        diagnostics.lifetime = .keepAlways
-        add(diagnostics)
+        """]
+        // One allowlisted attachment, including cached pre-input and post-drag
+        // evidence. Defer also keeps the report if an unwrap below throws.
+        defer {
+            let diagnostics = XCTAttachment(string: diagnosticReports.joined(separator: "\n\n"))
+            diagnostics.name = "M1b-pattern-controls-AX-before-assertion.txt"
+            diagnostics.lifetime = .keepAlways
+            add(diagnostics)
+        }
         XCTAssertTrue(humanize.isHittable)
         XCTAssertTrue(swing.isHittable)
-        XCTAssertNil(cachedDescendant("pattern.overlay", in: state), "Decorative paint must not be an AX target")
+        // accessibilityHidden describes system accessibility participation;
+        // XCTest's descendant snapshot may still retain a layout-only node.
+        let overlay = app.descendants(matching: .any).matching(identifier: "pattern.overlay").firstMatch
+        let overlayHittable = overlay.isHittable
+        diagnosticReports.append("Decorative overlay isHittable=\(overlayHittable)")
+        XCTAssertFalse(overlayHittable, "Decorative paint must not be an AX hit target")
+        if let paint = cachedDescendant("pattern.overlay", in: state) {
+            XCTAssertEqual(paint.elementType, .other)
+            XCTAssertTrue(paint.label.isEmpty, "Decorative paint must have no spoken label")
+            XCTAssertNil(paint.value, "Decorative paint must expose no control value")
+            XCTAssertTrue(paint.children.isEmpty, "Decorative paint must expose no child controls")
+        }
         let topBarFrame = try XCTUnwrap(cachedDescendant("editor.topBar", in: state)).frame
         let controlsFrame = try XCTUnwrap(cachedDescendant("pattern.controls", in: state)).frame
         XCTAssertGreaterThanOrEqual(controlsFrame.minX, topBarFrame.midX)
@@ -189,10 +205,33 @@ final class CodaLaunchTests: XCTestCase {
             .press(forDuration: 0.1, thenDragTo:
                 origin.withOffset(CGVector(dx: end.x - state.frame.minX, dy: end.y - state.frame.minY)))
         state = try window.snapshot()
+        diagnosticReports.append("""
+        After original short Swing drag \(start)->\(end):
+        Swing=\(String(describing: cachedDescendant("pattern.swing", in: state)?.value))
+        Production UI events (cached): \(String(describing: cachedDescendant("editor.uiDiagnostics", in: state)?.value))
+        """)
         let swingValue = try XCTUnwrap(cachedDescendant("pattern.swing", in: state)?.value as? String)
         let percent = try XCTUnwrap(Int(swingValue.components(separatedBy: " ")[0]))
         XCTAssertGreaterThan(percent, 0, "Finger lift must commit Swing through the production gesture")
         XCTAssertLessThanOrEqual(percent, 100)
+        XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
+        XCTAssertEqual(try musicState(in: state), retainedMusic)
+
+        let reverseEnd = CGPoint(x: start.x, y: start.y + 16)
+        XCTAssertTrue(state.frame.contains(reverseEnd) && swingFrame.contains(reverseEnd))
+        origin.withOffset(CGVector(dx: start.x - state.frame.minX, dy: start.y - state.frame.minY))
+            .press(forDuration: 0.1, thenDragTo:
+                origin.withOffset(CGVector(dx: reverseEnd.x - state.frame.minX, dy: reverseEnd.y - state.frame.minY)))
+        state = try window.snapshot()
+        diagnosticReports.append("""
+        After second, reversed Swing drag \(start)->\(reverseEnd):
+        Swing=\(String(describing: cachedDescendant("pattern.swing", in: state)?.value))
+        Production UI events (cached): \(String(describing: cachedDescendant("editor.uiDiagnostics", in: state)?.value))
+        """)
+        let reversedValue = try XCTUnwrap(cachedDescendant("pattern.swing", in: state)?.value as? String)
+        let reversedPercent = try XCTUnwrap(Int(reversedValue.components(separatedBy: " ")[0]))
+        XCTAssertLessThan(reversedPercent, percent, "A second drag must reverse from the committed baseline")
+        XCTAssertGreaterThanOrEqual(reversedPercent, 0)
         XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
         XCTAssertEqual(try musicState(in: state), retainedMusic)
     }

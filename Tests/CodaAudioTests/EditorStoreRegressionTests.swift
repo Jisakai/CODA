@@ -978,6 +978,87 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSwingFinalEventAndSecondDragEachCommitOneTransactionWithoutPreviewEdits() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        store.updatePatternSettings(preset: true)
+        let chords = session.editor.progression
+        let seeded = try XCTUnwrap(session.patterns.regions.first)
+
+        // The first short drag only previews zero; the second reverses its
+        // preview direction at lift and must start at the first committed value.
+        for (updates, finalTranslation, expected) in [([0.0], -16.0, 16.0 / 120),
+                                                     ([0.0, -32.0], 16.0, 0.0)] {
+            let before = session.patterns
+            var drag = PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+            for translation in updates {
+                drag.update(verticalTranslation: translation)
+                XCTAssertEqual(session.patterns, before, "Preview cannot create history or alter the pattern")
+                XCTAssertEqual(session.editor.progression, chords)
+            }
+            let value = try XCTUnwrap(drag.valueToCommit(verticalTranslation: finalTranslation))
+            store.updatePatternSettings(swing: value)
+            XCTAssertEqual(store.currentPatternSettings.swing, expected, accuracy: 0.000001)
+            let after = session.patterns
+            let region = try XCTUnwrap(after.regions.first)
+            XCTAssertEqual(region.id, seeded.id)
+            XCTAssertEqual(region.range, seeded.range)
+            XCTAssertEqual(region.slots, seeded.slots)
+            XCTAssertEqual(session.editor.progression, chords)
+            store.routeFingerGesture(touchCount: 2, tapCount: 2)
+            XCTAssertEqual(session.patterns, before, "One undo must remove the entire drag")
+            XCTAssertEqual(session.editor.progression, chords)
+            store.routeFingerGesture(touchCount: 3, tapCount: 2)
+            XCTAssertEqual(session.patterns, after, "One redo must restore exactly that drag")
+            XCTAssertEqual(session.editor.progression, chords)
+        }
+    }
+
+    @MainActor
+    func testDiscardedSwingPreviewAndNoOpLiftPreserveEmptyPatternAndRedo() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        let initialCanUndo = store.canUndo
+        let initialChords = session.editor.progression
+        let unchanged = PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+        if let value = unchanged.valueToCommit(verticalTranslation: 16) {
+            store.updatePatternSettings(swing: value)
+        }
+        XCTAssertTrue(session.patterns.regions.isEmpty, "A clamped no-op cannot create an empty pattern")
+        XCTAssertEqual(store.canUndo, initialCanUndo, "Retain the fixture's existing chord history")
+        XCTAssertEqual(session.editor.progression, initialChords)
+
+        store.updatePatternSettings(preset: true)
+        store.updatePatternSettings(swing: 0.4)
+        let changed = session.patterns
+        store.routeFingerGesture(touchCount: 2, tapCount: 2)
+        let before = session.patterns
+        let chords = session.editor.progression
+        XCTAssertTrue(store.canRedo)
+        do {
+            var abandoned = PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+            abandoned.update(verticalTranslation: -60)
+            XCTAssertEqual(abandoned.preview, 0.5, accuracy: 0.000001)
+            // Cancellation discards this transient value; there is no store call.
+        }
+        var returnedToStart = PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+        returnedToStart.update(verticalTranslation: -16)
+        if let value = returnedToStart.valueToCommit(verticalTranslation: 0) {
+            store.updatePatternSettings(swing: value)
+        }
+        XCTAssertEqual(session.patterns, before)
+        XCTAssertEqual(session.editor.progression, chords)
+        XCTAssertTrue(store.canRedo, "Cancelled previews and no-op lifts must retain the redo item")
+        store.routeFingerGesture(touchCount: 3, tapCount: 2)
+        XCTAssertEqual(session.patterns, changed)
+        XCTAssertEqual(session.editor.progression, chords)
+    }
+
+    @MainActor
     func testPatternSettingsCommitOnceAndPreserveChordsAndStrokesThroughHistory() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
