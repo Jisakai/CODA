@@ -1308,6 +1308,7 @@ private struct PatternControlsView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 10)
         .background { CodaAcrylic(store: store).clipShape(RoundedRectangle(cornerRadius: 8)) }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pattern.controls")
     }
     @State private var swingDraft: Double?

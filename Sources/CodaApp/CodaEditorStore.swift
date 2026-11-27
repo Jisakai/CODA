@@ -739,6 +739,7 @@ final class CodaEditorStore {
         lastPencilLocation = point
         touchLast = point
         if patternGestureWasActive {
+            if patternControlExcludes(point) { cancelPatternInput(); return }
             patternGesture.move(to: point); patternPreview = patternGesture.preview
             patternPencilPosition = patternGesture.isActive ? point : nil
             return
@@ -776,6 +777,10 @@ final class CodaEditorStore {
         touchLast = point
         holdWork?.cancel(); holdWork = nil
         if patternGestureWasActive {
+            if patternControlExcludes(point) {
+                cancelPatternInput(); discardPencilLift = false; clearTouch()
+                return
+            }
             let result = patternGesture.finish(at: point)
             cancelPatternInput(); discardPencilLift = false; clearTouch()
             if let result { commitPatternGesture(result) }

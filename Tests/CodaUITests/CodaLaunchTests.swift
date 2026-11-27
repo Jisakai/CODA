@@ -104,10 +104,15 @@ final class CodaLaunchTests: XCTestCase {
         app.terminate()
         app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-pattern"]
         launchAndDescribe(app)
-        let done = app.buttons["pattern.done"]
+        let controls = app.otherElements["pattern.controls"]
+        XCTAssertTrue(controls.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.otherElements.matching(identifier: "pattern.controls").count, 1)
+        let done = controls.buttons["pattern.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["pattern.preset"].exists)
-        XCTAssertTrue(app.buttons["pattern.humanize"].exists)
+        for identifier in ["pattern.humanize", "pattern.preset", "pattern.done"] {
+            XCTAssertEqual(controls.buttons.matching(identifier: identifier).count, 1)
+            XCTAssertTrue(controls.buttons[identifier].isHittable)
+        }
         attachScreenshot(named: "M1b-pattern-overlay", from: app)
         done.tap()
         XCTAssertFalse(done.exists)

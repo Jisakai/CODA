@@ -978,6 +978,48 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testPatternStrokeCrossingDoneControlsCancelsWithoutEditingHistory() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        try session.undo()
+        store.beginPatternEditing()
+
+        let start = CGPoint(x: store.patternFrame.minX + 20, y: store.patternFrame.minY + 10)
+        let control = CGPoint(x: store.patternControlsFrame.midX, y: store.patternControlsFrame.midY)
+        XCTAssertTrue(store.patternFrame.contains(start))
+        XCTAssertTrue(store.patternControlExcludes(control))
+        XCTAssertFalse(store.canUndo)
+        XCTAssertTrue(store.canRedo)
+
+        // A move event that crosses into the controls cancels the active draft;
+        // lifting there must not create pattern data or replace the redo item.
+        store.pencilTouchBegan(at: start)
+        store.pencilTouchMoved(to: control)
+        XCTAssertNil(store.patternPreview)
+        store.pencilTouchEnded(at: control)
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+        XCTAssertFalse(store.canUndo)
+        XCTAssertTrue(store.canRedo)
+
+        // Also reject a lift delivered in the controls when no final move event
+        // arrived there, while retaining normal strokes elsewhere in the roll.
+        store.pencilTouchBegan(at: start)
+        store.pencilTouchEnded(at: control)
+        XCTAssertTrue(session.patterns.regions.isEmpty)
+        XCTAssertFalse(store.canUndo)
+        XCTAssertTrue(store.canRedo)
+
+        let end = CGPoint(x: start.x, y: start.y + store.patternFrame.height * 0.4)
+        store.pencilTouchBegan(at: start)
+        store.pencilTouchMoved(to: end)
+        store.pencilTouchEnded(at: end)
+        XCTAssertEqual(session.patterns.regions.first?.slots.compactMap { $0 }.count, 1)
+        XCTAssertTrue(store.canUndo)
+        XCTAssertFalse(store.canRedo)
+    }
+
+    @MainActor
     func testCancelledPatternLiftNeverAuditionsOrCreatesChordStripMusic() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
