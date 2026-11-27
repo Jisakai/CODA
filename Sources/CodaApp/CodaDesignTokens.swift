@@ -105,6 +105,8 @@ enum CodaDesignTokens {
     }
 
     enum EditorSurface {
+        static let patternReadoutHorizontalPadding: CGFloat = 8
+        static let patternReadoutVerticalPadding: CGFloat = 4
         static let acrylicTint = 0.045
         static let acrylicHighlight = 0.025
         static let elevationRadius: CGFloat = 18

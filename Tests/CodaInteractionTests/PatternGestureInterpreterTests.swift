@@ -5,6 +5,32 @@ import Foundation
 final class PatternGestureInterpreterTests: XCTestCase {
     private let frame = CGRect(x: 56, y: 180, width: 1280, height: 600)
 
+    func testReadoutTracksPencilAndClampsWholeCapsuleAtEveryEdge() {
+        let size = CGSize(width: 58, height: 26) // Includes the widest removal label.
+        let first = CGPoint(x: 300, y: 400), second = CGPoint(x: 451, y: 512)
+        let a = PatternReadoutGeometry.frame(near: first, size: size, in: frame)
+        let b = PatternReadoutGeometry.frame(near: second, size: size, in: frame)
+        XCTAssertEqual(a.minX, first.x + PatternReadoutGeometry.pencilGap)
+        XCTAssertEqual(a.maxY, first.y - PatternReadoutGeometry.pencilGap)
+        XCTAssertEqual(b.minX - a.minX, second.x - first.x)
+        XCTAssertEqual(b.minY - a.minY, second.y - first.y)
+        for x in [frame.minX, frame.midX, frame.maxX] {
+            for y in [frame.minY, frame.midY, frame.maxY] {
+                let placed = PatternReadoutGeometry.frame(near: CGPoint(x: x, y: y), size: size, in: frame)
+                XCTAssertEqual(placed.size, size)
+                XCTAssertTrue(frame.insetBy(dx: 4, dy: 4).contains(placed))
+                if x == frame.maxX { XCTAssertEqual(placed.maxX, frame.maxX - 4) }
+                if y == frame.minY { XCTAssertEqual(placed.minY, frame.minY + 4) }
+                if y == frame.maxY { XCTAssertEqual(placed.maxY, frame.maxY - PatternReadoutGeometry.pencilGap) }
+            }
+        }
+        let tiny = CGRect(x: 56, y: 180, width: 20, height: 16)
+        XCTAssertTrue(tiny.contains(PatternReadoutGeometry.frame(near: tiny.origin, size: size, in: tiny)))
+        let outside = PatternReadoutGeometry.frame(near: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100), size: size, in: frame)
+        XCTAssertEqual(outside.maxX, frame.maxX - 4)
+        XCTAssertEqual(outside.maxY, frame.maxY - 4)
+    }
+
     func testSharedStrokeGeometryUnderZoomAndScroll() throws {
         for zoom in [1.0, 3.0] {
             let viewport = EditorViewport(horizontalZoom: zoom, horizontalOffset: 80)
@@ -142,9 +168,14 @@ final class PatternGestureInterpreterTests: XCTestCase {
         guard case .chuck(let size) = try XCTUnwrap(interpret(rough)) else { return XCTFail("Expected closed circle") }
         XCTAssertEqual(size, 74.0 / 600, accuracy: 0.002)
         XCTAssertNotEqual(size, 0.1)
-        let paths = [circle(radius: 5), circle(radius: 37, turns: 0.7),
+        let zigzag: [CGPoint] = (0..<30).map { (index: Int) -> CGPoint in
+            let x: Double = Double(300 + (index % 2) * 50)
+            let y: Double = Double(300 + index * 4)
+            return CGPoint(x: x, y: y)
+        }
+        let paths: [[CGPoint]] = [circle(radius: 5), circle(radius: 37, turns: 0.7),
                      circle(radius: 37, turns: 2),
-                     (0..<30).map { CGPoint(x: Double(300 + ($0 % 2) * 50), y: Double(300 + $0 * 4)) },
+                     zigzag,
                      [CGPoint(x: 300, y: 300), CGPoint(x: 302, y: 305)],
                      [CGPoint(x: 300, y: 300)]]
         for path in paths {

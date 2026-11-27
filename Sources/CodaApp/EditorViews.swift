@@ -1247,14 +1247,17 @@ private struct PatternOverlayView: View {
                     context.stroke(path, with: .color(CodaDesignTokens.Colors.chord), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                 }
             }
-            if let preview = store.patternPreview {
-                let label: String
-                switch preview.content {
-                case .arrow(_, let level): label = "v\(level * 10)"
-                case .chuck(let size): label = "v\(Int((size * 100).rounded()))"
-                case .remove: label = "Remove"
-                }
-                context.draw(Text(label).font(CodaDesignTokens.Typography.font(size: 12, weight: .bold)).foregroundColor(CodaDesignTokens.Colors.primaryInk), at: CGPoint(x: frame.minX+42, y: frame.midY))
+            if let label = store.patternReadoutLabel, let point = store.patternPencilPosition {
+                let text = context.resolve(Text(label)
+                    .font(CodaDesignTokens.Typography.font(size: CodaDesignTokens.Typography.chipAndReadoutSize, weight: .bold))
+                    .foregroundColor(CodaDesignTokens.Colors.primaryInk))
+                let measured = text.measure(in: frame.size)
+                let size = CGSize(width: measured.width + 2 * CodaDesignTokens.EditorSurface.patternReadoutHorizontalPadding,
+                                  height: measured.height + 2 * CodaDesignTokens.EditorSurface.patternReadoutVerticalPadding)
+                let capsule = PatternReadoutGeometry.frame(near: point, size: size, in: frame)
+                context.fill(Path(roundedRect: capsule, cornerRadius: CodaDesignTokens.Radii.control),
+                             with: .color(CodaDesignTokens.Colors.darkGlass))
+                context.draw(text, at: CGPoint(x: capsule.midX, y: capsule.midY))
             }
         }
         .allowsHitTesting(false)

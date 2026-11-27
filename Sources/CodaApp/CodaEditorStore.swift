@@ -105,6 +105,15 @@ final class CodaEditorStore {
     }
     private(set) var patternEditing = false
     private(set) var patternPreview: PatternGestureValue?
+    private(set) var patternPencilPosition: CGPoint?
+    var patternReadoutLabel: String? {
+        guard let preview = patternPreview else { return nil }
+        switch preview.content {
+        case .arrow(_, let level): return (try? ArrowLevel(level))?.readout
+        case .chuck(let size): return "v\(Int((size * 100).rounded()))"
+        case .remove: return "Remove"
+        }
+    }
     @ObservationIgnored private var patternGesture = PatternGestureInterpreter()
     @ObservationIgnored private var patternGestureWasActive = false
     @ObservationIgnored private var discardPencilLift = false
@@ -665,6 +674,7 @@ final class CodaEditorStore {
         patternGesture.cancel()
         patternGestureWasActive = false
         patternPreview = nil
+        patternPencilPosition = nil
     }
 
     private func commitPatternGesture(_ value: PatternGestureValue) {
@@ -710,6 +720,7 @@ final class CodaEditorStore {
             let existing = patternHitTarget(at: point)
             patternGesture.begin(at: point, device: .pencil, frame: patternFrame, viewport: viewport, existing: existing)
             patternGestureWasActive = patternGesture.isActive
+            patternPencilPosition = patternGesture.isActive ? point : nil
             return
         }
         guard radial == nil, let hit = pencilTarget(at: point) else { return }
@@ -729,6 +740,7 @@ final class CodaEditorStore {
         touchLast = point
         if patternGestureWasActive {
             patternGesture.move(to: point); patternPreview = patternGesture.preview
+            patternPencilPosition = patternGesture.isActive ? point : nil
             return
         }
         guard let start = touchStart else {

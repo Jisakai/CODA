@@ -712,6 +712,99 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testPatternReadoutTracksActivePencilWithoutChangingQuantizedRetainedVelocity() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        let frame = store.patternFrame
+        for down in [true, false] {
+            for level in 1...10 {
+                let start = CGPoint(x: frame.minX + 20, y: down ? frame.minY : frame.maxY - 1)
+                XCTAssertTrue(session.patterns.regions.isEmpty)
+                XCTAssertNil(store.patternHitTarget(at: start))
+                store.pencilTouchBegan(at: start)
+                XCTAssertEqual(store.patternPencilPosition, start)
+                XCTAssertNil(store.patternReadoutLabel)
+                let fraction = level == 10 ? 1.0 : Double(level) / 10 + 0.02
+                let end = CGPoint(x: start.x + 30,
+                    y: down ? min(frame.maxY, start.y + frame.height * fraction)
+                            : max(frame.minY, start.y - frame.height * fraction))
+                store.pencilTouchMoved(to: end)
+                XCTAssertEqual(store.patternPencilPosition, end)
+                XCTAssertEqual(store.patternReadoutLabel, "v\(level * 10)")
+                // Even motion below interpreter sample spacing must move the readout.
+                let shifted = CGPoint(x: end.x + 0.25, y: end.y)
+                store.pencilTouchMoved(to: shifted)
+                XCTAssertEqual(store.patternPencilPosition, shifted)
+                XCTAssertEqual(store.patternReadoutLabel, "v\(level * 10)")
+                let preview = try XCTUnwrap(store.patternPreview)
+                XCTAssertEqual(preview.content, .arrow(down: down, level: level))
+                store.pencilTouchEnded(at: shifted)
+                let region = try XCTUnwrap(session.patterns.regions.first)
+                let stroke = try XCTUnwrap(region.slots[preview.slot])
+                XCTAssertEqual(stroke.content, .arrow(direction: down ? .down : .up, level: try ArrowLevel(level)))
+                XCTAssertEqual(stroke.baseVelocity, Double(level) / 10)
+                XCTAssertNil(store.patternPencilPosition)
+                XCTAssertNil(store.patternReadoutLabel)
+                // Whole-loop patterns reuse slots across bars; isolate each case.
+                try session.undo()
+                XCTAssertTrue(session.patterns.regions.isEmpty)
+            }
+        }
+        // Retain the final upstroke while checking that Done cancels a new draft.
+        try session.redo()
+        let retained = session.patterns
+        XCTAssertFalse(retained.regions.isEmpty)
+        let cancellationStart = CGPoint(x: frame.minX + 100, y: frame.minY)
+        XCTAssertNil(store.patternHitTarget(at: cancellationStart))
+        store.pencilTouchBegan(at: cancellationStart)
+        store.pencilTouchMoved(to: CGPoint(x: frame.minX + 100, y: frame.midY))
+        XCTAssertNotNil(store.patternReadoutLabel)
+        store.endPatternEditing()
+        XCTAssertNil(store.patternPencilPosition)
+        XCTAssertNil(store.patternReadoutLabel)
+        store.pencilTouchEnded(at: CGPoint(x: frame.minX + 100, y: frame.midY))
+        XCTAssertEqual(session.patterns, retained)
+    }
+
+    @MainActor
+    func testPatternChuckReadoutKeepsContinuousValueAndOutsideMoveClearsReadout() throws {
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { session.suspend() }
+        store.beginPatternEditing()
+        let frame = store.patternFrame
+        let center = CGPoint(x: frame.minX + 150, y: frame.midY)
+        let radius: CGFloat = 37
+        let start = CGPoint(x: center.x + radius, y: center.y)
+        store.pencilTouchBegan(at: start)
+        for i in 1...64 {
+            let angle = Double(i) / 64 * 2 * .pi
+            store.pencilTouchMoved(to: CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle)))
+        }
+        let preview = try XCTUnwrap(store.patternPreview)
+        guard case .chuck(let size) = preview.content else { return XCTFail("Expected chuck preview") }
+        XCTAssertEqual(size, 74 / Double(frame.height), accuracy: 0.000001)
+        XCTAssertNotEqual(size, (size * 10).rounded() / 10)
+        XCTAssertEqual(store.patternReadoutLabel, "v\(Int((size * 100).rounded()))")
+        store.pencilTouchEnded(at: start)
+        let region = try XCTUnwrap(session.patterns.regions.first)
+        XCTAssertEqual(region.slots[preview.slot]?.baseVelocity, size)
+        let retained = session.patterns
+        let cancellationStart = CGPoint(x: frame.minX + 20, y: frame.minY)
+        XCTAssertNil(store.patternHitTarget(at: cancellationStart))
+        store.pencilTouchBegan(at: cancellationStart)
+        store.pencilTouchMoved(to: CGPoint(x: cancellationStart.x, y: cancellationStart.y + 60))
+        XCTAssertNotNil(store.patternReadoutLabel)
+        store.pencilTouchMoved(to: CGPoint(x: frame.minX - 1, y: frame.midY))
+        XCTAssertNil(store.patternPencilPosition)
+        XCTAssertNil(store.patternReadoutLabel)
+        store.pencilTouchEnded(at: cancellationStart)
+        XCTAssertEqual(session.patterns, retained)
+    }
+
+    @MainActor
     func testPatternPencilLiftIsOneUnifiedUndoAndClosingRetainsPlayback() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)

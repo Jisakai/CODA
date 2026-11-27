@@ -33,6 +33,21 @@ public struct PatternGestureValue: Equatable, Sendable {
     public let content: Content
 }
 
+/// Placement uses the full measured capsule size in viewport coordinates.
+public enum PatternReadoutGeometry {
+    public static let pencilGap: CGFloat = 12
+    public static let frameInset: CGFloat = 4
+
+    public static func frame(near point: CGPoint, size: CGSize, in frame: CGRect) -> CGRect {
+        let inset = min(frameInset, min(frame.width, frame.height) / 2)
+        let bounds = frame.insetBy(dx: inset, dy: inset)
+        let width = min(size.width, bounds.width), height = min(size.height, bounds.height)
+        return CGRect(x: min(max(point.x + pencilGap, bounds.minX), bounds.maxX - width),
+                      y: min(max(point.y - pencilGap - height, bounds.minY), bounds.maxY - height),
+                      width: width, height: height)
+    }
+}
+
 /// Coordinates are absolute in the same viewport as `frame`; time mapping uses
 /// the timeline transform, including zoom and scroll. Only finish can commit.
 public struct PatternGestureInterpreter: Sendable {
