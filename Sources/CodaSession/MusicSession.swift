@@ -1330,7 +1330,8 @@ public final class MusicSession {
         let rate = audio.sampleRate > 0 ? audio.sampleRate : 48_000
         let arrangement = arrangement ?? patterns
         let unconsumedPosition = nextPosition > audio.performanceStatus().consumed_position_revision
-        let restarting = playing == true && status.completed != 0
+        let unconsumedPlayback = nextPlayback > status.playback_revision
+        let restarting = (playing == true || (unconsumedPlayback && playingValue)) && status.completed != 0
         let observed = unconsumedPosition ? UInt64(step / PerformanceCycleSource.windowSteps) : (restarting ? 0 : status.cycle)
         guard let cycle = Int64(exactly: observed), cycle < Int64.max else { throw AudioSessionError.capacity }
         let source = try PerformanceCycleSource(

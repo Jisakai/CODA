@@ -355,11 +355,12 @@ private struct EditorTopBar: View {
                     .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
             }
             .foregroundStyle(store.synthRackOpen ? Color.black : CodaDesignTokens.Colors.primaryInk)
-            .padding(.horizontal, 9).frame(height: 30)
+            .padding(.horizontal, 9).frame(height: 32)
             .background(store.synthRackOpen ? CodaDesignTokens.Colors.chord : .white.opacity(0.07), in: Capsule())
             .contentShape(Capsule())
         }
         .accessibilityLabel("Toggle Synth & Plugin Rack")
+        .accessibilityValue(store.synthRackOpen ? "open" : "closed")
         .accessibilityIdentifier("top.synthRack")
 
         Button { store.openDrawer() } label: {

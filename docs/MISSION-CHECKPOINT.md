@@ -19,5 +19,7 @@
   - Fixed `CodaSidekick` (`a4f0be7`: `DirectiveStreamParser` throwing `vocabulary.quality`), `CodaSession` (`edd0908`: `CODA_LAYER_COUNT.rawValue`), and all `CodaApp` compile errors (`ecd8623`).
   - Fixed all 20 simulator unit test failures and all 9 simulator UI test failures from run `46092044447`: chunked `MusicSession.renderOffline`, tightened `knob(at:)` guard, moved `PatternControlsView` flush-right with hit-testable `highPriorityGesture` on `pattern.swing`, wrapped `RadialMenuView` slots in `ZStack` with `.accessibilityElement(children: .combine)`, and updated unit/UI tests to match the redesigned Bottom Synth Rack, 28x32 chordMute, unified Wrench + Layers popups, and collapsed velocity-lane piano-roll height. Pushing to CI now.
 
+  - Fixed remaining 3 unit + 1 UI-C failures from run `46096795727` (`ui-b` and `ui-d` already green; `ui-a` was runner-canceled): fixed `MusicSession.preparePlan` restart-from-cycle-0 detection for unconsumed `play()` followed by `setTempo`, switched the 2 barrel-roll tests in `EditorStoreRegressionTests` from `drawerOpen` to `synthRackOpen`, and hardened `top.synthRack` tap/wait in `CodaLaunchTests.testActualSessionPlayPauseAndChordMuteControls`. Pushing to CI now.
+
 ## Last Updated
-2026-11-28 05:13 UTC+03:00 (2026-11-28 02:13 UTC) — Committed & pushed all 29 simulator test fixes; awaiting green CI run + unsigned App.ipa verification
+2026-11-28 05:35 UTC+03:00 (2026-11-28 02:35 UTC) — Committed & pushed fixes for final 4 simulator failures; awaiting full green CI run + unsigned App.ipa verification

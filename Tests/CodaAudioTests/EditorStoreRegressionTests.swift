@@ -1644,7 +1644,7 @@ final class EditorStoreRegressionTests: XCTestCase {
     func testBarrelRollRemainsContinuousAcrossAngleWrapAndReversal() throws {
         let store = try makeStore()
         defer { store.session?.suspend() }
-        store.drawerOpen = true
+        store.synthRackOpen = true
         let frame = CGRect(x: store.rootSize.width - 200, y: store.synthTop + 80, width: 42, height: 42)
         let at = CGPoint(x: frame.midX, y: frame.midY)
         store.knobFrames = [.cutoff: frame]
@@ -1677,7 +1677,7 @@ final class EditorStoreRegressionTests: XCTestCase {
     func testBarrelRollLifecycleResetsRearmDeadZoneAndAngleBaseline() throws {
         let store = try makeStore()
         defer { store.session?.suspend() }
-        store.drawerOpen = true
+        store.synthRackOpen = true
         let frame = CGRect(x: store.rootSize.width - 200, y: store.synthTop + 80, width: 42, height: 42)
         let at = CGPoint(x: frame.midX, y: frame.midY)
         let otherFrame = frame.offsetBy(dx: 70, dy: 0)

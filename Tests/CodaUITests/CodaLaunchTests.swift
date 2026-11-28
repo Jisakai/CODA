@@ -485,9 +485,16 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertEqual(restoreResult, .completed)
 
         for index in 0...2 {
-            app.buttons["top.synthRack"].tap()
-            app.buttons["drawer.preset.\(index)"].tap()
+            let synthToggle = app.buttons["top.synthRack"]
+            let preset = app.buttons["drawer.preset.\(index)"]
+            synthToggle.tap()
+            if !preset.waitForExistence(timeout: 2) {
+                synthToggle.tap()
+            }
+            XCTAssertTrue(preset.waitForExistence(timeout: 5))
+            preset.tap()
             app.buttons["synthRack.close"].tap()
+            XCTAssertTrue(app.buttons["rack.pullTab"].waitForExistence(timeout: 5))
             play.tap()
             XCTAssertEqual(play.value as? String, "playing")
             XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, "available")
