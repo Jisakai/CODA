@@ -976,9 +976,9 @@ public final class MusicSession {
         try offlineSession.loadProjectDocument(doc)
         var exportMixer = mixerControls
         if includeMutedLayers {
-            exportMixer.chords.muted = 0
-            exportMixer.bass.muted = 0
-            exportMixer.melody.muted = 0
+            exportMixer.layers.0.muted = 0
+            exportMixer.layers.1.muted = 0
+            exportMixer.layers.2.muted = 0
         }
         offlineSession.applyMixerControls(exportMixer)
         let activeSteps = max(MusicDefaults.stepsPerBar, looping ? loop.length : editor.progression.totalSteps)

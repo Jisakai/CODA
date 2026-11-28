@@ -2000,7 +2000,9 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     func testOfflineWAVExportProducesValid24BitStereoRIFF() throws {
-        let wav = MusicSession.encodeWAV24Stereo(interleavedFloatData: [0.0, 0.0, 0.25, -0.25, 0.5, -0.5, 0.0, 0.0], sampleRate: 48_000)
+        let samples: [Float] = [0.0, 0.0, 0.25, -0.25, 0.5, -0.5, 0.0, 0.0]
+        let rawData = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        let wav = MusicSession.encodeWAV24Stereo(interleavedFloatData: rawData, sampleRate: 48_000)
         XCTAssertGreaterThan(wav.count, 44)
         XCTAssertEqual(String(data: wav.subdata(in: 0..<4), encoding: .ascii), "RIFF")
         XCTAssertEqual(String(data: wav.subdata(in: 8..<12), encoding: .ascii), "WAVE")
