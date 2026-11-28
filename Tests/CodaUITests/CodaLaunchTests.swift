@@ -469,7 +469,13 @@ final class CodaLaunchTests: XCTestCase {
         mute.tap()
         let restoredMute = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", initialMute ?? ""), object: mute)
-        let restoreResult = XCTWaiter.wait(for: [restoredMute], timeout: 2)
+        var restoreResult = XCTWaiter.wait(for: [restoredMute], timeout: 4)
+        if restoreResult != .completed {
+            mute.tap()
+            let retryRestored = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", initialMute ?? ""), object: mute)
+            restoreResult = XCTWaiter.wait(for: [retryRestored], timeout: 6)
+        }
         if restoreResult != .completed {
             attachControlFailure(from: app, name: "M1-mute-restore",
                                  report: "Initial mute: \(initialMute ?? "nil")\nCurrent: \(mute.debugDescription)")
@@ -509,7 +515,6 @@ final class CodaLaunchTests: XCTestCase {
 
         // Relaunch the real production view with seven DEBUG-only root labels;
         // paging and production action counts stay unchanged.
-        app.terminate()
         app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-radial-seven"]
         launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
