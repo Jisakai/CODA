@@ -65,6 +65,7 @@ public final class SidekickEngine {
     public private(set) var messages: [SidekickMessage] = []
     public private(set) var isStreaming: Bool = false
     public private(set) var modelState: SidekickModelState = .notDownloaded
+    public private(set) var downloadProgress: SidekickDownloadProgress?
     public private(set) var activeGhosts: [GhostChordProposal] = []
     public private(set) var lastDirective: SidekickDirective?
     public var isTyping: Bool = false
@@ -91,16 +92,28 @@ public final class SidekickEngine {
     }
 
     public func startModelDownload() {
+        if case .downloading = modelState { return }
+        let initial = SidekickDownloadProgress(
+            fraction: 0.0,
+            completedBytes: 0,
+            totalBytes: SidekickModelConfig.estimatedDownloadBytes,
+            statusText: "Connecting to Hugging Face…"
+        )
+        self.downloadProgress = initial
+        self.modelState = .downloading(progress: 0.0)
         Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.modelManager.ensureModelReady { progress in
                     Task { @MainActor [weak self] in
-                        self?.modelState = .downloading(progress: progress)
+                        self?.downloadProgress = progress
+                        self?.modelState = .downloading(progress: progress.fraction)
                     }
                 }
+                self.downloadProgress = nil
                 self.modelState = await self.modelManager.state
             } catch {
+                self.downloadProgress = nil
                 self.modelState = await self.modelManager.state
             }
         }
@@ -110,6 +123,7 @@ public final class SidekickEngine {
         Task { [weak self] in
             guard let self else { return }
             await self.modelManager.cancelDownload()
+            self.downloadProgress = nil
             self.modelState = await self.modelManager.state
         }
     }
@@ -149,7 +163,13 @@ public final class SidekickEngine {
             do {
                 let stream = await self.modelManager.streamCompletion(
                     systemInstructions: instructions,
-                    userMessage: trimmed
+                    userMessage: trimmed,
+                    onDownloadProgress: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.downloadProgress = progress
+                            self?.modelState = .downloading(progress: progress.fraction)
+                        }
+                    }
                 )
                 for try await chunk in stream {
                     if Task.isCancelled { break }
@@ -162,6 +182,7 @@ public final class SidekickEngine {
                 if !tail.isEmpty {
                     self.appendVisibleText(tail, to: assistantID)
                 }
+                self.downloadProgress = nil
                 self.modelState = await self.modelManager.state
                 if let directive = parser.parsedDirective {
                     self.lastDirective = directive

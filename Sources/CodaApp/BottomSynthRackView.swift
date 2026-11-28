@@ -26,9 +26,12 @@ struct BottomSynthRackView: View {
             rackHeader
                 .padding(.horizontal, 18)
                 .frame(height: 44)
+                .background(Color.clear)
+                .contentShape(Rectangle())
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
                 }
+                .zIndex(2)
 
             ScrollView {
                 switch store.synthRackTab {
@@ -40,6 +43,7 @@ struct BottomSynthRackView: View {
                     soundFontImportContent
                 }
             }
+            .clipped()
             .scrollIndicators(.hidden)
             .accessibilityIdentifier("drawer.synthScroll")
         }
@@ -92,7 +96,7 @@ struct BottomSynthRackView: View {
                 Image(systemName: "chevron.down.circle.fill")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 36, height: 36)
                     .background(Color.white.opacity(0.06), in: Circle())
                     .contentShape(Rectangle())
             }

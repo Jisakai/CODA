@@ -655,7 +655,7 @@ final class EditorStoreRegressionTests: XCTestCase {
         for (family, ring) in [(ChordFamily.major, RadialRing.major), (.minor, .minor), (.odd, .odd)] {
             for index in store.qualities(for: family).indices {
                 store.openSqueeze(at: CGPoint(x: 100, y: 100))
-                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: CodaEditorStore.radialOuterAllSlotIndex))
                 let expected = store.qualities(for: family)[index].id
                 store.pencilTouchEnded(at: try point(store, ring: ring, slot: index))
                 XCTAssertEqual(store.regions.first?.chord.root, 0)
@@ -673,7 +673,9 @@ final class EditorStoreRegressionTests: XCTestCase {
             let before = session.editor.progression
             store.openSqueeze(at: CGPoint(x: 100, y: 100))
             store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 0))
-            let rootPoint = try point(store, ring: .roots, slot: root)
+            let ranked = store.rankedRoots(for: store.radial)
+            let rootSlot = try XCTUnwrap(ranked.firstIndex(of: root))
+            let rootPoint = try point(store, ring: .roots, slot: rootSlot)
             XCTAssertEqual(session.editor.progression, before, "Paging must never edit music")
             store.pencilTouchEnded(at: rootPoint)
             XCTAssertEqual(session.editor.progression, before, "Choosing a draft root must remain reversible by cancel")
@@ -1475,7 +1477,9 @@ final class EditorStoreRegressionTests: XCTestCase {
     @MainActor
     private func point(_ store: CodaEditorStore, ring: RadialRing, slot: Int) throws -> CGPoint {
         if ring == .roots || ring == .major || ring == .minor || ring == .odd {
-            let desiredPage = slot / RadialPage.capacity
+            let initialState = try XCTUnwrap(store.radial)
+            let capacity = store.radialPageCapacity(for: ring, state: initialState)
+            let desiredPage = slot / capacity
             while store.radial?.pages[ring, default: 0] != desiredPage {
                 let state = try XCTUnwrap(store.radial)
                 let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
@@ -1487,7 +1491,8 @@ final class EditorStoreRegressionTests: XCTestCase {
         }
         let state = try XCTUnwrap(store.radial)
         let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
-        let localSlot = ring == .inner || ring == .outer ? slot : slot % RadialPage.capacity
+        let capacity = store.radialPageCapacity(for: ring, state: state)
+        let localSlot = ring == .inner || ring == .outer ? slot : slot % capacity
         let circles = RadialRingLayout(count: layout.1.count, radius: layout.2,
             thickness: layout.3, direction: state.placement.direction)
         return circles.buttonCenter(slot: localSlot, center: state.center, scale: state.placement.scale)
@@ -1537,7 +1542,8 @@ final class EditorStoreRegressionTests: XCTestCase {
         store.openSqueeze(at: CGPoint(x: 100, y: 100))
         store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 0))
         XCTAssertEqual(store.radial?.mode, .roots)
-        store.pencilTouchEnded(at: try point(store, ring: .roots, slot: 7))
+        let gSlot = try XCTUnwrap(store.rankedRoots(for: store.radial).firstIndex(of: 7))
+        store.pencilTouchEnded(at: try point(store, ring: .roots, slot: gSlot))
         XCTAssertEqual(store.radial?.mode, .all)
         XCTAssertEqual(store.radial?.draft?.root, 7)
         XCTAssertEqual(session.editor.progression, original)
@@ -1548,7 +1554,8 @@ final class EditorStoreRegressionTests: XCTestCase {
 
         store.openSqueeze(at: CGPoint(x: 100, y: 100))
         store.pencilTouchEnded(at: try point(store, ring: .inner, slot: 0))
-        store.pencilTouchEnded(at: try point(store, ring: .roots, slot: 7))
+        let gSlotSecond = try XCTUnwrap(store.rankedRoots(for: store.radial).firstIndex(of: 7))
+        store.pencilTouchEnded(at: try point(store, ring: .roots, slot: gSlotSecond))
         let slot = try XCTUnwrap(store.qualities(for: .major).firstIndex { $0.id == "major7" })
         store.pencilTouchEnded(at: try point(store, ring: .major, slot: slot))
         XCTAssertEqual(store.regions.first?.chord, try Chord(root: 7, qualityID: "major7"))
@@ -1567,7 +1574,7 @@ final class EditorStoreRegressionTests: XCTestCase {
         store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 0))
         XCTAssertEqual(store.regions.first?.chord.root, 0)
         store.openSqueeze(at: CGPoint(x: 100, y: 100))
-        store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+        store.pencilTouchEnded(at: try point(store, ring: .outer, slot: CodaEditorStore.radialOuterAllSlotIndex))
         let slot = try XCTUnwrap(store.qualities(for: .major).firstIndex { $0.id == "major7" })
         store.pencilTouchEnded(at: try point(store, ring: .major, slot: slot))
         XCTAssertEqual(store.regions.first?.chord, try Chord(root: 0, qualityID: "major7"))

@@ -23,6 +23,8 @@ struct SidekickDrawerView: View {
 
             Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
 
+            modelDownloadBanner
+
             if !store.sidekick.activeGhosts.isEmpty {
                 ghostBar
                     .padding(.horizontal, 14)
@@ -111,9 +113,13 @@ struct SidekickDrawerView: View {
             Button {
                 store.sidekick.cancelModelDownload()
             } label: {
-                HStack(spacing: 4) {
-                    Text("Downloading \(Int((progress * 100).rounded()))%")
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(CodaDesignTokens.Colors.sidekickAccent)
+                    Text("\(Int((progress * 100).rounded()))%")
                         .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                        .monospacedDigit()
                     Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
                 }
                 .foregroundStyle(CodaDesignTokens.Colors.sidekickAccent)
@@ -138,11 +144,108 @@ struct SidekickDrawerView: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.white.opacity(0.05), in: Capsule())
         case .offlineUnavailable, .memoryConstrained:
-            Text("Qwen3-4B Offline")
-                .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
+            Button {
+                store.sidekick.startModelDownload()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
+                    Text("Retry Model")
+                        .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                }
                 .foregroundStyle(CodaDesignTokens.Colors.danger)
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(CodaDesignTokens.Colors.danger.opacity(0.12), in: Capsule())
+                .background(CodaDesignTokens.Colors.danger.opacity(0.14), in: Capsule())
+            }
+            .accessibilityIdentifier("sidekick.model.retry")
+        }
+    }
+
+    @ViewBuilder
+    private var modelDownloadBanner: some View {
+        switch store.sidekick.modelState {
+        case .downloading(let progress):
+            let info = store.sidekick.downloadProgress ?? SidekickDownloadProgress(
+                fraction: progress,
+                completedBytes: 0,
+                totalBytes: SidekickModelConfig.estimatedDownloadBytes,
+                statusText: "Downloading Qwen3-4B…"
+            )
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(CodaDesignTokens.Colors.sidekickAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(info.statusText)
+                            .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                            .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                            .lineLimit(1)
+                        Text("\(info.percentInt)% · \(info.formattedBytes)")
+                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                    }
+                    Spacer(minLength: 6)
+                    Button {
+                        store.sidekick.cancelModelDownload()
+                    } label: {
+                        Text("Cancel")
+                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                            .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.white.opacity(0.07), in: Capsule())
+                    }
+                    .accessibilityIdentifier("sidekick.model.cancelBanner")
+                }
+
+                ProgressView(value: max(0.0, min(1.0, info.fraction)))
+                    .progressViewStyle(.linear)
+                    .tint(CodaDesignTokens.Colors.sidekickAccent)
+                    .accessibilityIdentifier("sidekick.model.progressBar")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(CodaDesignTokens.Colors.sidekickAccent.opacity(0.07))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
+            }
+            .accessibilityIdentifier("sidekick.model.downloadBanner")
+
+        case .offlineUnavailable(let message), .memoryConstrained(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(CodaDesignTokens.Colors.danger)
+                    Text("Model Download Issue")
+                        .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                        .foregroundStyle(CodaDesignTokens.Colors.danger)
+                    Spacer()
+                    Button {
+                        store.sidekick.startModelDownload()
+                    } label: {
+                        Text("Retry")
+                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                            .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(.white.opacity(0.10), in: Capsule())
+                    }
+                }
+                Text(message)
+                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .medium))
+                    .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(CodaDesignTokens.Colors.danger.opacity(0.08))
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
+            }
+            .accessibilityIdentifier("sidekick.model.errorBanner")
+
+        default:
+            EmptyView()
         }
     }
 

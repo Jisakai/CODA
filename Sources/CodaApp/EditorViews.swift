@@ -467,7 +467,7 @@ private struct EditorTopBar: View {
                     Circle().fill(store.controls.muted == 0 ? CodaDesignTokens.Colors.chord : .clear)
                         .overlay(Circle().stroke(CodaDesignTokens.Colors.chord.opacity(0.55), lineWidth: 1.5))
                         .frame(width: 12, height: 12)
-                        .frame(width: 26, height: 30)
+                        .frame(width: 28, height: 32)
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("top.chordMute")
@@ -975,31 +975,27 @@ private struct PianoRollView: View {
                         .offset(y: y)
                 }
 
-                // Crisp modern pitch label (always prominent on C octaves, subtle on other natural keys)
-                if octave || (!accidental && row >= 17) {
-                    HStack(spacing: 3) {
-                        Spacer(minLength: 0)
-                        if octave {
-                            Circle()
-                                .fill(store.activeTrackColor.opacity(0.85))
-                                .frame(width: 3.5, height: 3.5)
-                        }
-                        Text(store.pitchName(midi))
-                            .font(CodaDesignTokens.Typography.font(size: octave ? 9.5 : 8.5, weight: octave ? .bold : .medium))
-                            .foregroundStyle(octave ? CodaDesignTokens.Colors.primaryInk.opacity(0.92)
-                                                    : CodaDesignTokens.Colors.mutedInk.opacity(0.55))
+                // Crisp modern pitch label (prominent on C octaves, subtle on natural keys,
+                // hidden visually on accidentals while preserving every semitone AX staticText)
+                let showVisibleLabel = octave || (!accidental && row >= 17)
+                HStack(spacing: 3) {
+                    Spacer(minLength: 0)
+                    if octave {
+                        Circle()
+                            .fill(store.activeTrackColor.opacity(0.85))
+                            .frame(width: 3.5, height: 3.5)
                     }
-                    .padding(.trailing, 5)
-                    .frame(width: gutterWidth, height: row, alignment: .trailing)
-                    .offset(y: y)
-                    .accessibilityIdentifier("roll.pitch.\(midi)")
-                } else {
-                    Color.clear
-                        .frame(width: gutterWidth, height: row)
-                        .offset(y: y)
-                        .accessibilityLabel(store.pitchName(midi))
+                    Text(store.pitchName(midi))
+                        .font(CodaDesignTokens.Typography.font(size: octave ? 9.5 : 8.5, weight: octave ? .bold : .medium))
+                        .foregroundStyle(
+                            octave ? CodaDesignTokens.Colors.primaryInk.opacity(0.92)
+                                   : (showVisibleLabel ? CodaDesignTokens.Colors.mutedInk.opacity(0.55) : Color.clear)
+                        )
                         .accessibilityIdentifier("roll.pitch.\(midi)")
                 }
+                .padding(.trailing, 5)
+                .frame(width: gutterWidth, height: row, alignment: .trailing)
+                .offset(y: y)
             }
             // Crisp vertical hairline divider separating piano keys from grid
             Rectangle()
@@ -1702,14 +1698,83 @@ private struct EditorSettingsPopover: View {
             Text("ON-DEVICE AI SIDEKICK (QWEN3-4B-4BIT)")
                 .font(CodaDesignTokens.Typography.font(size: 10, weight: .black))
                 .foregroundStyle(CodaDesignTokens.Colors.sidekick)
-            HStack {
-                Text(sidekickModelStatusText)
-                    .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
-                    .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
-                Spacer()
-                if case .ready = store.sidekick.modelState {
-                    EmptyView()
-                } else {
+
+            switch store.sidekick.modelState {
+            case .downloading(let progress):
+                let info = store.sidekick.downloadProgress ?? SidekickDownloadProgress(
+                    fraction: progress,
+                    completedBytes: 0,
+                    totalBytes: SidekickModelConfig.estimatedDownloadBytes,
+                    statusText: "Downloading Qwen3-4B…"
+                )
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(CodaDesignTokens.Colors.sidekick)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(info.statusText)
+                                .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                                .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                                .lineLimit(1)
+                            Text("\(info.percentInt)% · \(info.formattedBytes)")
+                                .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                        }
+                        Spacer()
+                        Button { store.sidekick.cancelModelDownload() } label: {
+                            Text("Cancel")
+                                .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color.white.opacity(0.08), in: Capsule())
+                                .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                        }
+                        .accessibilityIdentifier("settings.model.cancel")
+                    }
+                    ProgressView(value: max(0.0, min(1.0, info.fraction)))
+                        .progressViewStyle(.linear)
+                        .tint(CodaDesignTokens.Colors.sidekick)
+                        .accessibilityIdentifier("settings.model.progressBar")
+                }
+
+            case .ready, .loaded:
+                HStack(spacing: 6) {
+                    Circle().fill(CodaDesignTokens.Colors.bass).frame(width: 7, height: 7)
+                    Text(sidekickModelStatusText)
+                        .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                        .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                    Spacer()
+                }
+
+            case .offlineUnavailable(let message), .memoryConstrained(let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Download failed")
+                            .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                            .foregroundStyle(CodaDesignTokens.Colors.danger)
+                        Spacer()
+                        Button { store.sidekick.startModelDownload() } label: {
+                            Text("Retry")
+                                .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(CodaDesignTokens.Colors.sidekick.opacity(0.20), in: Capsule())
+                                .foregroundStyle(CodaDesignTokens.Colors.sidekick)
+                        }
+                        .accessibilityIdentifier("settings.model.retry")
+                    }
+                    Text(message)
+                        .font(CodaDesignTokens.Typography.font(size: 10, weight: .medium))
+                        .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+            default:
+                HStack {
+                    Text(sidekickModelStatusText)
+                        .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+                        .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                    Spacer()
                     Button { store.sidekick.startModelDownload() } label: {
                         Text("Download 2.3 GB")
                             .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
@@ -1717,6 +1782,7 @@ private struct EditorSettingsPopover: View {
                             .background(CodaDesignTokens.Colors.sidekick.opacity(0.20), in: Capsule())
                             .foregroundStyle(CodaDesignTokens.Colors.sidekick)
                     }
+                    .accessibilityIdentifier("settings.model.download")
                 }
             }
 
