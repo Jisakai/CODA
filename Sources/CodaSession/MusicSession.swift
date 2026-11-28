@@ -41,17 +41,93 @@ private struct PreparedPlan {
     let step: Int
 }
 
+/// An additional user-added synth/plugin layer (DSP slots 3..<12) so users can
+/// overlay multiple Chord, Bass, or Melody synths simultaneously.
+public struct ExtraLayerTrack: Identifiable, Equatable, Sendable {
+    public let id: String
+    public var name: String
+    public let kind: MusicLayer
+    public let dspSlot: Int
+    public var preset: UInt8
+    public var wobble: Float
+    public var warmth: Float
+    public var cutoff: Float
+    public var resonance: Float
+    public var shape: Float
+    public var detune: Float
+    public var glide: Float
+    public var level: Float
+    public var muted: Bool
+    public var pluginID: String?
+    public var notes: [RollNote]
+
+    public var layerControls: CodaLayerControls {
+        var lc = CodaLayerControls()
+        lc.wobble = wobble
+        lc.warmth = warmth
+        lc.cutoff = cutoff
+        lc.resonance = resonance
+        lc.shape = shape
+        lc.detune = detune
+        lc.glide = glide
+        lc.level = level
+        lc.preset = preset
+        lc.muted = muted ? 1 : 0
+        return lc
+    }
+
+    public mutating func apply(_ controls: CodaLayerControls) {
+        wobble = controls.wobble
+        warmth = controls.warmth
+        cutoff = controls.cutoff
+        resonance = controls.resonance
+        shape = controls.shape
+        detune = controls.detune
+        glide = controls.glide
+        level = controls.level
+        preset = controls.preset
+        muted = controls.muted != 0
+    }
+}
+
 @MainActor @Observable
 public final class MusicSession {
     public let vocabulary: ChordVocabulary
     public let solver = VoiceLeadingSolver()
     public let suggestions = RuleBasedChordSuggestions()
+    public let predictor: CoreMLChordPredictor
+    public let pluginHost = PluginHostManager()
+    public private(set) var key: MusicalKey = MusicDefaults.key
     public private(set) var editor: ProgressionEditor
     public private(set) var patterns: PatternArrangement
-    private enum HistoryEntry {
-        case chord
-        case pattern(PatternArrangement, PatternArrangement)
+    public private(set) var bassTrack: BassTrack = .empty
+    public private(set) var melodyTrack: MelodyTrack = .empty
+    public private(set) var extraLayers: [ExtraLayerTrack] = []
+    public private(set) var activeExtraLayerID: String? = nil
+    public private(set) var mixerControls: CodaMixerControls
+    public private(set) var projectID: String = UUID().uuidString
+    public private(set) var projectName: String = "Untitled Sketch"
+    public private(set) var projectCreatedAt: Date = Date()
+    public private(set) var abSnapshot: ProjectABSnapshot?
+    public private(set) var showingSnapshotB: Bool = false
+
+    private struct SessionStateSnapshot {
+        let progression: Progression
+        let patterns: PatternArrangement
+        let bassTrack: BassTrack
+        let melodyTrack: MelodyTrack
+        let key: MusicalKey
+        let loop: LoopSpan
     }
+
+    private enum HistoryEntry {
+        case chord(bassBefore: BassTrack, bassAfter: BassTrack)
+        case pattern(PatternArrangement, PatternArrangement)
+        case bass(BassTrack, BassTrack)
+        case melody(MelodyTrack, MelodyTrack)
+        case full(before: SessionStateSnapshot, after: SessionStateSnapshot, usesEditorHistory: Bool)
+    }
+
     private var undoHistory: [HistoryEntry] = []
     private var redoHistory: [HistoryEntry] = []
     public var canUndo: Bool { !undoHistory.isEmpty }
@@ -78,6 +154,7 @@ public final class MusicSession {
     @ObservationIgnored private var activeSource: PerformanceCycleSource?
     @ObservationIgnored private var activeGeneration: UInt64 = 0
     @ObservationIgnored private var pendingControls: [CodaControls] = []
+    @ObservationIgnored private var pendingMixerControls: [CodaMixerControls] = []
     @ObservationIgnored private var retry: Task<Void, Never>?
     @ObservationIgnored private let audioObservers = AudioObservationTokens()
     @ObservationIgnored private(set) var lifecycleEpoch = UUID()
@@ -92,10 +169,14 @@ public final class MusicSession {
     public init(vocabulary: ChordVocabulary, offline: Bool = false) throws {
         self.vocabulary = vocabulary
         self.offline = offline
-        editor = ProgressionEditor(try Progression(vocabulary: vocabulary))
-        patterns = try PatternArrangement()
-        loop = try LoopSpan()
+        self.predictor = CoreMLChordPredictor(vocabulary: vocabulary, key: MusicDefaults.key)
+        self.editor = ProgressionEditor(try Progression(vocabulary: vocabulary))
+        self.patterns = try PatternArrangement()
+        self.loop = try LoopSpan()
+        self.mixerControls = coda_dsp_default_mixer_controls()
+        self.mixerControls.tempo_bpm = Float(MusicDefaults.tempo)
         coda_dsp_default_controls(0, &controls)
+        syncLegacyControlsFromMixer()
     }
 
     /// Lazy output-only startup. Ordinary empty launch does not start hardware.
@@ -106,7 +187,12 @@ public final class MusicSession {
             let plan = try preparePlan()
             try audio.start()
             available = true
-            if pendingControls.isEmpty { pendingControls.append(controls) }
+            if pendingControls.isEmpty && pendingMixerControls.isEmpty {
+                pendingMixerControls.append(mixerControls)
+            }
+            for track in extraLayers {
+                publishTrackControlsToNative(track)
+            }
             commitPlan(plan)
             observeAudioLifecycle()
             pump()
@@ -116,8 +202,10 @@ public final class MusicSession {
             let savedPlaying = playing, savedIntent = playbackIntent, savedStep = requestedStep
             // Failed startup must retain unpublished preset/mute edges for retry.
             let savedControls = pendingControls
+            let savedMixer = pendingMixerControls
             suspend()
             pendingControls = savedControls
+            pendingMixerControls = savedMixer
             playbackRevision = savedPlayback; positionRevision = savedPosition
             playing = savedPlaying; playbackIntent = savedIntent; requestedStep = savedStep
             self.error = String(describing: error)
@@ -137,6 +225,7 @@ public final class MusicSession {
         legacyUnconsumed.removeAll()
         activeSource = nil; activeGeneration = 0
         pendingControls.removeAll()
+        pendingMixerControls.removeAll()
         audio.close()
         available = false; playing = false; renderedPlaying = false
         // Reopen creates a fresh native epoch; retire all old commands.
@@ -169,6 +258,7 @@ public final class MusicSession {
         try validateControls(next)
         // No fallible work or publication follows the first state mutation.
         tempo = value
+        mixerControls.tempo_bpm = Float(value)
         enqueueControls(next)
         commitPlan(plan)
     }
@@ -181,11 +271,29 @@ public final class MusicSession {
     public func edit(_ edits: [ProgressionEdit]) throws {
         var candidate = editor
         try candidate.apply(edits, vocabulary: vocabulary, solver: solver)
-        let plan = try preparePlan(progression: candidate.progression)
         guard candidate.progression != editor.progression else { return }
+        let nextBass = reconciledBass(from: editor.progression, to: candidate.progression)
+        let resizedPatterns = try PatternArrangement(
+            barCount: candidate.progression.totalSteps / MusicDefaults.stepsPerBar,
+            regions: patterns.regions
+        )
+        let plan = try preparePlan(progression: candidate.progression, arrangement: resizedPatterns, bass: nextBass)
+        let previousBass = bassTrack
         editor = candidate
-        undoHistory.append(.chord); redoHistory.removeAll()
+        patterns = resizedPatterns
+        bassTrack = nextBass
+        undoHistory.append(.chord(bassBefore: previousBass, bassAfter: nextBass))
+        redoHistory.removeAll()
         commitPlan(plan)
+    }
+    public func extendArrangement(through end: Int) throws {
+        var candidate = editor
+        try candidate.extendExtent(through: end, vocabulary: vocabulary)
+        guard candidate.progression.totalSteps != editor.progression.totalSteps else { return }
+        let next = try PatternArrangement(barCount: candidate.progression.totalSteps / MusicDefaults.stepsPerBar,
+            regions: patterns.regions)
+        let plan = try preparePlan(progression: candidate.progression, arrangement: next)
+        editor = candidate; patterns = next; commitPlan(plan)
     }
     public func editPatterns(_ edits: [PatternEdit]) throws {
         let next = try PatternEditor(patterns).preview(edits)
@@ -194,22 +302,745 @@ public final class MusicSession {
         undoHistory.append(.pattern(patterns, next)); redoHistory.removeAll()
         patterns = next; commitPlan(plan)
     }
+
+    // MARK: - 3-Layer Tracks & Mixer Controls
+
+    public func layerControls(for layer: MusicLayer) -> CodaLayerControls {
+        switch layer {
+        case .chords: return mixerControls.layers.0
+        case .bass: return mixerControls.layers.1
+        case .melody: return mixerControls.layers.2
+        }
+    }
+
+    public func setLayerControls(_ controls: CodaLayerControls, for layer: MusicLayer) {
+        let floats = [controls.wobble, controls.warmth, controls.cutoff, controls.resonance,
+                      controls.shape, controls.detune, controls.glide, controls.level]
+        guard floats.allSatisfy({ $0.isFinite }), controls.preset <= 2 else { return }
+        var next = mixerControls
+        switch layer {
+        case .chords: next.layers.0 = controls
+        case .bass: next.layers.1 = controls
+        case .melody: next.layers.2 = controls
+        }
+        applyMixerControls(next)
+    }
+
+    public func setSharedFX(delay: Float, reverb: Float) {
+        setSharedFX(chorus: mixerControls.chorus_amount, delay: delay, reverb: reverb)
+    }
+
+    public func setSharedFX(chorus: Float, delay: Float, reverb: Float) {
+        guard chorus.isFinite, delay.isFinite, reverb.isFinite else { return }
+        var next = mixerControls
+        next.chorus_amount = min(1, max(0, chorus))
+        next.delay_amount = min(1, max(0, delay))
+        next.reverb_amount = min(1, max(0, reverb))
+        applyMixerControls(next)
+    }
+
+    // MARK: - Multi-Layer Extra Tracks (DSP slots 3..<12)
+
+    @discardableResult
+    public func addExtraLayer(kind: MusicLayer, name: String? = nil) -> ExtraLayerTrack? {
+        let usedSlots = Set(extraLayers.map(\.dspSlot))
+        guard let freeSlot = (Int(CODA_LAYER_COUNT)..<Int(CODA_MAX_TRACKS)).first(where: { !usedSlots.contains($0) }) else {
+            return nil
+        }
+        let sameKindCount = extraLayers.filter { $0.kind == kind }.count + 2
+        let baseName: String
+        switch kind {
+        case .chords: baseName = "Chords \(sameKindCount)"
+        case .bass: baseName = "Bass \(sameKindCount)"
+        case .melody: baseName = "Melody \(sameKindCount)"
+        }
+        let defaults = layerControls(for: kind)
+        let track = ExtraLayerTrack(
+            id: UUID().uuidString,
+            name: name ?? baseName,
+            kind: kind,
+            dspSlot: freeSlot,
+            preset: defaults.preset,
+            wobble: defaults.wobble,
+            warmth: defaults.warmth,
+            cutoff: defaults.cutoff,
+            resonance: defaults.resonance,
+            shape: defaults.shape,
+            detune: defaults.detune,
+            glide: defaults.glide,
+            level: defaults.level,
+            muted: false,
+            pluginID: nil,
+            notes: []
+        )
+        extraLayers.append(track)
+        activeExtraLayerID = track.id
+        publishTrackControlsToNative(track)
+        return track
+    }
+
+    public func removeExtraLayer(id: String) {
+        guard let idx = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        var removed = extraLayers.remove(at: idx)
+        removed.muted = true
+        publishTrackControlsToNative(removed)
+        if activeExtraLayerID == id { activeExtraLayerID = nil }
+        try? schedule()
+    }
+
+    public func selectExtraLayer(id: String?) {
+        if let id, extraLayers.contains(where: { $0.id == id }) {
+            activeExtraLayerID = id
+        } else {
+            activeExtraLayerID = nil
+        }
+    }
+
+    public func setExtraLayerControls(_ controls: CodaLayerControls, for id: String) {
+        guard let idx = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        let floats = [controls.wobble, controls.warmth, controls.cutoff, controls.resonance,
+                      controls.shape, controls.detune, controls.glide, controls.level]
+        guard floats.allSatisfy({ $0.isFinite }), controls.preset <= 2 else { return }
+        extraLayers[idx].apply(controls)
+        publishTrackControlsToNative(extraLayers[idx])
+    }
+
+    public func setExtraLayerMuted(_ muted: Bool, for id: String) {
+        guard let idx = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[idx].muted = muted
+        publishTrackControlsToNative(extraLayers[idx])
+    }
+
+    public func setExtraLayerNotes(_ notes: [RollNote], for id: String) {
+        guard let idx = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[idx].notes = notes
+        try? schedule()
+    }
+
+    public func setExtraLayerPlugin(_ pluginID: String?, for id: String) {
+        guard let idx = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[idx].pluginID = pluginID
+    }
+
+    private func publishTrackControlsToNative(_ track: ExtraLayerTrack) {
+        guard available else { return }
+        _ = audio.publish(trackControls: track.layerControls,
+                          forTrack: UInt8(track.dspSlot),
+                          eqProfile: track.kind.nativeIndex)
+    }
+
+    public func isLayerMuted(_ layer: MusicLayer) -> Bool {
+        layerControls(for: layer).muted != 0
+    }
+
+    public func setLayerMuted(_ muted: Bool, for layer: MusicLayer) {
+        var lc = layerControls(for: layer)
+        lc.muted = muted ? 1 : 0
+        setLayerControls(lc, for: layer)
+    }
+
+    public func soloLayer(_ layer: MusicLayer) {
+        var next = mixerControls
+        next.layers.0.muted = layer == .chords ? 0 : 1
+        next.layers.1.muted = layer == .bass ? 0 : 1
+        next.layers.2.muted = layer == .melody ? 0 : 1
+        applyMixerControls(next)
+    }
+
+    public func unmuteAllLayers() {
+        var next = mixerControls
+        next.layers.0.muted = 0
+        next.layers.1.muted = 0
+        next.layers.2.muted = 0
+        applyMixerControls(next)
+    }
+
+    public func audition(pitches: [Int], layer: MusicLayer) {
+        let sorted = Array(Set(pitches.filter { (0...127).contains($0) })).sorted()
+        guard sorted.count <= 12 else { return }
+        do { try activate() } catch { return }
+        let values = sorted.map(UInt8.init)
+        let result = values.withUnsafeBufferPointer {
+            audio.audition(layer: layer.nativeIndex, pitches: $0.baseAddress,
+                           count: UInt32($0.count),
+                           frames: UInt32(audio.sampleRate * TransportConfiguration.auditionSeconds))
+        }
+        if result == 1 {
+            auditionPreviewOwner = nil
+            pendingPreviewStop = nil
+        }
+    }
+
+    public func setBassTrack(_ track: BassTrack) {
+        guard track != bassTrack else { return }
+        do {
+            let plan = try preparePlan(bass: track)
+            undoHistory.append(.bass(bassTrack, track))
+            redoHistory.removeAll()
+            bassTrack = track
+            commitPlan(plan)
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+
+    public func setMelodyTrack(_ track: MelodyTrack) {
+        guard track != melodyTrack else { return }
+        do {
+            let plan = try preparePlan(melody: track)
+            undoHistory.append(.melody(melodyTrack, track))
+            redoHistory.removeAll()
+            melodyTrack = track
+            commitPlan(plan)
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+
+    public func clearLayer(_ layer: MusicLayer) {
+        switch layer {
+        case .bass:
+            setBassTrack(.empty)
+        case .melody:
+            setMelodyTrack(.empty)
+        case .chords:
+            guard !editor.progression.regions.isEmpty else { return }
+            do {
+                var candidate = editor
+                let deletes = editor.progression.regions.map { ProgressionEdit.delete(id: $0.id) }
+                try candidate.apply(deletes, vocabulary: vocabulary, solver: solver)
+                let plan = try preparePlan(progression: candidate.progression)
+                editor = candidate
+                undoHistory.append(.chord(bassBefore: bassTrack, bassAfter: bassTrack))
+                redoHistory.removeAll()
+                commitPlan(plan)
+            } catch {
+                self.error = String(describing: error)
+            }
+        }
+    }
+
+    // MARK: - Musical QoL (Key, Transpose, + Bar, A/B, Ghost Chords)
+
+    public func setKey(_ key: MusicalKey) throws {
+        self.key = key
+        self.predictor.key = key
+    }
+
+    public func switchRelativeKey() throws {
+        let next: MusicalKey
+        switch key.mode {
+        case .major:
+            next = MusicalKey(tonic: key.tonic - 3, mode: .naturalMinor)
+        case .naturalMinor:
+            next = MusicalKey(tonic: key.tonic + 3, mode: .major)
+        }
+        try setKey(next)
+    }
+
+    public func transposeAll(semitones: Int) throws {
+        guard semitones != 0 else { return }
+        let before = currentSnapshot()
+        let nextKey = MusicalKey(tonic: key.tonic + semitones, mode: key.mode)
+
+        var candidate = editor
+        let hasRegions = !editor.progression.regions.isEmpty
+        if hasRegions {
+            let deltaPC = (semitones % 12 + 12) % 12
+            let replacements: [ProgressionEdit] = try editor.progression.regions.map { region in
+                let newRoot = (region.chord.root + deltaPC) % 12
+                let newSlash = region.chord.slashBass.map { ($0 + deltaPC) % 12 }
+                let newChord = try Chord(root: newRoot, qualityID: region.chord.qualityID, slashBass: newSlash)
+                let newNotes = try region.notes.map { note in
+                    try RollNote(
+                        id: note.id,
+                        startTick: note.startTick,
+                        durationTicks: note.durationTicks,
+                        pitch: note.pitch + semitones,
+                        velocity: note.velocity,
+                        slide: note.slide
+                    )
+                }
+                let newPitches = Array(Set(newNotes.map(\.pitch))).sorted()
+                let updated = try ChordRegion(
+                    id: region.id,
+                    chord: newChord,
+                    start: region.start,
+                    length: region.length,
+                    pitches: newPitches,
+                    notes: newNotes,
+                    detectionUncertain: region.detectionUncertain
+                )
+                return .replace(updated)
+            }
+            try candidate.apply(replacements, vocabulary: vocabulary, solver: solver)
+        }
+
+        let nextBass = try bassTrack.transposing(semitones: semitones)
+        let nextMelody = try melodyTrack.transposing(semitones: semitones)
+        let plan = try preparePlan(progression: candidate.progression, bass: nextBass, melody: nextMelody)
+
+        let after = SessionStateSnapshot(
+            progression: candidate.progression,
+            patterns: patterns,
+            bassTrack: nextBass,
+            melodyTrack: nextMelody,
+            key: nextKey,
+            loop: loop
+        )
+
+        key = nextKey
+        predictor.key = nextKey
+        editor = candidate
+        bassTrack = nextBass
+        melodyTrack = nextMelody
+        undoHistory.append(.full(before: before, after: after, usesEditorHistory: hasRegions))
+        redoHistory.removeAll()
+        commitPlan(plan)
+    }
+
+    public func duplicateBar(at barIndex: Int) throws {
+        let totalBars = editor.progression.totalSteps / MusicDefaults.stepsPerBar
+        guard barIndex >= 0, barIndex < totalBars else { throw MusicError.invalidSpan }
+        let before = currentSnapshot()
+
+        let barSteps = MusicDefaults.stepsPerBar
+        let barStartStep = barIndex * barSteps
+        let barEndStep = barStartStep + barSteps
+        let barTicks = barSteps * MusicDefaults.ticksPerStep
+        let barStartTick = barStartStep * MusicDefaults.ticksPerStep
+        let barEndTick = barEndStep * MusicDefaults.ticksPerStep
+        let newTotalBars = totalBars + 1
+        let newTotalSteps = newTotalBars * barSteps
+
+        // 1. Chords
+        var nextRegions: [ChordRegion] = []
+        for region in editor.progression.regions {
+            if region.end <= barStartStep {
+                nextRegions.append(region)
+            } else if region.start >= barEndStep {
+                nextRegions.append(try ChordRegion(
+                    id: region.id,
+                    chord: region.chord,
+                    start: region.start + barSteps,
+                    length: region.length,
+                    pitches: region.pitches,
+                    notes: region.notes,
+                    detectionUncertain: region.detectionUncertain
+                ))
+            } else if region.start >= barStartStep && region.end <= barEndStep {
+                nextRegions.append(region)
+                let dupID = "\(region.id)-dup-\(UUID().uuidString.prefix(8))"
+                let dupNotes = try region.notes.map { note in
+                    try RollNote(
+                        id: "\(dupID)-\(note.pitch)-\(note.startTick)",
+                        startTick: note.startTick,
+                        durationTicks: note.durationTicks,
+                        pitch: note.pitch,
+                        velocity: note.velocity,
+                        slide: note.slide
+                    )
+                }
+                nextRegions.append(try ChordRegion(
+                    id: dupID,
+                    chord: region.chord,
+                    start: region.start + barSteps,
+                    length: region.length,
+                    pitches: region.pitches,
+                    notes: dupNotes,
+                    detectionUncertain: region.detectionUncertain
+                ))
+            } else {
+                // Region spans across a boundary of the duplicated bar: extend by 1 bar.
+                let oldEndTicks = region.length * MusicDefaults.ticksPerStep
+                let newLength = region.length + barSteps
+                let newEndTicks = newLength * MusicDefaults.ticksPerStep
+                let stretchedNotes = try region.notes.map { note in
+                    try RollNote(
+                        id: note.id,
+                        startTick: note.startTick,
+                        durationTicks: note.endTick == oldEndTicks ? (newEndTicks - note.startTick) : note.durationTicks,
+                        pitch: note.pitch,
+                        velocity: note.velocity,
+                        slide: note.slide
+                    )
+                }
+                nextRegions.append(try ChordRegion(
+                    id: region.id,
+                    chord: region.chord,
+                    start: region.start,
+                    length: newLength,
+                    pitches: region.pitches,
+                    notes: stretchedNotes,
+                    detectionUncertain: region.detectionUncertain
+                ))
+            }
+        }
+        let nextProgression = try Progression(totalSteps: newTotalSteps, regions: nextRegions, vocabulary: vocabulary)
+
+        // 2. Bass
+        var nextBassNotes: [BassNote] = []
+        for note in bassTrack.notes {
+            if note.endTick <= barStartTick {
+                nextBassNotes.append(note)
+            } else if note.startTick >= barEndTick {
+                nextBassNotes.append(try BassNote(
+                    id: note.id,
+                    startTick: note.startTick + barTicks,
+                    durationTicks: note.durationTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    provenance: note.provenance,
+                    userEdited: note.userEdited
+                ))
+            } else if note.startTick >= barStartTick && note.endTick <= barEndTick {
+                nextBassNotes.append(note)
+                nextBassNotes.append(try BassNote(
+                    id: UUID().uuidString,
+                    startTick: note.startTick + barTicks,
+                    durationTicks: note.durationTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    provenance: note.provenance,
+                    userEdited: note.userEdited
+                ))
+            } else {
+                nextBassNotes.append(try BassNote(
+                    id: note.id,
+                    startTick: note.startTick,
+                    durationTicks: note.durationTicks + barTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    provenance: note.provenance,
+                    userEdited: note.userEdited
+                ))
+            }
+        }
+        let nextBass = try BassTrack(notes: nextBassNotes)
+
+        // 3. Melody
+        var nextMelodyNotes: [MelodyNote] = []
+        for note in melodyTrack.notes {
+            if note.endTick <= barStartTick {
+                nextMelodyNotes.append(note)
+            } else if note.startTick >= barEndTick {
+                nextMelodyNotes.append(try MelodyNote(
+                    id: note.id,
+                    startTick: note.startTick + barTicks,
+                    durationTicks: note.durationTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    nudgeTicks: note.nudgeTicks
+                ))
+            } else if note.startTick >= barStartTick && note.endTick <= barEndTick {
+                nextMelodyNotes.append(note)
+                nextMelodyNotes.append(try MelodyNote(
+                    id: UUID().uuidString,
+                    startTick: note.startTick + barTicks,
+                    durationTicks: note.durationTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    nudgeTicks: note.nudgeTicks
+                ))
+            } else {
+                nextMelodyNotes.append(try MelodyNote(
+                    id: note.id,
+                    startTick: note.startTick,
+                    durationTicks: note.durationTicks + barTicks,
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    slide: note.slide,
+                    nudgeTicks: note.nudgeTicks
+                ))
+            }
+        }
+        let nextMelody = try MelodyTrack(notes: nextMelodyNotes)
+
+        // 4. Patterns
+        let nextPatternRegions: [PatternRegion] = try patterns.regions.map { region in
+            if region.range.end <= barIndex {
+                return region
+            } else if region.range.start >= barIndex + 1 {
+                let shifted = try PatternBarRange(start: region.range.start + 1, length: region.range.length)
+                return try PatternRegion(id: region.id, range: shifted, slots: region.slots, settings: region.settings)
+            } else {
+                let extended = try PatternBarRange(start: region.range.start, length: region.range.length + 1)
+                return try PatternRegion(id: region.id, range: extended, slots: region.slots, settings: region.settings)
+            }
+        }
+        let nextPatterns = try PatternArrangement(barCount: newTotalBars, regions: nextPatternRegions)
+
+        let plan = try preparePlan(
+            progression: nextProgression,
+            arrangement: nextPatterns,
+            bass: nextBass,
+            melody: nextMelody
+        )
+
+        let after = SessionStateSnapshot(
+            progression: nextProgression,
+            patterns: nextPatterns,
+            bassTrack: nextBass,
+            melodyTrack: nextMelody,
+            key: key,
+            loop: loop
+        )
+
+        editor = ProgressionEditor(nextProgression)
+        patterns = nextPatterns
+        bassTrack = nextBass
+        melodyTrack = nextMelody
+        undoHistory.append(.full(before: before, after: after, usesEditorHistory: false))
+        redoHistory.removeAll()
+        commitPlan(plan)
+    }
+
+    public func captureABSnapshot() {
+        abSnapshot = makeProjectDocument().captureABSnapshot(label: "A")
+        showingSnapshotB = false
+    }
+
+    public func toggleABSnapshot() throws {
+        guard let target = abSnapshot else { return }
+        let current = makeProjectDocument().captureABSnapshot(label: showingSnapshotB ? "B" : "A")
+
+        let progression = try Progression(
+            totalSteps: target.arrangementTotalSteps,
+            regions: target.chordRegions,
+            vocabulary: vocabulary
+        )
+        let bass = try BassTrack(notes: target.bassNotes)
+        let melody = try MelodyTrack(notes: target.melodyNotes)
+        let nextPatterns = try PatternArrangement(
+            barCount: progression.totalSteps / MusicDefaults.stepsPerBar,
+            regions: target.patternArrangement.regions
+        )
+        let nextMixer = Self.mixerControls(from: target.synthState, tempo: target.tempo)
+        let plan = try preparePlan(
+            progression: progression,
+            arrangement: nextPatterns,
+            bass: bass,
+            melody: melody,
+            tempo: target.tempo,
+            loop: target.loopSpan,
+            looping: looping
+        )
+
+        tempo = target.tempo
+        key = target.key
+        predictor.key = target.key
+        loop = target.loopSpan
+        editor = ProgressionEditor(progression)
+        patterns = nextPatterns
+        bassTrack = bass
+        melodyTrack = melody
+        abSnapshot = current
+        showingSnapshotB.toggle()
+        applyMixerControls(nextMixer)
+        commitPlan(plan)
+    }
+
+    public func acceptGhostChords(_ proposals: [(startStep: Int, lengthSteps: Int, chord: Chord, pitches: [Int])]) throws {
+        guard !proposals.isEmpty else { return }
+        var edits: [ProgressionEdit] = []
+        var removedIDs = Set<String>()
+
+        for proposal in proposals {
+            let pStart = proposal.startStep
+            let pEnd = pStart + proposal.lengthSteps
+            for existing in editor.progression.regions where !removedIDs.contains(existing.id) {
+                if existing.start < pEnd && existing.end > pStart {
+                    removedIDs.insert(existing.id)
+                    edits.append(.delete(id: existing.id))
+                }
+            }
+            let region = try ChordRegion(
+                id: UUID().uuidString,
+                chord: proposal.chord,
+                start: pStart,
+                length: proposal.lengthSteps,
+                pitches: proposal.pitches
+            )
+            edits.append(.add(region))
+        }
+
+        // Delegates to edit(_:) for atomic 1-step undo + BassFollower sync; never touches melodyTrack.
+        try edit(edits)
+    }
+
+    // MARK: - Project Document Persistence & MIDI Export
+
+    public func makeProjectDocument(viewport: ViewportState = ViewportState()) -> CodaProjectDocument {
+        CodaProjectDocument(
+            schemaVersion: CodaProjectDocument.currentSchemaVersion,
+            id: projectID,
+            name: projectName,
+            createdAt: projectCreatedAt,
+            modifiedAt: Date(),
+            tempo: tempo,
+            key: key,
+            loopSpan: loop,
+            looping: looping,
+            arrangementTotalSteps: editor.progression.totalSteps,
+            chordRegions: editor.progression.regions,
+            bassNotes: bassTrack.notes,
+            melodyNotes: melodyTrack.notes,
+            patternArrangement: patterns,
+            synthState: Self.synthState(from: mixerControls),
+            viewport: viewport,
+            abSnapshot: abSnapshot
+        )
+    }
+
+    public func loadProjectDocument(_ document: CodaProjectDocument) throws {
+        guard document.tempo.isFinite, (30...300).contains(document.tempo) else {
+            throw MusicError.invalidTempo
+        }
+        let progression = try document.makeProgression(vocabulary: vocabulary)
+        guard document.loopSpan.end <= progression.totalSteps else {
+            throw MusicError.invalidSpan
+        }
+        let bass = try document.makeBassTrack()
+        let melody = try document.makeMelodyTrack()
+        let nextPatterns = try PatternArrangement(
+            barCount: progression.totalSteps / MusicDefaults.stepsPerBar,
+            regions: document.patternArrangement.regions
+        )
+        let nextMixer = Self.mixerControls(from: document.synthState, tempo: document.tempo)
+        let plan = try preparePlan(
+            progression: progression,
+            arrangement: nextPatterns,
+            bass: bass,
+            melody: melody,
+            tempo: document.tempo,
+            loop: document.loopSpan,
+            looping: document.looping,
+            seek: 0
+        )
+
+        projectID = document.id
+        projectName = document.name
+        projectCreatedAt = document.createdAt
+        tempo = document.tempo
+        key = document.key
+        predictor.key = document.key
+        loop = document.loopSpan
+        looping = document.looping
+        editor = ProgressionEditor(progression)
+        patterns = nextPatterns
+        bassTrack = bass
+        melodyTrack = melody
+        abSnapshot = document.abSnapshot
+        showingSnapshotB = false
+        undoHistory.removeAll()
+        redoHistory.removeAll()
+        applyMixerControls(nextMixer)
+        commitPlan(plan)
+    }
+
+    public func exportMIDI(includeMutedLayers: Bool = false) throws -> Data {
+        let options = MIDIExportOptions(
+            mutedLayers: currentMutedLayers,
+            respectMutes: !includeMutedLayers
+        )
+        return try MIDIExporter.export(
+            progression: editor.progression,
+            patternArrangement: patterns,
+            bass: bassTrack,
+            melody: melodyTrack,
+            tempo: tempo,
+            key: key,
+            projectName: projectName,
+            options: options
+        )
+    }
+
+    // MARK: - Unified Undo / Redo
+
     public func undo() throws { try moveHistory(undoing: true) }
     public func redo() throws { try moveHistory(undoing: false) }
+
     private func moveHistory(undoing: Bool) throws {
         guard let entry = (undoing ? undoHistory : redoHistory).last else { return }
         var candidate = editor
-        var next = patterns
+        var nextPatterns = patterns
+        var nextBass = bassTrack
+        var nextMelody = melodyTrack
+        var nextKey = key
+        var nextLoop = loop
+
         switch entry {
-        case .chord:
+        case .chord(let bassBefore, let bassAfter):
             guard undoing ? candidate.undo() : candidate.redo() else { throw AudioSessionError.invalidPlan }
-        case .pattern(let before, let after): next = undoing ? before : after
+            try candidate.extendExtent(through: max(editor.progression.totalSteps, loop.end), vocabulary: vocabulary)
+            nextPatterns = try PatternArrangement(
+                barCount: candidate.progression.totalSteps / MusicDefaults.stepsPerBar,
+                regions: nextPatterns.regions
+            )
+            nextBass = undoing ? bassBefore : bassAfter
+
+        case .pattern(let before, let after):
+            let chosen = undoing ? before : after
+            try candidate.extendExtent(through: max(editor.progression.totalSteps, loop.end), vocabulary: vocabulary)
+            nextPatterns = try PatternArrangement(
+                barCount: candidate.progression.totalSteps / MusicDefaults.stepsPerBar,
+                regions: chosen.regions
+            )
+
+        case .bass(let before, let after):
+            nextBass = undoing ? before : after
+
+        case .melody(let before, let after):
+            nextMelody = undoing ? before : after
+
+        case .full(let before, let after, let usesEditorHistory):
+            let target = undoing ? before : after
+            if usesEditorHistory {
+                guard undoing ? candidate.undo() : candidate.redo() else { throw AudioSessionError.invalidPlan }
+            } else {
+                candidate = ProgressionEditor(target.progression)
+            }
+            nextLoop = target.loop
+            if candidate.progression.totalSteps < nextLoop.end {
+                try candidate.extendExtent(through: nextLoop.end, vocabulary: vocabulary)
+            }
+            nextPatterns = try PatternArrangement(
+                barCount: candidate.progression.totalSteps / MusicDefaults.stepsPerBar,
+                regions: target.patterns.regions
+            )
+            nextBass = target.bassTrack
+            nextMelody = target.melodyTrack
+            nextKey = target.key
         }
-        let plan = try preparePlan(progression: candidate.progression, arrangement: next)
+
+        let plan = try preparePlan(
+            progression: candidate.progression,
+            arrangement: nextPatterns,
+            bass: nextBass,
+            melody: nextMelody,
+            loop: nextLoop
+        )
+
         if undoing { undoHistory.removeLast(); redoHistory.append(entry) }
         else { redoHistory.removeLast(); undoHistory.append(entry) }
-        editor = candidate; patterns = next; commitPlan(plan)
+
+        editor = candidate
+        patterns = nextPatterns
+        bassTrack = nextBass
+        melodyTrack = nextMelody
+        key = nextKey
+        predictor.key = nextKey
+        loop = nextLoop
+        commitPlan(plan)
     }
+
+    // MARK: - Audition & Legacy Controls
+
     public func audition(regionID: String) throws { try audition(pitches: editor.audition(id: regionID)) }
     public func audition(chord: Chord) throws {
         try audition(pitches: solver.solve([chord], vocabulary: vocabulary)[0])
@@ -241,11 +1072,14 @@ public final class MusicSession {
         pendingPreviewStop = owner
         pump()
     }
+
     public func setControls(_ value: CodaControls) throws {
         try validateControls(value)
         enqueueControls(value)
+        syncMixerFromLegacyControls(value)
         if available { pump() }
     }
+
     private func validateControls(_ value: CodaControls) throws {
         let values = [value.wobble, value.warmth, value.cutoff, value.resonance, value.shape,
                       value.detune, value.glide, value.delay_amount, value.reverb_amount, value.chord_level]
@@ -256,6 +1090,7 @@ public final class MusicSession {
             throw AudioSessionError.capacity
         }
     }
+
     private func enqueueControls(_ value: CodaControls) {
         // Coalesce only continuous changes with identical preset/mute. Preserve
         // mute/unmute and preset edges in FIFO order through backpressure.
@@ -266,6 +1101,157 @@ public final class MusicSession {
         }
         controls = value
     }
+
+    private func applyMixerControls(_ next: CodaMixerControls) {
+        mixerControls = next
+        syncLegacyControlsFromMixer()
+        if let last = pendingMixerControls.last,
+           last.layers.0.preset == next.layers.0.preset && last.layers.0.muted == next.layers.0.muted &&
+           last.layers.1.preset == next.layers.1.preset && last.layers.1.muted == next.layers.1.muted &&
+           last.layers.2.preset == next.layers.2.preset && last.layers.2.muted == next.layers.2.muted {
+            pendingMixerControls[pendingMixerControls.count - 1] = next
+        } else if pendingMixerControls.count < TransportConfiguration.pendingControls {
+            pendingMixerControls.append(next)
+        } else {
+            pendingMixerControls[pendingMixerControls.count - 1] = next
+        }
+        if available { pump() }
+    }
+
+    private func syncLegacyControlsFromMixer() {
+        let l0 = mixerControls.layers.0
+        controls.wobble = l0.wobble
+        controls.warmth = l0.warmth
+        controls.cutoff = l0.cutoff
+        controls.resonance = l0.resonance
+        controls.shape = l0.shape
+        controls.detune = l0.detune
+        controls.glide = l0.glide
+        controls.chord_level = l0.level
+        controls.preset = l0.preset
+        controls.muted = l0.muted
+        controls.delay_amount = mixerControls.delay_amount
+        controls.reverb_amount = mixerControls.reverb_amount
+        controls.tempo_bpm = mixerControls.tempo_bpm
+    }
+
+    private func syncMixerFromLegacyControls(_ value: CodaControls) {
+        mixerControls.layers.0.wobble = value.wobble
+        mixerControls.layers.0.warmth = value.warmth
+        mixerControls.layers.0.cutoff = value.cutoff
+        mixerControls.layers.0.resonance = value.resonance
+        mixerControls.layers.0.shape = value.shape
+        mixerControls.layers.0.detune = value.detune
+        mixerControls.layers.0.glide = value.glide
+        mixerControls.layers.0.level = value.chord_level
+        mixerControls.layers.0.preset = value.preset
+        mixerControls.layers.0.muted = value.muted
+        mixerControls.delay_amount = value.delay_amount
+        mixerControls.reverb_amount = value.reverb_amount
+        mixerControls.tempo_bpm = value.tempo_bpm
+    }
+
+    private var currentMutedLayers: Set<MusicLayer> {
+        var set = Set<MusicLayer>()
+        if mixerControls.layers.0.muted != 0 { set.insert(.chords) }
+        if mixerControls.layers.1.muted != 0 { set.insert(.bass) }
+        if mixerControls.layers.2.muted != 0 { set.insert(.melody) }
+        return set
+    }
+
+    private func reconciledBass(from previous: Progression, to updated: Progression) -> BassTrack {
+        if bassTrack.notes.isEmpty && previous.regions.isEmpty && !updated.regions.isEmpty {
+            let seeded = BassFollower.seedFromProgression(updated, vocabulary: vocabulary)
+            return (try? BassTrack(notes: seeded)) ?? bassTrack
+        }
+        guard !bassTrack.notes.isEmpty else { return bassTrack }
+        let reconciled = BassFollower.reconcile(
+            bassNotes: bassTrack.notes,
+            previousRegions: previous.regions,
+            newRegions: updated.regions,
+            vocabulary: vocabulary
+        )
+        return (try? BassTrack(notes: reconciled)) ?? bassTrack
+    }
+
+    private func currentSnapshot() -> SessionStateSnapshot {
+        SessionStateSnapshot(
+            progression: editor.progression,
+            patterns: patterns,
+            bassTrack: bassTrack,
+            melodyTrack: melodyTrack,
+            key: key,
+            loop: loop
+        )
+    }
+
+    private static func presetID(for index: UInt8) -> String {
+        switch index {
+        case 1: return "currents"
+        case 2: return "wobble"
+        default: return "pluck"
+        }
+    }
+
+    private static func presetIndex(for id: String) -> UInt8 {
+        switch id {
+        case "currents", "subBass": return 1
+        case "wobble", "pluckedKeys": return 2
+        default: return 0
+        }
+    }
+
+    private static func synthState(from mixer: CodaMixerControls) -> MixerAndSynthState {
+        func mapLayer(_ lc: CodaLayerControls) -> LayerSynthState {
+            LayerSynthState(
+                presetID: presetID(for: lc.preset),
+                volume: Double(lc.level),
+                filterCutoff: Double(lc.cutoff),
+                resonance: Double(lc.resonance),
+                attack: Double(lc.shape),
+                release: Double(lc.detune),
+                wobble: Double(lc.wobble),
+                warmth: Double(lc.warmth),
+                glide: Double(lc.glide),
+                muted: lc.muted != 0
+            )
+        }
+        return MixerAndSynthState(
+            chords: mapLayer(mixer.layers.0),
+            bass: mapLayer(mixer.layers.1),
+            melody: mapLayer(mixer.layers.2),
+            sharedFX: SharedFXState(
+                chorusMix: Double(mixer.chorus_amount),
+                delayMix: Double(mixer.delay_amount),
+                reverbMix: Double(mixer.reverb_amount)
+            )
+        )
+    }
+
+    private static func mixerControls(from state: MixerAndSynthState, tempo: Double) -> CodaMixerControls {
+        var mixer = coda_dsp_default_mixer_controls()
+        func mapLayer(_ ls: LayerSynthState, into lc: inout CodaLayerControls) {
+            lc.preset = presetIndex(for: ls.presetID)
+            lc.level = Float(min(1, max(0, ls.volume)))
+            lc.cutoff = Float(min(1, max(0, ls.filterCutoff)))
+            lc.resonance = Float(min(1, max(0, ls.resonance)))
+            lc.shape = Float(min(1, max(0, ls.attack)))
+            lc.detune = Float(min(1, max(0, ls.release)))
+            lc.wobble = Float(min(1, max(0, ls.wobble)))
+            lc.warmth = Float(min(1, max(0, ls.warmth)))
+            lc.glide = Float(min(1, max(0, ls.glide)))
+            lc.muted = ls.muted ? 1 : 0
+        }
+        mapLayer(state.chords, into: &mixer.layers.0)
+        mapLayer(state.bass, into: &mixer.layers.1)
+        mapLayer(state.melody, into: &mixer.layers.2)
+        mixer.chorus_amount = Float(min(1, max(0, state.sharedFX.chorusMix)))
+        mixer.delay_amount = Float(min(1, max(0, state.sharedFX.delayMix)))
+        mixer.reverb_amount = Float(min(1, max(0, state.sharedFX.reverbMix)))
+        mixer.tempo_bpm = Float(min(300, max(30, tempo)))
+        return mixer
+    }
+
     public func status() -> CodaTransportStatus {
         let status = audio.transportStatus()
         if status.failures > 0 { error = "Native audio scheduling failure" }
@@ -303,79 +1289,66 @@ public final class MusicSession {
     private func schedule(seek: Int? = nil) throws {
         commitPlan(try preparePlan(seek: seek))
     }
-    private func preparePlan(progression: Progression? = nil, arrangement: PatternArrangement? = nil, tempo: Double? = nil,
-                             loop: LoopSpan? = nil, looping: Bool? = nil,
+    private func preparePlan(progression: Progression? = nil, arrangement: PatternArrangement? = nil,
+                             bass: BassTrack? = nil, melody: MelodyTrack? = nil,
+                             tempo: Double? = nil, loop: LoopSpan? = nil, looping: Bool? = nil,
                              playing: Bool? = nil, seek: Int? = nil) throws -> PreparedPlan {
         let progression = progression ?? editor.progression
+        for region in progression.regions {
+            guard region.pitches.count <= 12 else { throw AudioSessionError.capacity }
+        }
+        let bass = bass ?? bassTrack
+        let melody = melody ?? melodyTrack
         let tempo = tempo ?? self.tempo
         let looping = looping ?? self.looping
-        // Exhaustion rejects the whole request before mutation/publication. A
-        // deliberate suspend/reopen starts a fresh epoch; never wrap counters.
-        guard playing == nil || playbackRevision < (UInt64.max >> 1),
-              seek == nil || positionRevision < UInt64.max else { throw AudioSessionError.capacity }
-        let nextPlayback = playbackRevision + (playing == nil ? 0 : 1)
-        let nextPosition = positionRevision + (seek == nil ? 0 : 1)
-        let playing = playing ?? playbackIntent
-        let step = seek ?? requestedStep
         let span: LoopSpan
         if looping { span = loop ?? self.loop }
         else { span = try LoopSpan(bars: progression.totalSteps / MusicDefaults.stepsPerBar) }
-        // The music model allows more than twelve pitches; reject such edits
-        // before history/intent changes, even while hardware is inactive.
-        guard progression.regions.count <= 128,
-              progression.regions.allSatisfy({ $0.pitches.count <= 12 }) else { throw AudioSessionError.capacity }
-        // Validate every candidate before mutating intent/history, even unopened.
+        let previousSpan = try playbackSpan()
+        let status = audio.transportStatus()
+        let nativeStep = Int(exactly: status.step) ?? requestedStep
+        let absolutePosition = previousSpan.start + (available ? nativeStep : requestedStep)
+        let remapped = min(span.length - 1, max(0, absolutePosition - span.start))
+        // Stage 1 loop-disable rebase: when looping transitions true -> false even
+        // without a span change, rebase so cycle_index < length / windowSteps holds.
+        let disablingLoop = self.looping && !looping
+        let explicitSeek = seek ?? ((span != previousSpan || disablingLoop) ? remapped : nil)
+        guard playing == nil || playbackRevision < (UInt64.max >> 1),
+              explicitSeek == nil || positionRevision < UInt64.max else { throw AudioSessionError.capacity }
+        let nextPlayback = playbackRevision + (playing == nil ? 0 : 1)
+        let nextPosition = positionRevision + (explicitSeek == nil ? 0 : 1)
+        let playingValue = playing ?? playbackIntent
+        let step = min(span.length - 1, max(0, explicitSeek ?? requestedStep))
         let rate = audio.sampleRate > 0 ? audio.sampleRate : 48_000
         let arrangement = arrangement ?? patterns
-        // A queued command is not consumed. Compare only the monotonic native
-        // consumption watermark, never a combination of observational statuses.
         let unconsumedPosition = nextPosition > audio.performanceStatus().consumed_position_revision
-        let observed: UInt64 = unconsumedPosition ? 0 : audio.transportStatus().cycle
+        let restarting = playing == true && status.completed != 0
+        let observed = unconsumedPosition ? UInt64(step / PerformanceCycleSource.windowSteps) : (restarting ? 0 : status.cycle)
         guard let cycle = Int64(exactly: observed), cycle < Int64.max else { throw AudioSessionError.capacity }
-        let compilation = try PatternEventCompiler.compile(progression, arrangement: arrangement,
-            tempo: tempo, sampleRate: rate, loop: span, cycleIndex: cycle)
-        let compiled: CompiledLoop
-        switch compilation {
-        case .legacy(let legacy): compiled = legacy
-        case .pattern(let pattern):
-            let source = try PerformanceCycleSource(progression: progression, arrangement: arrangement,
-                tempo: tempo, sampleRate: rate, span: span, initialCycle: cycle)
-            let payload = try NativePerformanceCycle(pattern)
-            let storage = NativePerformancePlan()
-            storage.pointer.pointee.initial_cycle = payload.pointer.pointee
-            storage.pointer.pointee.samples_per_step = rate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
-            storage.pointer.pointee.length = UInt16(span.length)
-            storage.pointer.pointee.playback_revision = nextPlayback
-            storage.pointer.pointee.position_revision = nextPosition
-            storage.pointer.pointee.seek_step = UInt16(step)
-            storage.pointer.pointee.playing = playing ? 1 : 0
-            storage.pointer.pointee.looping = looping ? 1 : 0
-            return PreparedPlan(native: nil, performance: storage, source: source,
-                playbackRevision: nextPlayback, positionRevision: nextPosition, playing: playing, step: step)
-        }
-        guard compiled.events.count <= Int(CODA_PLAN_EVENTS) else { throw AudioSessionError.capacity }
-        let storage = NativePlan()
-        let plan = storage.pointer
-        plan.pointee.samples_per_step = rate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
-        plan.pointee.length = UInt16(span.length)
-        plan.pointee.playback_revision = nextPlayback
-        plan.pointee.position_revision = nextPosition
-        plan.pointee.seek_step = UInt16(step)
-        plan.pointee.count = UInt32(compiled.events.count)
-        plan.pointee.playing = playing ? 1 : 0
-        plan.pointee.looping = looping ? 1 : 0
-        let valid = withUnsafeMutableBytes(of: &plan.pointee.events) { raw -> Bool in
-            let events = raw.bindMemory(to: CodaGridEvent.self)
-            for (i, e) in compiled.events.enumerated() {
-                guard e.voiceIndex < 12, e.regionIndex < 128 else { return false }
-                events[i] = CodaGridEvent(step: UInt16(e.stepOffset), region: UInt16(e.regionIndex),
-                    kind: UInt8(e.kind.rawValue), pitch: e.pitch, rank: UInt8(e.voiceIndex), reserved: 0)
-            }
-            return true
-        }
-        guard valid else { throw AudioSessionError.capacity }
-        return PreparedPlan(native: storage, performance: nil, source: nil, playbackRevision: nextPlayback,
-            positionRevision: nextPosition, playing: playing, step: step)
+        let source = try PerformanceCycleSource(
+            progression: progression,
+            arrangement: arrangement,
+            bassTrack: bass,
+            melodyTrack: melody,
+            extraLayers: extraLayers,
+            tempo: tempo,
+            sampleRate: rate,
+            span: span,
+            initialCycle: cycle
+        )
+        let payload = try source.compile(cycle: cycle)
+        let storage = NativePerformancePlan()
+        storage.pointer.pointee.initial_cycle = payload.pointer.pointee
+        storage.pointer.pointee.samples_per_step = rate * 60 / tempo / Double(MusicDefaults.stepsPerBeat)
+        storage.pointer.pointee.length = UInt64(span.length)
+        storage.pointer.pointee.window_steps = UInt64(PerformanceCycleSource.windowSteps)
+        storage.pointer.pointee.playback_revision = nextPlayback
+        storage.pointer.pointee.position_revision = nextPosition
+        storage.pointer.pointee.seek_step = UInt64(step)
+        storage.pointer.pointee.playing = playingValue ? 1 : 0
+        storage.pointer.pointee.looping = looping ? 1 : 0
+        return PreparedPlan(native: nil, performance: storage, source: source,
+            playbackRevision: nextPlayback, positionRevision: nextPosition, playing: playingValue, step: step)
     }
     private func commitPlan(_ plan: PreparedPlan) {
         // Native plan replacement already retires its old audition. Do not let
@@ -452,13 +1425,21 @@ public final class MusicSession {
                 if let desired = desiredPlan, let source = desired.source, let storage = desired.performance {
                     // required_cycle is only a hint; native remains admission authority.
                     let unconsumedPosition = desired.positionRevision > audio.performanceStatus().consumed_position_revision
-                    let observed: UInt64 = unconsumedPosition ? 0 : max(audio.transportStatus().cycle, status.required_cycle)
+                    let observed: UInt64 = unconsumedPosition ? UInt64(desired.step / PerformanceCycleSource.windowSteps) : max(audio.transportStatus().cycle, status.required_cycle)
                     guard let cycle = Int64(exactly: observed), cycle < Int64.max else { throw AudioSessionError.capacity }
-                    let replacement = try source.compile(cycle: cycle)
+                    let retrySource = try PerformanceCycleSource(
+                        progression: source.progression,
+                        arrangement: source.arrangement,
+                        bassTrack: source.bassTrack,
+                        melodyTrack: source.melodyTrack,
+                        mutedLayers: source.mutedLayers,
+                        tempo: source.tempo,
+                        sampleRate: source.sampleRate,
+                        span: source.span,
+                        initialCycle: cycle
+                    )
+                    let replacement = try retrySource.compile(cycle: cycle)
                     storage.pointer.pointee.initial_cycle = replacement.pointer.pointee
-                    let retrySource = try PerformanceCycleSource(progression: source.progression,
-                        arrangement: source.arrangement, tempo: source.tempo, sampleRate: source.sampleRate,
-                        span: source.span, initialCycle: cycle)
                     desiredPlan = PreparedPlan(native: nil, performance: storage, source: retrySource,
                         playbackRevision: desired.playbackRevision, positionRevision: desired.positionRevision,
                         playing: desired.playing, step: desired.step)
@@ -538,7 +1519,15 @@ public final class MusicSession {
             pendingControls.removeFirst()
             if result < 0 { error = "Native controls rejected" }
         }
-        if (desiredPlan != nil || publishedPlan != nil || activeSource != nil || !pendingControls.isEmpty || pendingPreviewStop != nil), retry == nil {
+        while !pendingMixerControls.isEmpty {
+            let next = pendingMixerControls[0]
+            let result = audio.publish(mixerControls: next)
+            if result == 0 { break }
+            pendingMixerControls.removeFirst()
+            if result < 0 { error = "Native mixer controls rejected" }
+        }
+        if (desiredPlan != nil || publishedPlan != nil || activeSource != nil ||
+            !pendingControls.isEmpty || !pendingMixerControls.isEmpty || pendingPreviewStop != nil), retry == nil {
             let epoch = lifecycleEpoch
             retry = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: TransportConfiguration.retryNanoseconds)

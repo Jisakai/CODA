@@ -1,5 +1,9 @@
 # DESIGN.md — UI Design File
 
+## Latest owner correction — November 28
+**NEW VISUAL SOURCE OF TRUTH:** the owner explicitly replaces the entire UI with a Procreate-style look: icons, fonts, toolbars, menus, text treatments, gallery/save hub and panels. All older tables below are historical where they conflict. Use original SwiftUI/vector assets, platform-licensed system typography, compact monochrome toolbar chrome, canvas-first dark neutrals, transient anchored/grouped panels and a coherent project gallery. Keep coda/music semantics, actual functional actions, Pencil-only music edits, circular count-fitted squeeze geometry, no Pattern Done/window, unlimited arrangement and safe non-destructive audio/AI behavior. The full redesign includes the musical canvas, settings/layers, synth/FX, sidekick and save hub, not just a recolor. Detailed implementation direction is in docs/briefs/full-app-implementation-overnight.md.
+Eight visible bars are an initial viewport, not a finite song canvas. Horizontal navigation continues as far as needed with lazy/virtualized content and coherent timeline/loop/strip/roll alignment. Add the explicitly requested save/project hub, reachable through Project Settings, for creating/opening/naming/saving/renaming/duplicating/deleting local projects and import/export/recovery. Reuse the existing black/glass/Plus Jakarta tokens; the music-editing canvas stays uncluttered. This owner-authorized hub is not a new pattern-editing window or permanent sidebar.
+
 The complete target UI: layout, components, visual states, motion. It replaces the Stitch prototype, which is outdated and kept only as a loose mood reference.
 
 ## 0. Purpose & precedence
@@ -179,7 +183,7 @@ Header cell (56 pt, aligned with the gutter): `CHORDS` 10 pt muted + tiny `Poly 
 | Open/close | The current interaction is the existing "Pattern" item in the chord-roll squeeze menu, which toggles editing. Other entry/exit details remain unresolved. | OPEN |
 
 ### 3.8 Radial menus (squeeze, opens centered on the Pencil tip)
-General: a small 8 pt center dot marks the tip. Each ring is a band of glass slots with 1.5 pt gaps. Slot labels 12 pt 600; icons where clearer. The slot under the Pencil brightens (white 10% overlay) and its label turns primary ink. Selecting happens when the Pencil **lifts on a slot**. Non-hovered rings fade to ~45%. The menu shifts away from screen edges so it never clips. Appear: 100 ms, scale 0.92→1.
+General: a small 8 pt center dot marks the Pencil tip. Each ring has a continuous dark-glass backing and equal-size, fully circular option buttons (never pills/capsules); retain the existing per-ring button diameter derived from the band’s inner width. Keep a consistent named gap between circles. Place button centers uniformly along the arc and derive the arc sweep/backing length from the visible choice count, button diameter, gap and ring radius—seven choices require seven non-overlapping circles, not a fixed four-slot footprint or unused extra arc. Round the backing ends just beyond the outermost button. Rendering, hit testing and edge-fit bounds share the same geometry and include all painted circles/caps. Labels remain 12 pt 600 and icons are used where clearer. The Pencil-hovered circle brightens (white 10% overlay) and its label turns primary ink. Selecting happens when the Pencil **lifts on a button**. Non-hovered rings fade to ~45%. The menu shifts away from screen edges so it never clips. Appear: 100 ms, scale 0.92→1.
 
 | Menu | Layout | Status |
 |---|---|---|
@@ -249,13 +253,43 @@ Gear · ellipsis · loop · play · pause · bass (low note) · chord (stacked n
 ## 8. Corrections relative to the old prototype
 | Old prototype | Use this instead |
 |---|---|
-| Single gear button | Gear (App Settings) + ellipsis (Project Settings) |
-| No mute circles | Mute circles beside Play |
-| AI icon opening a floating chat | Drawer icon opening the right drawer (sidekick top, synth below) |
-| Ruler below the chord strip | Timeline strip **above** the chord strip |
+| Single gear button / split Gear + Ellipsis | Single Procreate-style Wrench Settings dropdown (`Project` default tab, `Import / Export`, `Canvas`, `Gestures`, `Prefs`) |
+| Off-center transport controls | Dead-center Play/Pause inside a full-width `ZStack(alignment: .center)` |
+| No mute circles | Mute circles beside Play + per-layer mixer mute/solo in Bottom Synth Rack & Layers popover |
+| AI icon opening a floating chat / mixed right drawer | Right drawer = **100% AI Sidekick ONLY** (Qwen3-4B-4bit streaming chat + ghost chords); Synth & Plugins live in the **FL-style Bottom VST Synth & Plugin Rack** |
+| Ruler below the chord strip | Timeline strip **above** the chord strip (`.clipped()` on pan/zoom) |
 | Dense chord blocks and note labels always on | Name + numeral by default; the rest on hover or toggle |
-| Hover popover for extensions | Squeeze two-ring radial menu; hover only highlights |
-| No pattern UI, no synth drawer | Pattern overlay (§3.7), right drawer (§3.10) |
+| Hover popover for extensions | Squeeze two-ring radial menu with monochrome SF Symbols; hover only highlights |
+| No pattern UI, no synth rack | Pattern overlay (§3.7), Bottom VST Synth & Plugin Rack (§9.2), AI Sidekick right drawer (§9.1) |
 | Amber octave labels | Muted/white ink labels, no yellow |
 | 48 px top bar | 52 pt (≈ 1 cm) |
 | 88 px chord strip | 104 pt (≈ 2 cm) |
+
+---
+
+## 9. Procreate-Style UI Architecture & Owner Additions
+
+### 9.1 Top Bar & Unified Wrench Settings
+- **Dead-Center Transport**: Play/Pause sits in a `ZStack(alignment: .center)` spanning the full top-bar width so it stays mathematically centered on screen regardless of left/right cluster widths.
+- **Gallery (`coda` wordmark)** opens the full-screen dark **Project Hub** (`ProjectHubView`): `+` New Sketch, `Import`, `Select`, 4-column card grid with mini chord-bar previews, Key · BPM · bar count, modified date, Rename / Duplicate / Export MIDI / Export JSON / Delete actions, and autosave recovery banner.
+- **Unified Wrench Settings Dropdown**: One Procreate-style popover with 5 tabs across the top:
+  1. **Project (default tab)** — Project Name, Save, Gallery/Hub, A/B Snapshot capture/toggle, Global Transpose −1/+1, Relative Major/Minor, `+ Bar` Duplicate, Clear Active Layer.
+  2. **Import / Export** — Import `.sf2`/`.dls`, Scan AUv3 Plugins, Import Project JSON, Export MIDI, Export Project JSON.
+  3. **Canvas** — Grid Snap, Note Labels toggle, Scale Highlights, **Scale Lock**, **Velocity Lane (`VEL`)**, Ghost Layers Opacity, Reset Zoom.
+  4. **Gestures** — Procreate-style gesture controls persisted in `GestureSettings` (`UserDefaults`): Apple Pencil Pro Double Tap (`.toggleDrawErase` default), Squeeze (`.radialPalette` default), Barrel Roll (`.voicingAndNudge` default), 2-Finger Undo, 3-Finger Redo, Hold Delay (`320ms` default), Haptics.
+  5. **Prefs** — Audio sample rate/engine status, Qwen3-4B-4bit model status/download/unload, Glass Acrylic toggle.
+- **Multi-Layer Popover**: Base Chords / Bass / Melody layers plus user-added extra layers (`+ Chord` / `+ Bass` / `+ Melody` up to 8 total layers), each with independent mute, level, synth/plugin assignment, and delete.
+
+### 9.2 FL-Style Bottom VST Synth & Plugin Rack
+- Rises from the bottom edge up to 50% of screen height via a slim bottom pull-tab (`rack.pullTab`) or the top-bar Synth/Rack button.
+- Mode tabs: **`CODA Synth` | `AUv3 Plugins` | `Import (.sf2/.dls)`**.
+- **`CODA Synth`**: Active track badge, 3 preset cards (`Pluck`, `Currents Pad`, `Wobble Lead`), Wobble & Warmth macros, 5 knobs (`Cutoff`, `Resonance`, `Shape`, `Detune`, `Glide`), **Post-FX rack with all 3 knobs (`Chorus`, `Delay`, `Reverb`)**, and per-layer mixer faders + mute/solo.
+- **`AUv3 Plugins`**: Scan & load installed iPadOS AUv3 instruments via `PluginHostManager`, assign to active track (with a note that iPadOS hosts native AUv3 plugins rather than desktop `.vst3` binaries).
+- **`Import (.sf2/.dls)`**: Document picker bridge to import, list, and assign/clear SoundFont instruments on the active track.
+
+### 9.3 AI Sidekick Right Drawer (100% Sidekick Only)
+- The right drawer (`SidekickDrawerView`) is dedicated exclusively to the local Qwen3-4B-4bit AI Sidekick: streaming chat messages, `#ddb7ff` `coda` badge, quick-prompt chips, text/Scribble input, model status/download pill, and Accept All / Dismiss All bar for inline ghost chords in the chord strip.
+
+### 9.4 Piano Roll Additions: Scale Lock & Collapsible Velocity Lane
+- **Scale Lock (`scaleLockEnabled`)**: Toggleable from `Settings → Canvas` and a compact `SCL` pill in the piano roll pitch gutter. When enabled, out-of-scale pitch rows are subtly dimmed and Pencil-drawn/dragged notes snap to the nearest in-scale pitch for `session.key`.
+- **Collapsible FL-Style Velocity Lane (`velocityLaneVisible`)**: Toggleable from `Settings → Canvas` and a slim `VEL` pull-bar at the bottom of `PianoRollView` (above the bottom synth rack pull-tab). Expands to 64pt showing vertical velocity stems aligned with visible notes on the active layer (Chords / Bass / Melody / active extra layer), allowing vertical Pencil drag to paint note velocities (`1...127`).

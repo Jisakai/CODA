@@ -54,12 +54,19 @@ static void test_eq_units() {
         require(std::abs(end)<1e-7,"Chords DC step decays to zero");
         const double low=gain(chords,rate,30),mid=gain(chords,rate,1000),high=gain(chords,rate,15000);
         require(low<.08 && mid>.97 && high<.5,"Chords HP120/LP9k sine response");
+        coda::BassEQ bassEq;bassEq.prepare(rate);
+        const double bSub=gain(bassEq,rate,10),bFund=gain(bassEq,rate,100),bHigh=gain(bassEq,rate,8000);
+        require(bSub<.15 && bFund>.95 && bHigh<.15,"Bass HP35/LP2.5k sine response");
+        coda::MelodyEQ melEq;melEq.prepare(rate);
+        const double mLow=gain(melEq,rate,40),mMid=gain(melEq,rate,800),mDip=gain(melEq,rate,3000),mHigh=gain(melEq,rate,8000);
+        require(mLow<.08 && mMid>.93 && mDip<.80 && mDip>.68 && mHigh>mDip,"Melody HP200/-2.5dB@3k sine response");
         coda::MasterEQ master;master.prepare(rate);
         double bass=gain(master,rate,100),dip=gain(master,rate,3000),outside=gain(master,rate,700),upper=gain(master,rate,6000),top=gain(master,rate,18000);
         require(bass>.99&&outside>.95&&dip>.73&&dip<.82,"localized broad master dip");
         require(upper>dip&&top<bass*.8,"master returns above dip and attenuates highs");
         // State reset must be real, not coefficient reconfiguration.
-        chords.reset();master.reset();for(int i=0;i<100;i++)require(chords.tick(0)==0&&master.tick(0)==0,"filter reset silence");
+        chords.reset();bassEq.reset();melEq.reset();master.reset();
+        for(int i=0;i<100;i++)require(chords.tick(0)==0&&bassEq.tick(0)==0&&melEq.tick(0)==0&&master.tick(0)==0,"filter reset silence");
     }
 }
 static void test_production_reset_wiring() {
@@ -158,11 +165,11 @@ static void test_public_reprepare() {
     }
 }
 static void test_admission_delivery_stop() {
-    for(int limit:{31,32,33}) {
+    for(int limit:{int(CODA_DSP_MAX_EVENTS_PER_SAMPLE)-1,int(CODA_DSP_MAX_EVENTS_PER_SAMPLE),int(CODA_DSP_MAX_EVENTS_PER_SAMPLE)+1}) {
         CodaDSP *d=coda_dsp_create();require(coda_dsp_prepare(d,48000,256),"admission prepare");
-        for(int i=0;i<limit;i++){CodaNoteEvent e{17,1,CODA_EVENT_OFF,60,0,0};require(bool(coda_dsp_push_event(d,&e))==(i<32),"limit-1/limit/limit+1 admission");}
+        for(int i=0;i<limit;i++){CodaNoteEvent e{17,1,CODA_EVENT_OFF,60,0,0};require(bool(coda_dsp_push_event(d,&e))==(i<CODA_DSP_MAX_EVENTS_PER_SAMPLE),"limit-1/limit/limit+1 admission");}
         frames(d,17);require(inspect(d).delivered==0,"no early delivery");frames(d,1);
-        require(inspect(d).delivered==static_cast<uint64_t>(std::min(limit,32))&&inspect(d).late==0,"all accepted offsets exact");
+        require(inspect(d).delivered==static_cast<uint64_t>(std::min(limit,int(CODA_DSP_MAX_EVENTS_PER_SAMPLE)))&&inspect(d).late==0,"all accepted offsets exact");
         coda_dsp_reset(d);event(d,0,1,CODA_EVENT_OFF,60);event(d,0,2,CODA_EVENT_ON,64);
         CodaNoteEvent bad{0,1,CODA_EVENT_OFF,60,0,0};require(!coda_dsp_push_event(d,&bad),"off-after-on rejected");
         bad={1,1,CODA_EVENT_ON,60,12,0};require(!coda_dsp_push_event(d,&bad),"invalid rank rejected");
@@ -177,10 +184,11 @@ static void test_admission_delivery_stop() {
         coda_dsp_reset(d);event(d,0,4,CODA_EVENT_ON,72);frames(d,1);require(inspect(d).delivered==1&&inspect(d).late==0,"reset resumes from zero");coda_dsp_destroy(d);
     }
     CodaDSP *d=coda_dsp_create();require(coda_dsp_prepare(d,48000,256),"full queue prepare");
-    for(int i=0;i<1023;i++)event(d,i,1,i%2?CODA_EVENT_ON:CODA_EVENT_OFF,60);
-    CodaNoteEvent e{1023,1,CODA_EVENT_OFF,60,0,0};require(!coda_dsp_push_event(d,&e),"full queue rejects");
-    frames(d,1023);require(inspect(d).delivered==1023&&inspect(d).late==0,"full queue delivered in order at exact offsets");
-    require(coda_dsp_push_event(d,&e),"full queue recovers");frames(d,1);require(inspect(d).delivered==1024&&inspect(d).late==0,"recovery event exact");coda_dsp_destroy(d);
+    constexpr int cap=CODA_DSP_QUEUE_CAPACITY-1;
+    for(int i=0;i<cap;i++)event(d,i,1,i%2?CODA_EVENT_ON:CODA_EVENT_OFF,60);
+    CodaNoteEvent e{cap,1,CODA_EVENT_OFF,60,0,0};require(!coda_dsp_push_event(d,&e),"full queue rejects");
+    frames(d,cap);require(inspect(d).delivered==static_cast<uint64_t>(cap)&&inspect(d).late==0,"full queue delivered in order at exact offsets");
+    require(coda_dsp_push_event(d,&e),"full queue recovers");frames(d,1);require(inspect(d).delivered==static_cast<uint64_t>(cap+1)&&inspect(d).late==0,"recovery event exact");coda_dsp_destroy(d);
 }
 static void test_glide_predecessor() {
     for(int preset=0;preset<3;preset++) {
@@ -242,14 +250,14 @@ static void test_allocations_and_concurrency() {
     // rendering; ready prevents the consumer entering an incompletely published group.
     d=coda_dsp_create();require(coda_dsp_prepare(d,48000,256),"concurrent prepare");
     std::atomic<int> ready{0};std::atomic<bool> producerOK{true};uint64_t expectedHash=1469598103934665603ull;
-    constexpr int groups=20,groupSize=1023;
+    constexpr int groups=8,groupSize=CODA_DSP_QUEUE_CAPACITY-1;
     std::thread producer([&]{
         for(int group=0;group<groups;group++) {
             for(int i=0;i<groupSize;i++) {
-                int64_t t=group*1024+i;CodaNoteEvent e{t,static_cast<uint32_t>(group*1024+i/2+1),static_cast<uint8_t>(i%2?CODA_EVENT_OFF:CODA_EVENT_ON),60,0,0};
+                int64_t t=group*CODA_DSP_QUEUE_CAPACITY+i;CodaNoteEvent e{t,static_cast<uint32_t>(group*CODA_DSP_QUEUE_CAPACITY+i/2+1),static_cast<uint8_t>(i%2?CODA_EVENT_OFF:CODA_EVENT_ON),60,0,0};
                 while(!coda_dsp_push_event(d,&e))std::this_thread::yield();expectedHash=hash_event(expectedHash,e);
             }
-            if(group==0){CodaNoteEvent full{1023,1,CODA_EVENT_OFF,60,0,0};if(coda_dsp_push_event(d,&full))producerOK=false;}
+            if(group==0){CodaNoteEvent full{groupSize,1,CODA_EVENT_OFF,60,0,0};if(coda_dsp_push_event(d,&full))producerOK=false;}
             auto ctrl=controls(group%3);for(int i=0;i<7;i++)while(!coda_dsp_publish_controls(d,&ctrl))std::this_thread::yield();
             if(group==0&&coda_dsp_publish_controls(d,&ctrl))producerOK=false;
             ready.store(group+1,std::memory_order_release);
@@ -257,7 +265,7 @@ static void test_allocations_and_concurrency() {
     });
     for(int group=0;group<groups;group++) {
         while(ready.load(std::memory_order_acquire)<group+1)std::this_thread::yield();
-        frames(d,1024);auto x=inspect(d);require(x.delivered==static_cast<uint64_t>((group+1)*groupSize)&&x.late==0,"concurrent exact delivery and full recovery");
+        frames(d,CODA_DSP_QUEUE_CAPACITY);auto x=inspect(d);require(x.delivered==static_cast<uint64_t>((group+1)*groupSize)&&x.late==0,"concurrent exact delivery and full recovery");
     }
     producer.join();require(producerOK.load()&&inspect(d).event_hash==expectedHash,"concurrent note on/off order/hash and control storms");coda_dsp_destroy(d);
 }

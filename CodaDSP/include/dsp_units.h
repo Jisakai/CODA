@@ -76,21 +76,36 @@ struct ChordsEQ {
     void reset() noexcept {hp.reset();lp.reset();}
     float tick(float x) noexcept {return lp.tick(hp.tick(x));}
 };
+struct BassEQ {
+    Biquad hp,lp;
+    void prepare(double rate){hp.pass(rate,35,true);lp.pass(rate,2500,false);}
+    void reset() noexcept {hp.reset();lp.reset();}
+    float tick(float x) noexcept {return lp.tick(hp.tick(x));}
+};
+struct MelodyEQ {
+    Biquad hp,dip;
+    void prepare(double rate){hp.pass(rate,200,true);dip.peak(rate,3000,-2.5,0.85);}
+    void reset() noexcept {hp.reset();dip.reset();}
+    float tick(float x) noexcept {return dip.tick(hp.tick(x));}
+};
 struct MasterEQ {
     Biquad shelf,dip;
     void prepare(double rate){shelf.shelf(rate,9000,-3);dip.peak(rate,3000,-2,0.85);}
     void reset() noexcept {shelf.reset();dip.reset();}
     float tick(float sum) noexcept {return dip.tick(shelf.tick(sum));}
 };
-// Four-line orthogonal Hadamard FDN, 2.8 s low-frequency RT60. Two Schroeder
-// allpasses diffuse the predelayed input. Memory and generation tags are owned
-// by CodaDSP; reset invalidates in O(1), never clears a delay line in render.
+// Four-line modulated orthogonal Hadamard FDN, ~2.9 s warm RT60. Two Schroeder
+// allpasses diffuse the predelayed input, with gentle LFO delay-line modulation
+// to eliminate metallic ringing and a pre-HPF to keep low-end clean. Memory and
+// generation tags are owned by CodaDSP; reset invalidates in O(1), never clears
+// a delay line in render.
 struct Hall {
     std::array<float,4>* lines=nullptr; uint64_t* tags=nullptr;
     float* pre=nullptr; uint64_t* preTags=nullptr;
     uint32_t size=0,preSize=0,write=0,preWrite=0,preTap=0,taps[4]{};
     uint64_t generation=1;
     float damping=0,lp[4]{},feedback[4]{};
+    float hpCoeff=0,hpState=0,modPhase[4]{},modInc[4]{},modDepth=0;
     std::array<std::array<float,4096>,2> diffusion{};
     std::array<std::array<uint64_t,4096>,2> diffusionTags{};
     uint32_t diffWrite[2]{},diffTap[2]{};
@@ -99,25 +114,51 @@ struct Hall {
         // Newly bound rings/tap lengths cannot reuse cursors from a prior rate.
         write=preWrite=0;diffWrite[0]=diffWrite[1]=0;
         constexpr double times[]={.0297,.0371,.0411,.0533};
-        for(int i=0;i<4;i++) {taps[i]=static_cast<uint32_t>(rate*times[i]);feedback[i]=static_cast<float>(std::pow(.001,taps[i]/(rate*2.8)));}
+        constexpr double lfoHz[]={0.31,0.43,0.57,0.71};
+        for(int i=0;i<4;i++) {
+            taps[i]=static_cast<uint32_t>(rate*times[i]);
+            feedback[i]=static_cast<float>(std::pow(.001,taps[i]/(rate*2.85)));
+            modInc[i]=static_cast<float>(2*pi*lfoHz[i]/rate);
+        }
+        modDepth=static_cast<float>(std::min(12.0,rate*0.00022));
         preTap=static_cast<uint32_t>(rate*.020);
         diffTap[0]=std::max(1u,static_cast<uint32_t>(rate*.0047));diffTap[1]=std::max(1u,static_cast<uint32_t>(rate*.0061));
-        damping=static_cast<float>(1-std::exp(-2*pi*2400/rate));reset();
+        damping=static_cast<float>(1-std::exp(-2*pi*3200/rate));
+        hpCoeff=static_cast<float>(1-std::exp(-2*pi*160/rate));
+        reset();
     }
-    void reset() noexcept {++generation;for(auto &x:lp)x=0;}
+    void reset() noexcept {
+        ++generation;
+        for(auto &x:lp)x=0;
+        hpState=0;
+        for(auto &p:modPhase)p=0;
+    }
     float tick(float input) noexcept {
         uint32_t r=(preWrite+preSize-preTap)%preSize;
         float x=preTags[r]==generation?pre[r]:0;
         pre[preWrite]=input;preTags[preWrite]=generation;preWrite=(preWrite+1)%preSize;
+        // Gentle input HPF keeps bass/sub energy from muddying the hall tail.
+        hpState=clean(hpState+hpCoeff*(x-hpState));
+        x-=hpState;
         for(int i=0;i<2;i++) {
             uint32_t at=diffWrite[i];float delayed=diffusionTags[i][at]==generation?diffusion[i][at]:0;
-            float y=delayed-.6f*x;diffusion[i][at]=clean(x+.6f*y);diffusionTags[i][at]=generation;
+            float y=delayed-.62f*x;diffusion[i][at]=clean(x+.62f*y);diffusionTags[i][at]=generation;
             diffWrite[i]=(at+1)%diffTap[i];x=y;
         }
         float v[4];
         for(int i=0;i<4;i++) {
-            uint32_t at=(write+size-taps[i])%size;
-            float y=tags[at]==generation?lines[at][i]:0;
+            modPhase[i]+=modInc[i];
+            if(modPhase[i]>=static_cast<float>(2*pi)) modPhase[i]-=static_cast<float>(2*pi);
+            float tapF=static_cast<float>(taps[i])+modDepth*std::sin(modPhase[i]);
+            if(tapF<1.f) tapF=1.f;
+            if(tapF>static_cast<float>(size-2)) tapF=static_cast<float>(size-2);
+            uint32_t tap0=static_cast<uint32_t>(tapF);
+            float frac=tapF-static_cast<float>(tap0);
+            uint32_t at0=(write+size-tap0)%size;
+            uint32_t at1=(at0+size-1)%size;
+            float y0=tags[at0]==generation?lines[at0][i]:0;
+            float y1=tags[at1]==generation?lines[at1][i]:0;
+            float y=y0+(y1-y0)*frac;
             lp[i]=clean(lp[i]+damping*(y-lp[i]));v[i]=lp[i]*feedback[i];
         }
         const float h[4]={(v[0]+v[1]+v[2]+v[3])*.5f,(v[0]-v[1]+v[2]-v[3])*.5f,

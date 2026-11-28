@@ -147,4 +147,34 @@ enum CodaDesignTokens {
         static let drawerCloseSize: CGFloat = 32
         static let fxRowHeight: CGFloat = 40
     }
+
+    /// Procreate-style iPadOS dark studio chrome tokens (Nov 28 visual redesign).
+    /// Complements the preserved base tokens without introducing yellow or native materials.
+    enum ProcreateChrome {
+        static let surfaceBase = Color(red: 28.0 / 255, green: 28.0 / 255, blue: 30.0 / 255)      // #1C1C1E
+        static let surfaceElevated = Color(red: 36.0 / 255, green: 36.0 / 255, blue: 38.0 / 255)  // #242426
+        static let surfaceControl = Color(red: 46.0 / 255, green: 46.0 / 255, blue: 50.0 / 255)   // #2E2E32
+        static let surfaceDeep = Color(red: 18.0 / 255, green: 18.0 / 255, blue: 20.0 / 255)      // #121214
+        static let bevelHighlight = Color.white.opacity(0.08)
+        static let bevelSubtle = Color.white.opacity(0.05)
+        static let divider = Color.white.opacity(0.07)
+        static let activePillFill = Color.white.opacity(0.11)
+        static let inactivePillFill = Color.white.opacity(0.045)
+        static let shadowColor = Color.black.opacity(0.48)
+        static let shadowRadius: CGFloat = 20
+        static let shadowY: CGFloat = 8
+        static let popoverCornerRadius: CGFloat = 12
+        static let cardCornerRadius: CGFloat = 10
+        static let pillCornerRadius: CGFloat = 7
+        static let bevelLineWidth: CGFloat = 0.5
+        static let collapsedSynthBarHeight: CGFloat = 28
+
+        static func uiFont(size: CGFloat, weight: Font.Weight = .medium) -> Font {
+            .system(size: size, weight: weight, design: .default)
+        }
+
+        static func monoFont(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+            .system(size: size, weight: weight, design: .monospaced)
+        }
+    }
 }

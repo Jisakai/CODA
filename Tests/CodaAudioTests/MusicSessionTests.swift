@@ -20,11 +20,11 @@ final class MusicSessionTests: XCTestCase {
         try session.setLoop(LoopSpan(bars: 2), enabled: true)
         try session.seek(step: 10)
         _ = try session.renderOffline(frames: 1, pumping: false)
-        XCTAssertEqual(session.status().delivered, 4, "Intermediate legacy chord must actually sound")
+        XCTAssertEqual(session.status().delivered, 5, "Intermediate legacy chord + auto-seeded bass must actually sound")
         try session.setControls(session.controls)
         _ = try session.renderOffline(frames: 1)
         XCTAssertEqual(session.status().step, 10)
-        XCTAssertEqual(session.status().delivered, 12)
+        XCTAssertEqual(session.status().delivered, 15)
         XCTAssertEqual(session.status().failures, 0)
     }
 
@@ -208,7 +208,7 @@ final class MusicSessionTests: XCTestCase {
         try session.edit([.add(region)])
         try session.play()
         XCTAssertGreaterThan(try session.renderOffline(frames: 4096), 0)
-        XCTAssertEqual(session.status().delivered, 4)
+        XCTAssertEqual(session.status().delivered, 5)
         let history = session.editor.progression
         try session.audition(regionID: "a")
         _ = try session.renderOffline(frames: 4096)
@@ -289,6 +289,7 @@ final class MusicSessionTests: XCTestCase {
         let session = try makeSession()
         defer { session.suspend() }
         try addChord(to: session)
+        session.clearLayer(.bass)
         let region = try PatternRegion(id: "silent", range: PatternBarRange(start: 0, length: 1),
             slots: Array(repeating: nil, count: 8), settings: PatternSettings())
         try session.editPatterns([.add(region)])
@@ -297,9 +298,11 @@ final class MusicSessionTests: XCTestCase {
         XCTAssertEqual(session.status().delivered, 0)
         try session.undo()
         try session.undo()
+        try session.undo()
         XCTAssertTrue(session.editor.progression.regions.isEmpty)
         try session.redo()
         XCTAssertEqual(session.editor.progression.regions.count, 1)
+        try session.redo()
         try session.redo()
         XCTAssertEqual(session.patterns.regions, [region])
     }
@@ -359,7 +362,7 @@ final class MusicSessionTests: XCTestCase {
         try session.setControls(session.controls) // pumps retained latest facade plan
         _ = try session.renderOffline(frames: 1)
         XCTAssertEqual(session.status().step, 10)
-        XCTAssertEqual(session.status().delivered, 12) // 4 ons, then 4 offs + 4 ons
+        XCTAssertEqual(session.status().delivered, 15) // 5 ons, then 5 offs + 5 ons
         XCTAssertEqual(session.status().failures, 0)
         XCTAssertEqual(session.status().late, 0)
         XCTAssertNil(session.error)
@@ -475,7 +478,7 @@ final class MusicSessionTests: XCTestCase {
         _ = try session.renderOffline(frames: 1)
         XCTAssertEqual(session.status().playing, 1)
         XCTAssertEqual(session.status().step, 0)
-        XCTAssertEqual(session.status().delivered, ended.delivered + 4)
+        XCTAssertEqual(session.status().delivered, ended.delivered + 5)
         // Also reproduce configuration after completion WITHOUT polling status.
         _ = try session.renderOffline(frames: 480_000)
         _ = try session.renderOffline(frames: 300_000)

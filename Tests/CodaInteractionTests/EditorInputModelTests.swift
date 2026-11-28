@@ -25,30 +25,30 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertEqual(viewport.visiblePitches(in: 400).last, 0)
     }
 
-    func testFanSweepTiltAdaptivePlacementAndBoundedCornerFallback() throws {
-        XCTAssertEqual(RadialGeometry.sweep, 2 * .pi / 3, accuracy: 1e-12)
+    func testCountFittedTiltAdaptivePlacementAndBoundedCornerFallback() throws {
         XCTAssertEqual(RadialGeometry.defaultDirection, -2 * .pi / 3, accuracy: 1e-12)
         let size = CGSize(width: 1194, height: 834)
+        let layouts = [(132.0, 48.0), (196, 48), (260, 48)].map {
+            RadialRingLayout(count: 4, radius: $0.0, thickness: $0.1)
+        }
         for x in [400.0, 800] {
             let tip = CGPoint(x: x, y: 450)
-            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts))
             XCTAssertEqual(placement.origin, tip)
             XCTAssertEqual(placement.direction, -2 * .pi / 3, accuracy: 1e-12)
             XCTAssertEqual(placement.scale, 1)
             for _ in 0..<20 {
-                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
+                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts), placement)
             }
         }
         for tip in [CGPoint(x: 600, y: 12), CGPoint(x: 600, y: 822),
                     CGPoint(x: 12, y: 417), CGPoint(x: 1182, y: 417),
                     .zero, CGPoint(x: 1194, y: 0), CGPoint(x: 0, y: 834), CGPoint(x: 1194, y: 834)] {
-            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
-            for _ in 0..<20 {
-                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
-            }
+            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts))
+            XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts), placement)
             XCTAssertGreaterThanOrEqual(placement.scale, 0.8)
             XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 120)
-            let bounds = RadialGeometry.bounds(direction: placement.direction, radius: 284 * placement.scale)
+            let bounds = RadialGeometry.bounds(layouts: layouts, direction: placement.direction, scale: placement.scale)
                 .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
             XCTAssertGreaterThanOrEqual(bounds.minX, 8 - 1e-9)
             XCTAssertGreaterThanOrEqual(bounds.minY, 8 - 1e-9)
@@ -65,56 +65,65 @@ final class EditorInputModelTests: XCTestCase {
         }
     }
 
-    func testTopCenterFanUsesExactCounterClockwiseDownwardTiltAtTheTip() throws {
+    func testTopCenterCirclesUseExactCounterClockwiseDownwardTilt() throws {
         let size = CGSize(width: 1194, height: 834)
-        for y in [0.0, 8, 12] {
-            let tip = CGPoint(x: size.width / 2, y: y)
-            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284))
-            XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
-            XCTAssertEqual(placement.origin, tip)
-            XCTAssertEqual(placement.scale, 1)
-            let bounds = RadialGeometry.bounds(direction: placement.direction, radius: 284)
-                .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
-            XCTAssertGreaterThanOrEqual(bounds.minX, 8 - 1e-9)
-            XCTAssertGreaterThanOrEqual(bounds.minY, y - 1e-9)
-            XCTAssertLessThanOrEqual(bounds.maxX, size.width - 8 + 1e-9)
-            XCTAssertLessThanOrEqual(bounds.maxY, size.height - 8 + 1e-9)
-            for _ in 0..<20 {
-                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, outerRadius: 284), placement)
+        for count in 1...7 {
+            let layouts = [RadialRingLayout(count: count, radius: 260, thickness: 48)]
+            for y in [0.0, 8, 12] {
+                let tip = CGPoint(x: size.width / 2, y: y)
+                let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts))
+                XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
+                XCTAssertEqual(placement.origin.x, tip.x)
+                XCTAssertEqual(placement.scale, 1)
+                let bounds = RadialGeometry.bounds(layouts: layouts, direction: placement.direction)
+                    .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+                XCTAssertGreaterThanOrEqual(bounds.minX, 8 - 1e-9)
+                XCTAssertGreaterThanOrEqual(bounds.minY, -1e-9)
+                XCTAssertLessThanOrEqual(bounds.maxX, size.width - 8 + 1e-9)
+                XCTAssertLessThanOrEqual(bounds.maxY, size.height - 8 + 1e-9)
+                XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts), placement)
             }
         }
     }
 
-    func testChromeExclusionAcrossEdgesCornersAndEveryBandExtent() throws {
+    func testChromeExclusionAcrossEdgesCornersCountsAndEveryBandExtent() throws {
         for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
                      CGSize(width: 1376, height: 1032)] {
             let tips = [CGPoint.zero, CGPoint(x: size.width / 2, y: 0),
                 CGPoint(x: size.width, y: 0), CGPoint(x: 0, y: 72),
-                CGPoint(x: size.width, y: 72), CGPoint(x: 12, y: 88), // screenshot fixture
+                CGPoint(x: size.width, y: 72), CGPoint(x: 12, y: 88),
                 CGPoint(x: 60, y: 92), CGPoint(x: size.width - 10, y: 92),
                 CGPoint(x: 0, y: size.height / 2), CGPoint(x: size.width, y: size.height / 2),
                 CGPoint(x: 0, y: size.height), CGPoint(x: size.width / 2, y: size.height),
                 CGPoint(x: size.width, y: size.height), CGPoint(x: size.width / 2, y: 450)]
-            // Primary, root picker and All: inner AND outer edges, not just label centers.
-            for radius in [160.0, 156, 284] {
-                for tip in tips {
-                    let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
-                        outerRadius: radius, minimumY: 72))
-                    XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size,
-                        outerRadius: radius, minimumY: 72), placement)
-                    XCTAssertGreaterThanOrEqual(placement.scale, RadialGeometry.minimumScale)
-                    XCTAssertLessThanOrEqual(placement.scale, 1)
-                    XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
-                    // Independent perimeter sampling checks the whole swept sector;
-                    // do not reuse the solver's bounds calculation as the oracle.
-                    for degree in 0...120 {
-                        let angle = placement.direction - .pi / 3 + Double(degree) * .pi / 180
-                        for r in [0.0, radius * 0.4, radius] {
-                            let point = placement.point(radius: r, angle: angle)
-                            XCTAssertGreaterThanOrEqual(point.x, -1e-9)
-                            XCTAssertLessThanOrEqual(point.x, size.width + 1e-9)
-                            XCTAssertGreaterThanOrEqual(point.y, 72 - 1e-9)
-                            XCTAssertLessThanOrEqual(point.y, size.height + 1e-9)
+            for count in 1...7 {
+                for bands in [[(84.0, 40.0), (136, 48)], [(136.0, 40.0)], [(132.0, 48.0), (196, 48), (260, 48)]] {
+                    let layouts = bands.map { RadialRingLayout(count: count, radius: $0.0, thickness: $0.1) }
+                    for tip in tips {
+                        let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                            layouts: layouts, minimumY: 72))
+                        XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size,
+                            layouts: layouts, minimumY: 72), placement)
+                        XCTAssertGreaterThanOrEqual(placement.scale, RadialGeometry.minimumScale)
+                        XCTAssertLessThanOrEqual(placement.scale, 1)
+                        XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                        // Sample complete backing discs swept along the derived
+                        // centerline independently of the solver's bounds.
+                        for layout in layouts.map({ $0.oriented(placement.direction) }) {
+                            for step in 0...24 {
+                                let angle = layout.backing.start + layout.sweep * Double(step) / 24
+                                for degree in stride(from: 0, to: 360, by: 15) {
+                                    let normal = Double(degree) * .pi / 180
+                                    let local = CGPoint(x: cos(angle) * layout.radius + cos(normal) * layout.thickness / 2,
+                                                        y: sin(angle) * layout.radius + sin(normal) * layout.thickness / 2)
+                                    let x = placement.origin.x + local.x * placement.scale
+                                    let y = placement.origin.y + local.y * placement.scale
+                                    XCTAssertGreaterThanOrEqual(x, -1e-6)
+                                    XCTAssertLessThanOrEqual(x, size.width + 1e-6)
+                                    XCTAssertGreaterThanOrEqual(y, 72 - 1e-6)
+                                    XCTAssertLessThanOrEqual(y, size.height + 1e-6)
+                                }
+                            }
                         }
                     }
                 }
@@ -124,43 +133,60 @@ final class EditorInputModelTests: XCTestCase {
 
     func testTopCenterChromeFallbackRetainsCanonicalDownwardTiltAndFeasibleTipAnchor() throws {
         let size = CGSize(width: 1194, height: 834)
-        for radius in [160.0, 284] {
-            for y in [0.0, 12, 72, 80, 100] {
-                let tip = CGPoint(x: size.width / 2, y: y)
+        for count in 1...7 {
+            for radius in [136.0, 260] {
+                let layouts = [RadialRingLayout(count: count, radius: radius, thickness: 48)]
+                for y in [0.0, 12, 72, 80, 100] {
+                    let tip = CGPoint(x: size.width / 2, y: y)
+                    let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                        layouts: layouts, minimumY: 72))
+                    XCTAssertEqual(placement.origin.x, tip.x, accuracy: 1e-9)
+                    if count < 7 || radius == 260 {
+                        XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
+                        XCTAssertEqual(placement.origin.y, max(84, y), accuracy: 1e-9,
+                                       "The complete 8-point tip dot also clears chrome")
+                    } else {
+                        // Seven 40-point circles span past the old short fan;
+                        // retain downward orientation while fitting both ends.
+                        XCTAssertGreaterThan(sin(placement.direction), 0)
+                        let box = RadialGeometry.bounds(layouts: layouts, direction: placement.direction,
+                            scale: placement.scale).offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+                        XCTAssertGreaterThanOrEqual(box.minY, 80 - 1e-9)
+                        XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                    }
+                    XCTAssertEqual(placement.scale, 1)
+                }
+                let tip = CGPoint(x: 600, y: 450)
                 let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
-                    outerRadius: radius, minimumY: 72))
-                XCTAssertEqual(placement.direction, .pi / 3, accuracy: 1e-12)
-                XCTAssertEqual(placement.origin.x, tip.x, accuracy: 1e-9)
-                XCTAssertEqual(placement.origin.y, max(80, y), accuracy: 1e-9)
-                XCTAssertEqual(placement.scale, 1)
+                    layouts: layouts, minimumY: 72))
+                XCTAssertEqual(placement.origin, tip)
+                XCTAssertEqual(placement.direction, RadialGeometry.defaultDirection)
             }
-            let tip = CGPoint(x: 600, y: 450)
-            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
-                outerRadius: radius, minimumY: 72))
-            XCTAssertEqual(placement.origin, tip)
-            XCTAssertEqual(placement.direction, RadialGeometry.defaultDirection)
         }
     }
 
-    func testInfeasibleFanDoesNotReturnAnOverlappingPlacement() {
+    func testInfeasibleCirclesDoNotReturnAnOverlappingPlacement() {
+        let layouts = [RadialRingLayout(count: 7, radius: 260, thickness: 48)]
         for size in [CGSize(width: 1194, height: 72), CGSize(width: 100, height: 180)] {
             XCTAssertNil(RadialGeometry.placement(tip: CGPoint(x: 12, y: 88), viewport: size,
-                outerRadius: 284, minimumY: 72))
+                layouts: layouts, minimumY: 72))
         }
+        XCTAssertNil(RadialGeometry.placement(tip: .zero, viewport: CGSize(width: 1194, height: 834), layouts: []))
     }
 
-    func testSectorCentersReachableAndOutsideSweepAndRenderedGapsCancel() {
+    func testCircleCentersReachableAndOutsideBackingAndRenderedGapsCancel() {
         for direction in [-Double.pi, RadialGeometry.defaultDirection, .pi / 3, -.pi / 3, .pi / 2, 2 * .pi] {
-            for count in 2...4 {
-                let spacing = RadialGeometry.sweep / Double(count)
-                for index in 0..<count {
-                    let start = RadialGeometry.angle(forSlot: index, count: count, direction: direction)
-                    XCTAssertEqual(RadialGeometry.slot(atAngle: start + spacing / 2, count: count, direction: direction), index)
-                    XCTAssertNil(RadialGeometry.slot(atAngle: start, count: count, direction: direction))
+            for count in 1...7 {
+                let layout = RadialRingLayout(count: count, radius: 136, thickness: 48, direction: direction)
+                for slot in 0..<count {
+                    XCTAssertEqual(layout.slot(at: layout.buttonCenter(slot: slot)), slot)
                 }
-                for offset in [RadialGeometry.sweep / 2 + 0.01, .pi, -.pi] {
-                    XCTAssertNil(RadialGeometry.slot(atAngle: direction + offset, count: count, direction: direction))
+                for offset in [layout.sweep / 2 + 0.3, .pi, -.pi] {
+                    let point = CGPoint(x: cos(direction + offset) * 136, y: sin(direction + offset) * 136)
+                    XCTAssertNil(layout.slot(at: point))
                 }
+                XCTAssertNil(layout.slot(at: .zero))
+                XCTAssertNil(layout.slot(at: CGPoint(x: Double.nan, y: 0)))
             }
         }
     }
@@ -175,105 +201,82 @@ final class EditorInputModelTests: XCTestCase {
         }
     }
 
-    func testCurvedBackingIsContinuousAndPillsHaveRoundCapsWithNonselectableGlassGaps() {
+    func testCountFittedBackingHasRoundEndsAndNonselectableGlassRims() {
         for direction in [-Double.pi, RadialGeometry.defaultDirection, .pi / 3, 2 * .pi] {
             for (radius, thickness) in [(84.0, 40.0), (136, 48), (132, 48), (196, 48), (260, 48)] {
-                let backing = RadialGeometry.backing(radius: radius, thickness: thickness, direction: direction)
-                for count in 1...4 {
+                for count in 1...7 {
+                    let layout = RadialRingLayout(count: count, radius: radius, thickness: thickness, direction: direction)
                     for slot in 0..<count {
-                        let start = RadialGeometry.angle(forSlot: slot, count: count, direction: direction)
-                        let middle = start + RadialGeometry.sweep / Double(count) / 2
-                        let center = CGPoint(x: cos(middle) * radius, y: sin(middle) * radius)
-                        XCTAssertEqual(RadialGeometry.slot(at: center, count: count, radius: radius,
-                            thickness: thickness, direction: direction), slot)
-                        let seam = CGPoint(x: cos(start) * radius, y: sin(start) * radius)
-                        XCTAssertTrue(backing.path().contains(seam), "Glass must bridge every choice gap")
-                        XCTAssertNil(RadialGeometry.slot(at: seam, count: count, radius: radius,
-                            thickness: thickness, direction: direction))
-                        let rim = CGPoint(x: cos(middle) * (radius + thickness / 2 - 1),
-                                          y: sin(middle) * (radius + thickness / 2 - 1))
-                        XCTAssertTrue(backing.path().contains(rim))
-                        XCTAssertNil(RadialGeometry.slot(at: rim, count: count, radius: radius,
-                            thickness: thickness, direction: direction))
-                        let pill = RadialGeometry.pill(slot: slot, count: count, radius: radius,
-                            thickness: thickness, direction: direction)
-                        for arc in [backing, pill] {
-                            for (angle, sign) in [(arc.start, -1.0), (arc.end, 1.0)] {
-                                let cap = CGPoint(x: cos(angle) * radius, y: sin(angle) * radius)
-                                let half = arc.thickness / 2
-                                func capPoint(outward: Double, radial: Double = 0) -> CGPoint {
-                                    CGPoint(x: cap.x - sin(angle) * sign * half * outward + cos(angle) * half * radial,
-                                            y: cap.y + cos(angle) * sign * half * outward + sin(angle) * half * radial)
-                                }
-                                XCTAssertTrue(arc.path().contains(capPoint(outward: 0.95)))
-                                XCTAssertFalse(arc.path().contains(capPoint(outward: 1.05)))
-                                XCTAssertFalse(arc.path().contains(capPoint(outward: 0.85, radial: 0.85)),
-                                               "A cap must be round, not a squared-off sector")
-                            }
+                        let center = layout.buttonCenter(slot: slot)
+                        let angle = atan2(center.y, center.x)
+                        let rim = CGPoint(x: center.x + cos(angle) * (thickness / 2 - 1),
+                                          y: center.y + sin(angle) * (thickness / 2 - 1))
+                        XCTAssertTrue(layout.backing.path().contains(rim))
+                        XCTAssertNil(layout.slot(at: rim))
+                    }
+                    let arc = layout.backing
+                    for (angle, sign) in [(arc.start, -1.0), (arc.end, 1.0)] {
+                        let cap = CGPoint(x: cos(angle) * radius, y: sin(angle) * radius)
+                        func capPoint(outward: Double, radial: Double = 0) -> CGPoint {
+                            CGPoint(x: cap.x - sin(angle) * sign * thickness / 2 * outward + cos(angle) * thickness / 2 * radial,
+                                    y: cap.y + cos(angle) * sign * thickness / 2 * outward + sin(angle) * thickness / 2 * radial)
                         }
+                        XCTAssertTrue(arc.path().contains(capPoint(outward: 0.95)))
+                        XCTAssertFalse(arc.path().contains(capPoint(outward: 1.05)))
+                        XCTAssertFalse(arc.path().contains(capPoint(outward: 0.85, radial: 0.85)),
+                                       "Backing endpoints must be round")
                     }
                 }
             }
         }
     }
 
-    func testRoundedPaintedPerimetersFitEveryEdgeAndChromeAtPrimaryRootAndAllExtents() throws {
-        for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
-                     CGSize(width: 1376, height: 1032)] {
-            let tips = [CGPoint.zero, CGPoint(x: size.width / 2, y: 0), CGPoint(x: size.width, y: 0),
-                CGPoint(x: 12, y: 88), CGPoint(x: 60, y: 100), CGPoint(x: size.width - 10, y: 92),
-                CGPoint(x: 0, y: size.height / 2), CGPoint(x: size.width, y: size.height / 2),
-                CGPoint(x: 0, y: size.height), CGPoint(x: size.width / 2, y: size.height),
-                CGPoint(x: size.width, y: size.height), CGPoint(x: size.width / 2, y: 450)]
-            for bands in [[(84.0, 40.0), (136, 48)], [(136.0, 40.0)], [(132.0, 48.0), (196, 48), (260, 48)]] {
-                let extent = bands.map { $0.0 + $0.1 / 2 }.max()!
-                let cap = bands.map { $0.1 / 2 }.max()!
-                for tip in tips {
-                    let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
-                        outerRadius: extent, minimumY: 72, capRadius: cap))
-                    XCTAssertEqual(RadialGeometry.placement(tip: tip, viewport: size,
-                        outerRadius: extent, minimumY: 72, capRadius: cap), placement)
-                    XCTAssertGreaterThanOrEqual(placement.scale, RadialGeometry.minimumScale)
-                    XCTAssertLessThanOrEqual(placement.scale, 1)
-                    XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
-                    for (radius, thickness) in bands {
-                        let arc = RadialGeometry.backing(radius: radius, thickness: thickness,
-                                                        direction: placement.direction)
-                        // Independent sampling of circles swept along the whole
-                        // centerline includes both full cap circles and band edges.
-                        for degree in 0...120 {
-                            let angle = arc.start + Double(degree) * .pi / 180
-                            for circleDegree in stride(from: 0, to: 360, by: 15) {
-                                let capAngle = Double(circleDegree) * .pi / 180
-                                let x = placement.origin.x + (cos(angle) * radius + cos(capAngle) * thickness / 2) * placement.scale
-                                let y = placement.origin.y + (sin(angle) * radius + sin(capAngle) * thickness / 2) * placement.scale
-                                XCTAssertGreaterThanOrEqual(x, -1e-6)
-                                XCTAssertLessThanOrEqual(x, size.width + 1e-6)
-                                XCTAssertGreaterThanOrEqual(y, 72 - 1e-6)
-                                XCTAssertLessThanOrEqual(y, size.height + 1e-6)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    func testRoundedAllChromeCornersRespectDisplacementBeforeScalePreference() throws {
+    func testMixedVisibleCountsFitCompletePaintedPathsAtPrimaryRootAndAllExtents() throws {
         let size = CGSize(width: 1376, height: 1032)
-        for tip in [CGPoint.zero, CGPoint(x: size.width, y: 0)] {
-            let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
-                outerRadius: 284, minimumY: 72, capRadius: 24))
-            XCTAssertLessThan(placement.scale, 1, "Chrome corners require the smaller feasible fan")
-            XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
-            let box = RadialGeometry.bounds(direction: placement.direction,
-                radius: 284 * placement.scale, capRadius: 24 * placement.scale)
-                .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
-            XCTAssertTrue(CGRect(x: 8, y: 80, width: size.width - 16, height: size.height - 88).contains(box))
+        for counts in [[1, 4, 7], [7, 4, 1], [2, 3, 4], [1, 1, 1]] {
+            let layouts = zip(counts, [132.0, 196, 260]).map {
+                RadialRingLayout(count: $0.0, radius: $0.1, thickness: 48)
+            }
+            for tip in [CGPoint.zero, CGPoint(x: 12, y: 88), CGPoint(x: size.width, y: 0),
+                        CGPoint(x: 0, y: size.height), CGPoint(x: size.width, y: size.height)] {
+                let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size, layouts: layouts, minimumY: 72))
+                XCTAssertGreaterThanOrEqual(placement.scale, 0.8)
+                XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                for layout in layouts.map({ $0.oriented(placement.direction) }) {
+                    let paths = [layout.backing.path(center: placement.origin, scale: placement.scale)]
+                        + (0..<layout.count).map { layout.buttonPath(slot: $0, center: placement.origin, scale: placement.scale) }
+                    for path in paths {
+                        let box = path.boundingBoxOfPath
+                        XCTAssertGreaterThanOrEqual(box.minX, -1e-6)
+                        XCTAssertGreaterThanOrEqual(box.minY, 72 - 1e-6)
+                        XCTAssertLessThanOrEqual(box.maxX, size.width + 1e-6)
+                        XCTAssertLessThanOrEqual(box.maxY, size.height + 1e-6)
+                    }
+                }
+            }
         }
-        XCTAssertNil(RadialGeometry.placement(tip: CGPoint(x: -1000, y: -1000),
-            viewport: size, outerRadius: 284, minimumY: 72, capRadius: 24),
-            "No feasible fan may escape the displacement limit")
+    }
+
+    func testCountFittedAllChromeCornersRespectDisplacementBeforeScalePreference() throws {
+        let size = CGSize(width: 1376, height: 1032)
+        for count in 1...7 {
+            let layouts = [(132.0, 48.0), (196, 48), (260, 48)].map {
+                RadialRingLayout(count: count, radius: $0.0, thickness: $0.1)
+            }
+            for tip in [CGPoint.zero, CGPoint(x: size.width, y: 0)] {
+                let placement = try XCTUnwrap(RadialGeometry.placement(tip: tip, viewport: size,
+                    layouts: layouts, minimumY: 72))
+                XCTAssertGreaterThanOrEqual(placement.scale, 0.8)
+                XCTAssertLessThanOrEqual(placement.scale, 1)
+                XCTAssertLessThanOrEqual(hypot(placement.origin.x - tip.x, placement.origin.y - tip.y), 180)
+                let box = RadialGeometry.bounds(layouts: layouts, direction: placement.direction, scale: placement.scale)
+                    .offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+                XCTAssertTrue(CGRect(x: 8, y: 80, width: size.width - 16, height: size.height - 88).contains(box))
+            }
+            XCTAssertNil(RadialGeometry.placement(tip: CGPoint(x: -1000, y: -1000),
+                viewport: size, layouts: layouts, minimumY: 72),
+                "No feasible fan may escape the displacement limit")
+        }
     }
 
     func testPopupLayoutAnchorsEachSourceAndFitsTheViewport() {
@@ -297,18 +300,20 @@ final class EditorInputModelTests: XCTestCase {
         for tool in ChordTool.allCases { XCTAssertFalse(tool.symbol.isEmpty) }
     }
 
-    func testEmptyChordStartsRemainBarConstrainedAndPartialBarsAreUnavailable() {
+    func testEmptyChordStartsSnapToBeatGridAndAllowPartialBars() {
         let viewport = EditorViewport()
         let stepWidth = viewport.stepWidth(in: 1280)
         for step in 16..<32 {
             let hit = ChordStripHitTester.hit(x: 56 + (Double(step) + 0.5) * stepWidth,
                 y: 50, width: 1336, height: 104, headerWidth: 56, viewport: viewport, regions: [])
-            XCTAssertEqual(hit?.target, .emptyBar(startStep: 16))
+            let expectedBeatStart = (step / 4) * 4
+            XCTAssertEqual(hit?.target, .emptyBar(startStep: expectedBeatStart))
         }
-        XCTAssertNil(ChordStripHitTester.hit(x: 56 + 20.5 * stepWidth,
+        let partialHit = ChordStripHitTester.hit(x: 56 + 20.5 * stepWidth,
             y: 50, width: 1336, height: 104, headerWidth: 56, viewport: viewport,
-            regions: [(id: "partial", start: 16, end: 18)]),
-            "The unused tail of a partial bar is not a new chord-start target")
+            regions: [(id: "partial", start: 16, end: 18)])
+        XCTAssertEqual(partialHit?.target, .emptyBar(startStep: 20),
+            "Unused beats in a partial bar are valid chord-start targets")
     }
 
     func testEveryMusicMutationIsRejectedForFingerAndAcceptedForPencil() {
@@ -378,7 +383,7 @@ final class EditorInputModelTests: XCTestCase {
 
         let empty = ChordStripHitTester.hit(x: 56 + stepWidth * 20, y: 50, width: 1366,
             height: 104, headerWidth: 56, viewport: viewport, regions: regions)
-        XCTAssertEqual(empty?.target, .emptyBar(startStep: 16))
+        XCTAssertEqual(empty?.target, .emptyBar(startStep: 20))
 
         let occupied = ChordStripHitTester.hit(x: 56 + stepWidth * 35, y: 40, width: 1366,
             height: 104, headerWidth: 56, viewport: viewport, regions: regions)
@@ -456,10 +461,11 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertNil(RadialGeometry.ring(forRadius: 40, rings: [(.inner, 64, 104)]))
         XCTAssertEqual(RadialGeometry.ring(forRadius: 64, rings: [(.inner, 64, 104)]), .inner)
         XCTAssertEqual(RadialGeometry.ring(forRadius: 104, rings: [(.inner, 64, 104)]), .inner)
-        for count in 2...4 {
+        for count in 1...7 {
+            let layout = RadialRingLayout(count: count, radius: 84, thickness: 40)
+            XCTAssertNil(layout.slot(at: .zero))
             for slot in 0..<count {
-                let angle = RadialGeometry.angle(forSlot: slot, count: count) + RadialGeometry.sweep / Double(count) / 2
-                XCTAssertEqual(RadialGeometry.slot(atAngle: angle, count: count), slot)
+                XCTAssertEqual(layout.slot(at: layout.buttonCenter(slot: slot)), slot)
             }
         }
     }

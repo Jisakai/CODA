@@ -280,6 +280,119 @@ static void concurrencyAndReprepare() {
     gate.leave(); closer.join(); check(closed.load() && !gate.enter(),"close joins reader before destruction");
 }
 #include "performance_tests.h"
+static void multiLayerTransport() {
+    Owner o(48000);
+    // 1. Mixer controls validation & publication.
+    auto m=coda_dsp_default_mixer_controls();
+    m.delay_amount=0; m.reverb_amount=0;
+    m.layers[CODA_LAYER_CHORDS].preset=CODA_PRESET_CURRENTS;
+    m.layers[CODA_LAYER_BASS].preset=CODA_PRESET_WOBBLE;
+    m.layers[CODA_LAYER_MELODY].preset=CODA_PRESET_WOBBLE;
+    check(coda_transport_mixer_controls(o.t,&m)==1,"valid mixer controls accepted");
+    auto badMixer=m; badMixer.layers[CODA_LAYER_BASS].cutoff=NAN;
+    check(coda_transport_mixer_controls(o.t,&badMixer)==-1,"NaN mixer layer control rejected");
+    badMixer=m; badMixer.layers[CODA_LAYER_MELODY].preset=3;
+    check(coda_transport_mixer_controls(o.t,&badMixer)==-1,"invalid mixer preset rejected");
+    badMixer=m; badMixer.tempo_bpm=10;
+    check(coda_transport_mixer_controls(o.t,&badMixer)==-1,"invalid mixer tempo rejected");
+
+    // 2. Multi-layer unison performance plan (same MIDI pitch 60 on Chords, Bass, Melody)
+    //    plus windowed continuation across window boundary and seek/restore.
+    auto p=std::make_unique<CodaPerformancePlan>();
+    p->playback_revision=1; p->samples_per_step=400; p->length=32; p->window_steps=16;
+    p->playing=1; p->looping=1;
+    auto fillUnisonWindow=[&](CodaPerformanceCycle &c,uint64_t cyc,uint8_t flags) {
+        c={}; c.cycle_index=cyc; c.sample_origin=cyc*16*400; c.sample_count=16*400; c.count=0;
+        for(uint8_t L=0;L<CODA_LAYER_COUNT;++L) {
+            CodaPerformanceEvent on{};
+            on.sample_offset=0; on.owner.instance=10+L; on.harmonic_token=1;
+            on.kind=CODA_EVENT_ON; on.pitch=60; on.voice_rank=0; on.layer=L;
+            on.base_velocity=0.8f; on.effective_velocity=0.8f;
+            on.continuation_id=100+L; on.continuation_flags=flags;
+            c.events[c.count++]=on;
+        }
+        for(uint8_t L=0;L<CODA_LAYER_COUNT;++L) {
+            CodaPerformanceEvent off=c.events[L];
+            off.kind=CODA_EVENT_OFF; off.sample_offset=int64_t(c.sample_count);
+            c.events[c.count++]=off;
+        }
+    };
+    fillUnisonWindow(p->initial_cycle,0,2); // sustain into next window
+    // Out-of-range layer must be rejected.
+    auto badLayer=std::make_unique<CodaPerformancePlan>(*p);
+    badLayer->initial_cycle.events[0].layer=CODA_LAYER_COUNT;
+    uint64_t g=0;
+    check(coda_transport_publish_performance(o.t,badLayer.get(),&g)==-1,"out-of-range layer rejected");
+    // Same-layer duplicate pitch must still be rejected.
+    auto dupSameLayer=std::make_unique<CodaPerformancePlan>(*p);
+    dupSameLayer->initial_cycle.events[1].layer=CODA_LAYER_CHORDS;
+    dupSameLayer->initial_cycle.events[4].layer=CODA_LAYER_CHORDS;
+    check(coda_transport_publish_performance(o.t,dupSameLayer.get(),&g)==-1,"same-layer duplicate pitch rejected");
+
+    // Cross-layer unison pitch 60 on all 3 layers is accepted.
+    check(coda_transport_publish_performance(o.t,p.get(),&g)==1,"3-layer unison performance plan admitted");
+    auto w1=std::make_unique<CodaPerformanceCycle>();
+    fillUnisonWindow(*w1,1,1); // carry from previous window, end at boundary
+    check(coda_transport_enqueue_performance_cycle(o.t,g,w1.get())==1,"window 1 unison carry queued");
+    run(o.t,1000);
+    check(status(o.t).delivered==3,"all 3 unison layers delivered");
+
+    // Mute Chords & Bass; Melody unison must remain audible.
+    m.layers[CODA_LAYER_CHORDS].muted=1;
+    m.layers[CODA_LAYER_BASS].muted=1;
+    m.layers[CODA_LAYER_MELODY].muted=0;
+    check(coda_transport_mixer_controls(o.t,&m)==1,"mute chords+bass via transport");
+    run(o.t,1200);
+    float buf[1024]{};
+    count_allocations=true;
+    coda_transport_render(o.t,buf,1024);
+    count_allocations=false;
+    check(allocation_count==0 && deallocation_count==0,"3-layer mixer render zero allocations");
+    double melEnergy=0;
+    for(float x:buf) melEnergy+=double(x)*x;
+    check(melEnergy>1e-5,"melody unison audible while chords+bass muted");
+
+    // Advance across window boundary (6400 total samples in window 0); continuation keeps notes held without retriggering!
+    const auto deliveredBeforeBoundary=status(o.t).delivered;
+    run(o.t,uint32_t(6400-status(o.t).clock+10));
+    check(performanceStatus(o.t).cycle==1 && status(o.t).delivered==deliveredBeforeBoundary,
+          "3-layer unison continuation carries across window boundary without retrigger");
+
+    // 3. Per-layer audition (Bass & Melody) with validation and zero allocations.
+    const uint8_t bassPitch[]={40};
+    const uint8_t melPitch[]={72};
+    check(coda_transport_audition_layer(o.t,CODA_LAYER_COUNT,bassPitch,1,512)==-1,"invalid audition layer rejected");
+    // Unmute Bass only and audition Bass layer.
+    m.layers[CODA_LAYER_CHORDS].muted=1;
+    m.layers[CODA_LAYER_BASS].muted=0;
+    m.layers[CODA_LAYER_MELODY].muted=1;
+    check(coda_transport_mixer_controls(o.t,&m)==1,"solo bass for audition");
+    // Pause transport so only audition produces sound.
+    p->playing=0; ++p->playback_revision;
+    fillUnisonWindow(p->initial_cycle,1,0);
+    check(coda_transport_publish_performance(o.t,p.get(),&g)==1,"pause before layer audition");
+    run(o.t,1200);
+    check(coda_transport_audition_layer(o.t,CODA_LAYER_BASS,bassPitch,1,1024)==1,"bass layer audition admitted");
+    count_allocations=true;
+    coda_transport_render(o.t,buf,1024);
+    count_allocations=false;
+    check(allocation_count==0 && deallocation_count==0,"bass audition render zero allocations");
+    double bassAuditionEnergy=0;
+    for(float x:buf) bassAuditionEnergy+=double(x)*x;
+    check(bassAuditionEnergy>1e-5,"bass layer audition produces audible output");
+    // Let audition expire and verify release.
+    const auto beforeExpiry=status(o.t).delivered;
+    run(o.t,10);
+    check(status(o.t).delivered==beforeExpiry+1,"bass audition expiry releases cleanly");
+
+    // Audition Melody layer while Bass is soloed (Melody muted) -> should be silent!
+    check(coda_transport_audition_layer(o.t,CODA_LAYER_MELODY,melPitch,1,512)==1,"melody audition while muted admitted");
+    run(o.t,2000);
+    // Cancel audition explicitly with count 0.
+    check(coda_transport_audition_layer(o.t,CODA_LAYER_MELODY,nullptr,0,0)==1,"cancel layer audition");
+    run(o.t,10);
+    check(status(o.t).failures==0,"zero transport failures across multi-layer tests");
+}
 int main() {
     std::setbuf(stderr,nullptr);
 #if defined(__APPLE__)
@@ -320,6 +433,7 @@ int main() {
     check(allocation_count && deallocation_count,"allocation hooks calibrated"); allocation_count=deallocation_count=0;
     performanceModePhase();performanceBoundaryRejection();performanceConcurrentReconfiguration();
     performanceTransport(); performanceTransitions(); performanceAdmission(); performanceRetriggerAndAudio(); performanceConcurrentRefill(); performanceAbsoluteOrigins(); performanceNonzeroSeekAndConfiguration();
+    multiLayerTransport();
     timing(); transitions(); nonloopBoundaries(); auditionAtEnd(); durableIntent(); fractionalPauseIntent(); pressureAndValidation(); concurrencyAndReprepare();
     {std::lock_guard lock(mutex); finished=true;} cv.notify_one(); watchdog.join();
     std::puts("PASS: production transport timing, transitions, publication, controls, concurrency, gate, reprepare; zero render new/delete");

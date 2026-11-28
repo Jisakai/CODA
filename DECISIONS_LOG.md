@@ -4,6 +4,11 @@ Behavior authority: `SPEC.md`. Visual authority: `docs/DESIGN.md`. Owner decisio
 
 ## Owner-confirmed decisions
 
+### Radial menu circular options and count-fitted backing
+- **Status:** DECIDED by the owner. Every radial option is a true circle, never a pill/capsule. Backing length and button layout follow the actual visible count, including seven choices; the example does not authorize adding or removing actions. Shared geometry governs drawing, selection and edge fitting. This supersedes the earlier pill presentation only.
+- **Source:** “fully circular buttons in the radial menu not pills and size the menu length around the circles like if there are 7 buttons then size it that way”. Active bounded brief: `docs/briefs/M1-radial-circle-count-correction.md`.
+- **Verification:** implementation and native visual verification pending; no physical iPad/Pencil acceptance claimed. Existing unfinished M1b Swing-ingress work remains separate and open.
+
 ### App and sidekick name
 - **Status:** DECIDED by the owner.
 - **App name:** coda.

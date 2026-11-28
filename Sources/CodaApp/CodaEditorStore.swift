@@ -5,18 +5,48 @@ import CodaMusic
 import CodaSession
 import CodaNative
 import CodaInteraction
+import CodaSidekick
 
 enum EditorPopup: String, Identifiable, Hashable {
     case appSettings
     case projectSettings
     case keyScale
     case tempo
+    case layers
     var id: String { rawValue }
+}
+
+enum WrenchSettingsTab: String, CaseIterable, Identifiable {
+    case project
+    case importExport
+    case canvas
+    case gestures
+    case prefs
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .project: "Project"
+        case .importExport: "Import / Export"
+        case .canvas: "Canvas"
+        case .gestures: "Gestures"
+        case .prefs: "Prefs"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .project: "folder"
+        case .importExport: "square.and.arrow.up.on.square"
+        case .canvas: "square.grid.2x2"
+        case .gestures: "hand.draw"
+        case .prefs: "slider.horizontal.3"
+        }
+    }
 }
 
 enum EditorKnob: String, CaseIterable, Identifiable, Hashable {
     case wobble, warmth, cutoff, resonance, shape, detune, glide
-    case delay, reverb, chordLevel
+    case chorus, delay, reverb, chordLevel
 
     var id: String { rawValue }
     var title: String {
@@ -28,6 +58,7 @@ enum EditorKnob: String, CaseIterable, Identifiable, Hashable {
         case .shape: "Shape"
         case .detune: "Detune"
         case .glide: "Glide"
+        case .chorus: "Chorus"
         case .delay: "Delay"
         case .reverb: "Reverb"
         case .chordLevel: "Chords"
@@ -69,9 +100,13 @@ struct ResizeDraft {
 }
 
 struct HoldMenuState {
-    let regionID: String
+    let regionID: String?
     let origin: CGPoint
     var selectedIndex: Int?
+    var noteReferences: Set<RollNoteReference> = []
+    var layerNoteIDs: Set<String> = []
+    var emptyStep: Int? = nil
+    var ghostID: UUID? = nil
 }
 
 struct KnobResetState {
@@ -83,6 +118,46 @@ struct KnobResetState {
 final class CodaEditorStore {
     let session: MusicSession?
     let startupError: String?
+    let gestureSettings = GestureSettings()
+    let projectHub = ProjectHubStore()
+    private let fallbackPluginHost = PluginHostManager()
+    var pluginHost: PluginHostManager { session?.pluginHost ?? fallbackPluginHost }
+    let sidekick: SidekickEngine
+
+    var activeLayer: MusicLayer = .chords
+    var extraLayers: [ExtraLayerTrack] { session?.extraLayers ?? [] }
+    var activeExtraLayerID: String? { session?.activeExtraLayerID }
+    var bassRollDraft: BassRollDraft?
+    var melodyRollDraft: MelodyRollDraft?
+    var selectedLayerNoteIDs: Set<String> = []
+    @ObservationIgnored var bassClipboard: [BassNote] = []
+    @ObservationIgnored var melodyClipboard: [MelodyNote] = []
+    @ObservationIgnored var melodyNudgeTarget: String?
+    @ObservationIgnored var melodyNudgeAngle: Double?
+    @ObservationIgnored var melodyNudgeAccumulator = BarrelRollAccumulator()
+    @ObservationIgnored var melodyNudgeFraction = 0.0
+    @ObservationIgnored var melodyNudgeBase: MelodyNote?
+    @ObservationIgnored var melodyNudgePreview: MelodyNote?
+
+    var synthRackOpen = false { willSet { if newValue != synthRackOpen { pencilTouchCancelled() } } }
+    var synthRackTab: SynthRackTab = .codaSynth
+    var projectHubOpen = false { willSet { if newValue != projectHubOpen { pencilTouchCancelled() } } }
+    var wrenchTab: WrenchSettingsTab = .project
+    var scaleHighlightsVisible = true
+    var scaleLockEnabled = false
+    var velocityLaneVisible = false
+    var ghostLayersOpacity: Double = 0.30
+    var chorusAmount: Double = 0.16
+    var autosaveRecoveryDocument: CodaProjectDocument?
+    var abSnapshotActive: Bool { session?.showingSnapshotB ?? false }
+    var currentProjectName: String = "Untitled Sketch"
+    @ObservationIgnored private var autosaveWork: DispatchWorkItem?
+    @ObservationIgnored private var cutoffRollAngle: Double?
+    @ObservationIgnored private var cutoffRollAccumulator = BarrelRollAccumulator()
+
+    var isPatternSqueezeMenu: Bool { patternSqueezeMenu }
+    var bassNotes: [BassNote] { session?.bassTrack.notes ?? [] }
+    var melodyNotes: [MelodyNote] { session?.melodyTrack.notes ?? [] }
 
     var popup: EditorPopup? {
         willSet {
@@ -93,6 +168,23 @@ final class CodaEditorStore {
         didSet { recordUIEvent("popup.state \(oldValue?.rawValue ?? "nil")->\(popup?.rawValue ?? "nil")") }
     }
     var detailsVisible = false
+    var noteLabelsVisible = false
+    var gridSnap = true
+    var rollTool: PianoRollTool = PianoRollTool(rawValue: UserDefaults.standard.string(forKey: "editor.rollTool") ?? "") ?? .drawErase {
+        didSet { UserDefaults.standard.set(rollTool.rawValue, forKey: "editor.rollTool") }
+    }
+    var selectedNotes: Set<RollNoteReference> = []
+    var rollDraft: PianoRollDraft?
+    var rollMarquee: CGRect?
+    var razorPoint: CGPoint?
+    @ObservationIgnored var rollClipboard: [CopiedRollNote] = []
+    @ObservationIgnored var rollHoldWork: DispatchWorkItem?
+    @ObservationIgnored var chordRollTarget: String?
+    @ObservationIgnored var chordRollAngle: Double?
+    @ObservationIgnored var chordRollAccumulator = BarrelRollAccumulator()
+    @ObservationIgnored var chordRollFraction = 0.0
+    @ObservationIgnored var chordRollBase: ChordRegion?
+    @ObservationIgnored var chordRollPreview: ChordRegion?
     var drawerOpen = false { willSet { if newValue != drawerOpen { pencilTouchCancelled() } } }
     var fxExpanded = false
     var chromeHidden = false { willSet { if newValue != chromeHidden { pencilTouchCancelled() } } }
@@ -101,7 +193,12 @@ final class CodaEditorStore {
     var key = MusicDefaults.key
     var rootSize = CGSize(width: 1366, height: 1024)
     var viewport = EditorViewport(topMIDI: CodaDesignTokens.Geometry.pianoRollTopMIDI) {
-        willSet { if newValue != viewport { cancelPatternInput() } }
+        willSet {
+            if newValue != viewport {
+                cancelPatternInput()
+                if rollDraft != nil { cancelRollGesture(); discardPencilLift = true; clearTouch() }
+            }
+        }
     }
     private(set) var patternEditing = false
     private(set) var patternPreview: PatternGestureValue?
@@ -124,6 +221,10 @@ final class CodaEditorStore {
     var hoveredStep: Int?
     var playheadStep = 0
     var radial: RadialMenuState?
+    #if DEBUG
+    // Native screenshot/hover coverage of counts beyond the unchanged page size.
+    var radialCircleFixtureCount: Int?
+    #endif
     var holdMenu: HoldMenuState?
     var knobReset: KnobResetState?
     var resizeDraft: ResizeDraft?
@@ -159,11 +260,13 @@ final class CodaEditorStore {
     @ObservationIgnored private var lastPreviewTime = -Double.infinity
 
     // Opt-in, MainActor-only native diagnostics. Never used by audio rendering.
+    private static let uiDiagnosticSnapshotLimit = 480
     let uiDiagnosticsEnabled: Bool
     private(set) var uiDiagnosticReport = ""
     @ObservationIgnored private(set) var uiAnchorFrames: [String: [EditorPopup: CGRect]] = [:]
     @ObservationIgnored private(set) var uiPopupFrames: [EditorPopup: CGRect] = [:]
     @ObservationIgnored private var uiEvents: [String] = []
+    @ObservationIgnored private var uiEventSerial = 0
     @ObservationIgnored var uiEventObserver: ((String) -> Void)?
 
     init(session: MusicSession?, startupError: String? = nil,
@@ -171,14 +274,33 @@ final class CodaEditorStore {
         self.session = session
         self.startupError = startupError
         self.uiDiagnosticsEnabled = uiDiagnosticsEnabled
+        self.sidekick = SidekickEngine()
+        self.chorusAmount = Double(session?.mixerControls.chorus_amount ?? 0.16)
+        self.autosaveRecoveryDocument = projectHub.loadAutosave()
+        projectHub.refreshIndex()
     }
 
     func recordUIEvent(_ event: String) {
         guard uiDiagnosticsEnabled else { return }
-        let entry = "\(ProcessInfo.processInfo.systemUptime) \(event)"
+        uiEventSerial += 1
+        let entry = "#\(uiEventSerial) \(ProcessInfo.processInfo.systemUptime) \(event)"
         uiEvents.append(entry)
         if uiEvents.count > 96 { uiEvents.removeFirst(uiEvents.count - 96) }
-        uiDiagnosticReport = uiEvents.joined(separator: "\n")
+        // XCTest's cached AX value cut the old oldest-first report at ~500
+        // characters, before any input. Keep the newest events in that prefix
+        // and bound the value itself so snapshots cannot hide a stale prefix.
+        var report = ""
+        for recent in uiEvents.reversed() {
+            let separator = report.isEmpty ? "" : "\n"
+            guard report.utf16.count + separator.utf16.count + recent.utf16.count <= Self.uiDiagnosticSnapshotLimit else {
+                if report.isEmpty {
+                    report = String(decoding: recent.utf16.prefix(Self.uiDiagnosticSnapshotLimit - 1), as: UTF16.self) + "…"
+                }
+                break
+            }
+            report += separator + recent
+        }
+        uiDiagnosticReport = report
         print("M1 UI \(entry)")
         uiEventObserver?(event)
     }
@@ -201,6 +323,7 @@ final class CodaEditorStore {
     func recordPatternControlsFrame(_ frame: CGRect) {
         guard patternControlsFrame != frame else { return }
         patternControlsFrame = frame
+        recordUIEvent("pattern.controls.frame \(frame)")
     }
 
     func presentSettings(_ surface: EditorPopup) {
@@ -241,7 +364,7 @@ final class CodaEditorStore {
         if size != rootSize, patternGestureWasActive { pencilTouchCancelled() }
         rootSize = size
         if !hasActivePencilTouch, var state = radial {
-            guard let placement = menuPlacement(state.anchor, mode: state.mode) else {
+            guard let placement = menuPlacement(state.anchor, state: state) else {
                 closeRadial()
                 return
             }
@@ -300,15 +423,16 @@ final class CodaEditorStore {
     }
 
     func setLoopBars(_ bars: Int, startBar: Int? = nil) {
-        let barCount = min(MusicDefaults.canvasBars, max(1, bars))
+        let barCount = max(1, bars)
         guard let session else { return }
-        let start = min(MusicDefaults.canvasBars - barCount,
-                        max(0, startBar ?? session.loop.start / MusicDefaults.stepsPerBar))
-        guard let next = try? LoopSpan(start: start * MusicDefaults.stepsPerBar, bars: barCount) else { return }
-        guard next.end <= totalSteps else { return }
+        let start = max(0, startBar ?? session.loop.start / MusicDefaults.stepsPerBar)
+        let (startStep, overflow) = start.multipliedReportingOverflow(by: MusicDefaults.stepsPerBar)
+        guard !overflow, let next = try? LoopSpan(start: startStep, bars: barCount) else { return }
         guard next != session.loop else { return }
         let oldPosition = playheadStep
         do {
+            try session.extendArrangement(through: next.end)
+            viewport.extend(through: totalSteps)
             try session.setLoop(next, enabled: session.looping)
             let target = session.looping && !(next.start..<next.end).contains(oldPosition) ? next.start : oldPosition
             if (0..<totalSteps).contains(target) { try session.seek(step: target); playheadStep = target }
@@ -364,7 +488,7 @@ final class CodaEditorStore {
     func dragLoopHandle(edge: LoopEdge, toX x: CGFloat) {
         guard session != nil,
               let step = viewport.step(atX: Double(x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth)) else { return }
-        let bar = min(MusicDefaults.canvasBars - 1, max(0, step / MusicDefaults.stepsPerBar))
+        let bar = max(0, step / MusicDefaults.stepsPerBar)
         let currentStart = loop.start / MusicDefaults.stepsPerBar
         let currentEnd = loop.end / MusicDefaults.stepsPerBar
         switch edge {
@@ -380,6 +504,7 @@ final class CodaEditorStore {
     func panCanvas(by translation: CGPoint) {
         viewport.pan(horizontalBy: Double(translation.x), verticalBy: Double(translation.y),
                      canvasWidth: Double(contentWidth), canvasHeight: Double(max(1, rootSize.height - rollTop)))
+        growArrangementForViewport()
     }
 
     func zoomCanvas(to magnification: CGFloat, atX x: CGFloat) {
@@ -416,6 +541,7 @@ final class CodaEditorStore {
         case .shape: Double(value.shape)
         case .detune: Double(value.detune)
         case .glide: Double(value.glide)
+        case .chorus: chorusAmount
         case .delay: Double(value.delay_amount)
         case .reverb: Double(value.reverb_amount)
         case .chordLevel: Double(value.chord_level)
@@ -427,20 +553,26 @@ final class CodaEditorStore {
         guard let session else { setError(startupError ?? "Audio session is unavailable."); return }
         let normalized = min(1, max(0, value))
         let oldValue = lastParameterValues[knob] ?? self.value(for: knob)
-        var next = session.controls
-        switch knob {
-        case .wobble: next.wobble = Float(normalized)
-        case .warmth: next.warmth = Float(normalized)
-        case .cutoff: next.cutoff = Float(normalized)
-        case .resonance: next.resonance = Float(normalized)
-        case .shape: next.shape = Float(normalized)
-        case .detune: next.detune = Float(normalized)
-        case .glide: next.glide = Float(normalized)
-        case .delay: next.delay_amount = Float(normalized)
-        case .reverb: next.reverb_amount = Float(normalized)
-        case .chordLevel: next.chord_level = Float(normalized)
+        if knob == .chorus {
+            chorusAmount = normalized
+            setSharedFX(chorus: normalized, delay: Double(session.controls.delay_amount), reverb: Double(session.controls.reverb_amount))
+        } else {
+            var next = session.controls
+            switch knob {
+            case .wobble: next.wobble = Float(normalized)
+            case .warmth: next.warmth = Float(normalized)
+            case .cutoff: next.cutoff = Float(normalized)
+            case .resonance: next.resonance = Float(normalized)
+            case .shape: next.shape = Float(normalized)
+            case .detune: next.detune = Float(normalized)
+            case .glide: next.glide = Float(normalized)
+            case .chorus: break
+            case .delay: next.delay_amount = Float(normalized)
+            case .reverb: next.reverb_amount = Float(normalized)
+            case .chordLevel: next.chord_level = Float(normalized)
+            }
+            guard publish(next) else { return }
         }
-        guard publish(next) else { return }
         let regularDetents = RollDetentTracker.crossed(from: oldValue, to: normalized,
                                                         spacing: CodaDesignTokens.Input.knobDetentSpacing)
         let defaultValue = presetDefault(for: knob)
@@ -479,6 +611,7 @@ final class CodaEditorStore {
         case .shape: Double(defaults.shape)
         case .detune: Double(defaults.detune)
         case .glide: Double(defaults.glide)
+        case .chorus: 0.16
         case .delay: Double(defaults.delay_amount)
         case .reverb: Double(defaults.reverb_amount)
         case .chordLevel: Double(defaults.chord_level)
@@ -523,10 +656,13 @@ final class CodaEditorStore {
         }
     }
 
-    func clearRollTracking() {
+    func clearRollTracking(commitVoicing: Bool = true) {
+        finishChordVoicingRoll(commit: commitVoicing)
+        finishMelodyNudgeRoll(commit: commitVoicing)
         rollAngles.removeAll(keepingCapacity: true)
         rollAccumulators.removeAll(keepingCapacity: true)
         activeRollKnob = nil
+        cutoffRollAngle = nil
     }
 
     func chordName(_ region: ChordRegion) -> String {
@@ -585,6 +721,17 @@ final class CodaEditorStore {
     func suggestions(for regionID: String?) -> [ChordSuggestion] {
         guard let session else { return [] }
         let region = regions.first(where: { $0.id == regionID })
+        let step = min(max(0, region?.start ?? radial?.startStep ?? hoveredStep ?? 0), max(0, session.progression.totalSteps - 1))
+        if let predicted = try? session.predictor.steeredSuggestions(
+            in: session.progression,
+            at: step,
+            key: key,
+            vocabulary: session.vocabulary,
+            bias: .neutral,
+            limit: 12
+        ), !predicted.isEmpty {
+            return predicted
+        }
         let previous = region.map { target in
             regions.filter { $0.id != target.id && $0.end <= target.start }.max { $0.end < $1.end }?.chord
         } ?? regions.filter { $0.end <= (hoveredStep ?? 0) }.max { $0.end < $1.end }?.chord
@@ -593,7 +740,41 @@ final class CodaEditorStore {
     }
 
     func qualities(for family: ChordFamily) -> [ChordQuality] {
-        session?.vocabulary.ring(family) ?? []
+        guard let session else { return [] }
+        let base = session.vocabulary.ring(family)
+        guard base.count > 1 else { return base }
+        let targetRegion = radial?.regionID.flatMap { id in regions.first(where: { $0.id == id }) }
+        let step = min(max(0, targetRegion?.start ?? radial?.startStep ?? hoveredStep ?? 0), max(0, session.progression.totalSteps - 1))
+        guard let ranked = try? session.predictor.steeredSuggestions(
+            in: session.progression,
+            at: step,
+            key: key,
+            vocabulary: session.vocabulary,
+            bias: .neutral,
+            limit: max(24, session.vocabulary.qualities.count * 2)
+        ), !ranked.isEmpty else {
+            return base
+        }
+        let preferredRoot = targetRegion?.chord.root
+        var rankByQuality: [String: Int] = [:]
+        // Prioritize predictions matching the target chord's root first, then any root in the progression context.
+        for suggestion in ranked {
+            if let preferredRoot, suggestion.chord.root != preferredRoot { continue }
+            if rankByQuality[suggestion.chord.qualityID] == nil {
+                rankByQuality[suggestion.chord.qualityID] = rankByQuality.count
+            }
+        }
+        for suggestion in ranked {
+            if rankByQuality[suggestion.chord.qualityID] == nil {
+                rankByQuality[suggestion.chord.qualityID] = rankByQuality.count
+            }
+        }
+        return base.enumerated().sorted { lhs, rhs in
+            let lRank = rankByQuality[lhs.element.id] ?? Int.max
+            let rRank = rankByQuality[rhs.element.id] ?? Int.max
+            if lRank != rRank { return lRank < rRank }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     func patternControlExcludes(_ point: CGPoint) -> Bool {
@@ -621,7 +802,7 @@ final class CodaEditorStore {
     /// Reverse Canvas paint order: the last painted visible stroke owns overlaps.
     func patternHitTarget(at point: CGPoint) -> PatternStrokeTarget? {
         guard patternFrame.contains(point), !patternControlExcludes(point) else { return nil }
-        for bar in (0..<(viewport.totalSteps / 16)).reversed() {
+        for bar in visibleBars.reversed() {
             for slot in (0..<8).reversed() {
                 if patternGeometry(bar: bar, slot: slot)?.contains(point) == true {
                     return PatternStrokeTarget(bar: bar, slot: slot)
@@ -636,6 +817,13 @@ final class CodaEditorStore {
     }
 
     func updatePatternSettings(swing: Double? = nil, loose: Bool? = nil, spread: Double? = nil, preset: Bool = false) {
+        let swingBefore = uiDiagnosticsEnabled && swing != nil ? currentPatternSettings.swing : nil
+        var swingResult = "no-session"
+        defer {
+            if let swingBefore, let swing {
+                recordUIEvent("pattern.swing.commit before=\(swingBefore) requested=\(swing) after=\(currentPatternSettings.swing) result=\(swingResult)")
+            }
+        }
         guard let session else { return }
         do {
             let range = try PatternDefaults.defaultScope.resolve(loop: session.loop, barCount: session.patterns.barCount)
@@ -655,7 +843,11 @@ final class CodaEditorStore {
                     slots: [PatternStroke?](repeating: nil, count: 8), settings: settings)
                 try session.editPatterns([.add(region)])
             }
-        } catch { setError(error) }
+            swingResult = "ok"
+        } catch {
+            if swingBefore != nil { swingResult = "error:\(String(describing: error).prefix(60))" }
+            setError(error)
+        }
     }
 
     var patternFrame: CGRect {
@@ -738,6 +930,7 @@ final class CodaEditorStore {
         if case .region(let id, false) = hit {
             scheduleHold(for: id, at: point)
         }
+        if case .roll = hit { beginRollGesture(at: point) }
     }
 
     func pencilTouchMoved(to point: CGPoint) {
@@ -766,6 +959,7 @@ final class CodaEditorStore {
         }
         if holdMenu != nil { hoverHoldCommand(at: point); return }
         if radial != nil { updateRadialHover(at: point); return }
+        if hasActiveRollDraft { moveRollGesture(to: point); return }
         if var draft = resizeDraft {
             if let step = viewport.step(atX: Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth)) {
                 draft.end = min(totalSteps, max(draft.region.start + 1, step + 1))
@@ -783,6 +977,9 @@ final class CodaEditorStore {
         lastPencilLocation = point
         touchLast = point
         holdWork?.cancel(); holdWork = nil
+        if chordRollPreview != nil {
+            finishChordVoicingRoll(); resizeDraft = nil; clearTouch(); return
+        }
         if patternGestureWasActive {
             if patternControlExcludes(point) {
                 cancelPatternInput(); discardPencilLift = false; clearTouch()
@@ -805,8 +1002,13 @@ final class CodaEditorStore {
             return
         }
         if let holdMenu {
-            if let index = holdMenuLayout?.row(at: point) { performHoldCommand(index, regionID: holdMenu.regionID) }
+            if let index = holdMenuLayout?.row(at: point) { performObjectHoldCommand(index, state: holdMenu) }
             self.holdMenu = nil
+            clearTouch()
+            return
+        }
+        if hasActiveRollDraft {
+            finishRollGesture(at: point, moved: touchMoved)
             clearTouch()
             return
         }
@@ -830,6 +1032,7 @@ final class CodaEditorStore {
 
     func pencilTouchCancelled() {
         cancelPatternInput()
+        cancelRollGesture()
         cancelRadialPreview()
         holdWork?.cancel(); holdWork = nil
         resizeDraft = nil
@@ -839,7 +1042,7 @@ final class CodaEditorStore {
         radialPreview = nil
         knobReset = nil
         knobResetSelected = false
-        clearRollTracking()
+        clearRollTracking(commitVoicing: false)
         clearTouch()
     }
 
@@ -864,6 +1067,37 @@ final class CodaEditorStore {
             activeRollKnob = nil
             rollAngles.removeAll(keepingCapacity: true)
             rollAccumulators.removeAll(keepingCapacity: true)
+            if let rollAngle, radial == nil, holdMenu == nil, resizeDraft == nil, !patternEditing {
+                switch gestureSettings.barrelRoll {
+                case .off:
+                    finishChordVoicingRoll()
+                    finishMelodyNudgeRoll()
+                case .filterCutoff:
+                    finishChordVoicingRoll()
+                    finishMelodyNudgeRoll()
+                    let prev = cutoffRollAngle ?? rollAngle
+                    cutoffRollAngle = rollAngle
+                    var delta = (rollAngle - prev) * 180 / .pi
+                    if delta > 180 { delta -= 360 }
+                    if delta < -180 { delta += 360 }
+                    let adj = cutoffRollAccumulator.consume(degrees: delta)
+                    if adj != 0 { setValue(value(for: .cutoff) + adj, for: .cutoff) }
+                case .voicingAndNudge:
+                    if let region = region(at: point) {
+                        finishMelodyNudgeRoll()
+                        rollChordVoicing(region, angle: rollAngle, at: point)
+                    } else if activeLayer == .melody, let note = melodyNote(at: point) {
+                        finishChordVoicingRoll()
+                        rollMelodyNoteNudge(note, angle: rollAngle, at: point)
+                    } else {
+                        finishChordVoicingRoll()
+                        finishMelodyNudgeRoll()
+                    }
+                }
+            } else {
+                finishChordVoicingRoll()
+                finishMelodyNudgeRoll()
+            }
         }
     }
 
@@ -883,7 +1117,14 @@ final class CodaEditorStore {
     }
 
     func openSqueeze(at location: CGPoint?) {
-        guard popup == nil, let point = location ?? lastPencilLocation else { return }
+        guard popup == nil else { return }
+        switch gestureSettings.pencilSqueeze {
+        case .off: return
+        case .toggleSynthRack: toggleSynthRack(); return
+        case .toggleSidekick: openDrawer(); return
+        case .radialPalette, .chordPicker: break
+        }
+        guard let point = location ?? lastPencilLocation else { return }
         pencilTouchCancelled()
         cancelRadialPreview()
         lastPencilLocation = point
@@ -893,27 +1134,35 @@ final class CodaEditorStore {
         }
         guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
         guard !patternControlExcludes(point) else { return }
-        if patternFrame.contains(point), let placement = menuPlacement(point) {
+        let initialPlacement = RadialPlacement(origin: point, direction: RadialGeometry.defaultDirection)
+        if patternFrame.contains(point), gestureSettings.pencilSqueeze == .radialPalette {
             discardPencilLift = false
             patternSqueezeMenu = true
-            radial = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
-                emptyStart: nil, anchor: point, placement: placement,
+            var state = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
+                emptyStart: nil, anchor: point, placement: initialPlacement,
                 selectedRing: nil, selectedSlot: nil, draft: nil)
+            guard let placement = menuPlacement(point, state: state) else { patternSqueezeMenu = false; return }
+            state.placement = placement
+            radial = state
             return
         }
-        guard let stripHit = stripHit(at: point), let placement = menuPlacement(point) else { return }
+        guard let stripHit = stripHit(at: point) else { return }
+        var state: RadialMenuState
         switch stripHit {
         case .region(let id, _):
             guard let region = regions.first(where: { $0.id == id }) else { return }
-            radial = RadialMenuState(mode: .primary, context: .existingChord, regionID: id,
-                                     emptyStart: nil, anchor: point, placement: placement,
+            state = RadialMenuState(mode: .primary, context: .existingChord, regionID: id,
+                                     emptyStart: nil, anchor: point, placement: initialPlacement,
                                      selectedRing: nil, selectedSlot: nil,
                                      draft: RadialSwapDraft(root: region.chord.root, qualityID: region.chord.qualityID))
         case .emptyBar(let start):
-            radial = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
-                                     emptyStart: start, anchor: point, placement: placement,
+            state = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
+                                     emptyStart: start, anchor: point, placement: initialPlacement,
                                      selectedRing: nil, selectedSlot: nil, draft: nil)
         }
+        guard let placement = menuPlacement(point, state: state) else { return }
+        state.placement = placement
+        radial = state
         radialPreview = nil
     }
 
@@ -923,7 +1172,7 @@ final class CodaEditorStore {
         holdMenu.map { HoldMenuLayout(origin: $0.origin, viewport: rootSize, minimumY: rollTop,
             width: CodaDesignTokens.Input.holdMenuWidth,
             rowHeight: CodaDesignTokens.Input.holdRowHeight,
-            dividerHeight: CodaDesignTokens.Input.holdDividerHeight) }
+            dividerHeight: CodaDesignTokens.Input.holdDividerHeight, rowCount: holdCommands.count) }
     }
 
     func hoverHoldCommand(at point: CGPoint) {
@@ -937,8 +1186,10 @@ final class CodaEditorStore {
         guard let action = FingerShortcutRouter.action(touchCount: touchCount, tapCount: tapCount) else { return }
         switch action {
         case .undo:
+            guard gestureSettings.twoFingerTapUndo else { return }
             performFingerHistory { guard let session = self.session else { return }; try session.undo() }
         case .redo:
+            guard gestureSettings.threeFingerTapRedo else { return }
             performFingerHistory { guard let session = self.session else { return }; try session.redo() }
         case .toggleChrome:
             chromeHidden.toggle()
@@ -1001,12 +1252,24 @@ final class CodaEditorStore {
     }
 
     func radialRings() -> [(RadialRing, [String], Double, Double)] {
-        guard let radial, let session else { return [] }
-        if patternSqueezeMenu { return [(.inner, ["Pattern"], CodaDesignTokens.EditorSurface.radialInnerRadius, CodaDesignTokens.EditorSurface.radialInnerBand)] }
+        guard let radial else { return [] }
+        return radialRings(for: radial)
+    }
+
+    private func radialRings(for radial: RadialMenuState) -> [(RadialRing, [String], Double, Double)] {
+        guard let session else { return [] }
+        #if DEBUG
+        if let count = radialCircleFixtureCount {
+            return [(.roots, Array(Self.pitchNames.prefix(max(1, min(7, count)))),
+                     CodaDesignTokens.EditorSurface.radialOuterRadius,
+                     CodaDesignTokens.EditorSurface.radialInnerBand)]
+        }
+        #endif
+        if patternSqueezeMenu { return [(.inner, ["Draw/Erase", "Razor", "Select", "Copy", "Paste", "Pattern"], CodaDesignTokens.EditorSurface.radialOuterRadius, CodaDesignTokens.EditorSurface.radialInnerBand)] }
         let quality = radial.regionID.flatMap { id in regions.first(where: { $0.id == id })?.chord }
         switch radial.mode {
         case .primary:
-            return [(.inner, radial.context == .existingChord ? ["Swap", "Duplicate", "Copy", "Delete"] : ["Paste", "Rest", "", ""],
+            return [(.inner, radial.context == .existingChord ? ["Swap", "Duplicate", "Copy", "Delete"] : ["Paste", "Rest"],
                      CodaDesignTokens.EditorSurface.radialInnerRadius, CodaDesignTokens.EditorSurface.radialInnerBand),
                     (.outer, outerLabels(for: radial), CodaDesignTokens.EditorSurface.radialOuterRadius,
                      CodaDesignTokens.EditorSurface.radialOuterBand)]
@@ -1066,7 +1329,9 @@ final class CodaEditorStore {
 
     func radialSlotEnabled(_ ring: RadialRing, slot: Int) -> Bool {
         guard slot >= 0, let state = radial else { return false }
-        if patternSqueezeMenu { return ring == .inner && slot == 0 }
+        if patternSqueezeMenu {
+            return ring == .inner && (0..<6).contains(slot) && (slot != 3 || !selectedNotes.isEmpty) && (slot != 4 || !rollClipboard.isEmpty)
+        }
         switch state.mode {
         case .primary:
             if ring == .inner {
@@ -1093,12 +1358,13 @@ final class CodaEditorStore {
                                                 length: 16, pitches: pitches) else { continue }
             do { try session.edit([.add(region)]) } catch { setError(error) }
         }
-        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-drawer") { drawerOpen = true }
+        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-drawer") { synthRackOpen = true }
         if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-pattern") {
             beginPatternEditing(); updatePatternSettings(preset: true)
         }
         if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-edge")
-            || ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-primary") {
+            || ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-primary")
+            || ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-seven") {
             let at = CGPoint(x: 60, y: stripTop + 28)
             selectedRegionID = regions.first?.id
             openSqueeze(at: at)
@@ -1108,10 +1374,14 @@ final class CodaEditorStore {
                 var moved = state
                 moved.anchor = CGPoint(x: 12, y: stripTop + 16)
                 moved.mode = .all
-                guard let placement = menuPlacement(moved.anchor, mode: .all) else { return state }
+                guard let placement = menuPlacement(moved.anchor, state: moved) else { return state }
                 moved.placement = placement
                 return moved
             }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--coda-ui-fixture-radial-seven") {
+            radialCircleFixtureCount = 7
+            setRadialMode(.roots)
         }
         #endif
     }
@@ -1157,13 +1427,19 @@ final class CodaEditorStore {
         }
     }
 
+    private func clampedChordLength(at start: Int) -> Int {
+        let nextStart = regions.filter { $0.start > start }.map(\.start).min()
+        let gap = nextStart.map { $0 - start } ?? MusicDefaults.stepsPerBar
+        return max(4, min(MusicDefaults.stepsPerBar, gap))
+    }
+
     private func addNextSuggestion(at start: Int) {
         guard EditorInputRouter.accepts(.add, from: .pencil) else { return }
         let options = suggestions(for: nil)
         guard !options.isEmpty else { return }
         let hasPreviousChord = regions.contains(where: { $0.end <= start })
         let suggestion = hasPreviousChord ? options[0] : (options.last ?? options[0])
-        addChord(suggestion.chord, at: start, length: MusicDefaults.stepsPerBar)
+        addChord(suggestion.chord, at: start, length: clampedChordLength(at: start))
     }
 
     private func addChord(_ chord: Chord, at start: Int, length: Int) {
@@ -1175,6 +1451,7 @@ final class CodaEditorStore {
             let region = try ChordRegion(id: UUID().uuidString, chord: chord, start: start,
                                          length: length, pitches: pitches)
             try session.edit([.add(region)])
+            viewport.extend(through: totalSteps)
             selectedRegionID = region.id
             nextRegionNumber += 1
             inlineError = nil
@@ -1197,7 +1474,6 @@ final class CodaEditorStore {
 
     private func duplicate(_ region: ChordRegion) {
         guard EditorInputRouter.accepts(.duplicate, from: .pencil) else { return }
-        guard region.end + region.length <= totalSteps else { setError("There is no room to duplicate this chord."); return }
         performMusicAction(.duplicate) {
             guard let session = self.session else { return }
             try session.edit([.duplicate(id: region.id, newID: UUID().uuidString, start: region.end)])
@@ -1216,6 +1492,10 @@ final class CodaEditorStore {
         catch { setError(error) }
     }
 
+    func copyChordFromHold(_ regionID: String) throws {
+        clipboard = try session?.editor.copy(id: regionID)
+    }
+
     private func paste(at start: Int) {
         guard EditorInputRouter.accepts(.paste, from: .pencil), let clipboard else { return }
         performMusicAction(.paste) {
@@ -1227,11 +1507,9 @@ final class CodaEditorStore {
     private func validResize(_ draft: ResizeDraft) -> Bool {
         guard let session else { return false }
         do {
-            let replaced = regions.filter { $0.id != draft.region.id }
-            let resized = try ChordRegion(id: draft.region.id, chord: draft.region.chord,
-                                          start: draft.region.start, length: draft.end - draft.region.start,
-                                          pitches: draft.region.pitches)
-            _ = try Progression(totalSteps: totalSteps, regions: replaced + [resized], vocabulary: session.vocabulary)
+            var candidate = session.editor
+            try candidate.apply([.resize(id: draft.region.id, start: draft.region.start,
+                length: draft.end - draft.region.start)], vocabulary: session.vocabulary)
             return true
         } catch { return false }
     }
@@ -1243,7 +1521,8 @@ final class CodaEditorStore {
             self.holdMenu = HoldMenuState(regionID: id, origin: point, selectedIndex: nil)
         }
         holdWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + CodaDesignTokens.Input.holdDuration, execute: work)
+        let delay = max(0.15, gestureSettings.holdMenuDelayMs / 1000.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func clearTouch() {
@@ -1287,36 +1566,27 @@ final class CodaEditorStore {
     }
 
     func knob(at point: CGPoint) -> EditorKnob? {
-        guard drawerOpen, !chromeHidden, point.x >= rootSize.width - drawerWidth,
-              point.y >= synthTop, point.y < rootSize.height else { return nil }
+        guard (synthRackOpen || drawerOpen), !chromeHidden else { return nil }
         return EditorKnob.allCases.first { knob in
-            guard fxExpanded || ![EditorKnob.delay, .reverb, .chordLevel].contains(knob),
-                  let frame = knobFrames[knob], !frame.isEmpty, frame.contains(point) else { return false }
+            guard let frame = knobFrames[knob], !frame.isEmpty, frame.contains(point) else { return false }
             let radius = min(frame.width, frame.height) / 2
             return hypot(point.x - frame.midX, point.y - frame.midY) <= radius
         }
     }
 
-    private func menuPlacement(_ requested: CGPoint, mode: RadialMode = .primary) -> RadialPlacement? {
-        let outerBand: Double = switch mode {
-        case .primary: CodaDesignTokens.EditorSurface.radialOuterBand
-        case .roots: CodaDesignTokens.EditorSurface.radialInnerBand
-        case .all: CodaDesignTokens.EditorSurface.radialFamilyBand
-        }
-        let outerRadius: Double = switch mode {
-        case .primary, .roots: CodaDesignTokens.EditorSurface.radialOuterRadius + outerBand / 2
-        case .all: CodaDesignTokens.EditorSurface.radialFamilyRadius + 2 * CodaDesignTokens.EditorSurface.radialFamilySpacing
-            + outerBand / 2
+    private func menuPlacement(_ requested: CGPoint, state: RadialMenuState) -> RadialPlacement? {
+        let layouts = radialRings(for: state).map { _, labels, radius, thickness in
+            RadialRingLayout(count: labels.count, radius: radius, thickness: thickness)
         }
         return RadialGeometry.placement(tip: requested, viewport: rootSize,
-            outerRadius: outerRadius, margin: CodaDesignTokens.EditorSurface.radialMargin,
-            minimumY: chromeHidden ? 0 : Double(stripTop),
-            capRadius: outerBand / 2)
+            layouts: layouts, margin: CodaDesignTokens.EditorSurface.radialMargin,
+            minimumY: chromeHidden ? 0 : Double(stripTop))
     }
 
     private func setRadialMode(_ mode: RadialMode) {
-        guard var state = radial, let placement = menuPlacement(state.anchor, mode: mode) else { return }
+        guard var state = radial else { return }
         state.mode = mode
+        guard let placement = menuPlacement(state.anchor, state: state) else { return }
         state.placement = placement
         state.selectedRing = nil
         state.selectedSlot = nil
@@ -1437,9 +1707,10 @@ final class CodaEditorStore {
     private func radialHit(at point: CGPoint, state: RadialMenuState) -> (RadialRing, Int)? {
         let local = CGPoint(x: (point.x - state.center.x) / state.placement.scale,
                             y: (point.y - state.center.y) / state.placement.scale)
-        for (ring, labels, radius, thickness) in radialRings() {
-            if let slot = RadialGeometry.slot(at: local, count: labels.count, radius: radius,
-                                             thickness: thickness, direction: state.placement.direction) {
+        for (ring, labels, radius, thickness) in radialRings(for: state) {
+            let layout = RadialRingLayout(count: labels.count, radius: radius,
+                thickness: thickness, direction: state.placement.direction)
+            if let slot = layout.slot(at: local) {
                 return (ring, slot)
             }
         }
@@ -1491,7 +1762,15 @@ final class CodaEditorStore {
         guard let hit = radialHit(at: point, state: state) else { closeRadial(); return }
         if patternSqueezeMenu {
             radial = nil; patternSqueezeMenu = false
-            if patternEditing { endPatternEditing() } else { beginPatternEditing() }
+            switch hit.1 {
+            case 0: endPatternEditing(); rollTool = .drawErase
+            case 1: endPatternEditing(); rollTool = .razor
+            case 2: endPatternEditing(); rollTool = .selection
+            case 3: copyRollSelection()
+            case 4: pasteRollNotes(at: playheadStep)
+            case 5: if patternEditing { endPatternEditing() } else { beginPatternEditing() }
+            default: break
+            }
             discardPencilLift = false
             return
         }
@@ -1506,10 +1785,14 @@ final class CodaEditorStore {
         transientPoint = point
         switch intent {
         case .nextPage(let ring):
-            radial?.pages[ring, default: 0] += 1
-            radial?.selectedRing = nil
-            radial?.selectedSlot = nil
-            radial?.hasNavigated = false
+            var next = state
+            next.pages[ring, default: 0] += 1
+            guard let placement = menuPlacement(next.anchor, state: next) else { return }
+            next.placement = placement
+            next.selectedRing = nil
+            next.selectedSlot = nil
+            next.hasNavigated = false
+            radial = next
             radialPreview = nil
             return
         case .swapRoot:
@@ -1534,7 +1817,7 @@ final class CodaEditorStore {
                     try session.edit([.swap(id: id, chord: chord)])
                 }
             } else if let start = state.emptyStart {
-                addChord(chord, at: start, length: MusicDefaults.stepsPerBar)
+                addChord(chord, at: start, length: clampedChordLength(at: start))
             }
         case .showAll:
             setRadialMode(.all)
@@ -1552,7 +1835,7 @@ final class CodaEditorStore {
 
     private func outerIntentForEmpty(_ index: Int, at start: Int) {
         let values = suggestions(for: nil)
-        if values.indices.contains(index) { addChord(values[index].chord, at: start, length: MusicDefaults.stepsPerBar) }
+        if values.indices.contains(index) { addChord(values[index].chord, at: start, length: clampedChordLength(at: start)) }
     }
 
     private func updateSelectionPreview(_ state: RadialMenuState) {
@@ -1560,6 +1843,545 @@ final class CodaEditorStore {
     }
 
     private func knobDefaultForPreset(_ knob: EditorKnob) -> Double { presetDefault(for: knob) }
+}
+
+// MARK: - Procreate Overhaul: Bottom Synth Rack, Multi-Layers, Gestures, Sidekick & Project Hub
+extension CodaEditorStore {
+    func toggleSynthRack(_ open: Bool? = nil) {
+        withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
+            synthRackOpen = open ?? !synthRackOpen
+        }
+    }
+
+    func handlePencilDoubleTap() {
+        switch gestureSettings.pencilDoubleTap {
+        case .toggleDrawErase:
+            rollTool = (rollTool == .drawErase) ? .razor : .drawErase
+            knobReadout = "Tool: \(rollTool == .drawErase ? "Draw" : "Razor")"
+        case .togglePlayPause:
+            togglePlayback()
+        case .toggleSynthRack:
+            toggleSynthRack()
+        case .toggleSidekick:
+            openDrawer()
+        case .undo:
+            performFingerHistory { guard let session = self.session else { return }; try session.undo() }
+        case .cycleLayer:
+            let next: MusicLayer = switch activeLayer {
+            case .bass: .chords
+            case .chords: .melody
+            case .melody: .bass
+            }
+            setActiveLayer(next)
+            knobReadout = "Layer: \(next.rawValue.capitalized)"
+        case .off:
+            return
+        }
+        pencilFeedbackSerial += 1
+        pencilFeedbackIsCompletion = true
+    }
+
+    func setActiveLayer(_ layer: MusicLayer) {
+        activeLayer = layer
+        session?.selectExtraLayer(id: nil)
+        selectedNotes.removeAll()
+        selectedLayerNoteIDs.removeAll()
+        if layer != .chords, patternEditing { endPatternEditing() }
+    }
+
+    var activeLayerDisplayName: String {
+        if let id = activeExtraLayerID, let extra = extraLayers.first(where: { $0.id == id }) {
+            return extra.name
+        }
+        switch activeLayer {
+        case .bass: return "Bass"
+        case .chords: return "Chords"
+        case .melody: return "Melody"
+        }
+    }
+
+    var activeTrackDisplayName: String { activeLayerDisplayName }
+
+    var activeLayerTint: Color {
+        let kind = activeExtraLayerID.flatMap { id in extraLayers.first(where: { $0.id == id })?.kind } ?? activeLayer
+        return CodaDesignTokens.Colors.layerTint(kind)
+    }
+
+    var activeTrackColor: Color { activeLayerTint }
+
+    var activeLayerPreset: UInt8 {
+        if let id = activeExtraLayerID, let extra = extraLayers.first(where: { $0.id == id }) {
+            return extra.preset
+        }
+        if activeLayer == .chords { return controls.preset }
+        return session?.layerControls(for: activeLayer).preset ?? 0
+    }
+
+    func selectBaseLayer(_ layer: MusicLayer) { setActiveLayer(layer) }
+
+    func isLayerMuted(_ layer: MusicLayer) -> Bool { layerMuted(layer) }
+
+    func soloBaseLayer(_ layer: MusicLayer) {
+        session?.soloLayer(layer)
+    }
+
+    func layerMuted(_ layer: MusicLayer) -> Bool {
+        guard let session else { return false }
+        if layer == .chords { return session.controls.muted != 0 }
+        return session.isLayerMuted(layer)
+    }
+
+    func toggleLayerMute(_ layer: MusicLayer) {
+        if layer == .chords {
+            toggleChordMute()
+            return
+        }
+        guard let session else { return }
+        session.setLayerMuted(!session.isLayerMuted(layer), for: layer)
+    }
+
+    func layerLevel(_ layer: MusicLayer) -> Double {
+        guard let session else { return 0.72 }
+        if layer == .chords { return Double(session.controls.chord_level) }
+        return Double(session.layerControls(for: layer).level)
+    }
+
+    func setLayerLevel(_ value: Double, for layer: MusicLayer) {
+        let clamped = min(1, max(0, value))
+        if layer == .chords {
+            setValue(clamped, for: .chordLevel)
+            return
+        }
+        guard let session else { return }
+        var next = session.layerControls(for: layer)
+        next.level = Float(clamped)
+        session.setLayerControls(next, for: layer)
+    }
+
+    func setSharedFX(chorus: Double, delay: Double, reverb: Double) {
+        chorusAmount = min(1, max(0, chorus))
+        session?.setSharedFX(chorus: Float(chorusAmount),
+                             delay: Float(min(1, max(0, delay))),
+                             reverb: Float(min(1, max(0, reverb))))
+    }
+
+    // MARK: Multi-Layer Overlay Tracks
+    func addExtraLayer(kind: MusicLayer, name: String? = nil) {
+        if let added = session?.addExtraLayer(kind: kind, name: name) {
+            selectExtraLayer(id: added.id)
+        }
+    }
+
+    func removeExtraLayer(id: String) {
+        session?.removeExtraLayer(id: id)
+    }
+
+    func selectExtraLayer(id: String?) {
+        session?.selectExtraLayer(id: id)
+        if let id, let extra = extraLayers.first(where: { $0.id == id }) {
+            activeLayer = extra.kind
+        }
+    }
+
+    func setExtraLayerControls(_ controls: CodaLayerControls, for id: String) {
+        session?.setExtraLayerControls(controls, for: id)
+    }
+
+    func setExtraLayerMuted(_ muted: Bool, for id: String) {
+        session?.setExtraLayerMuted(muted, for: id)
+    }
+
+    func setExtraLayerNotes(_ notes: [RollNote], for id: String) {
+        session?.setExtraLayerNotes(notes, for: id)
+    }
+
+    func setExtraLayerPlugin(_ name: String?, for id: String) {
+        session?.setExtraLayerPlugin(name, for: id)
+    }
+
+    // MARK: Audition & Sidekick Ghost Proposals
+    func auditionLayerPitch(_ pitch: Int, layer: MusicLayer) {
+        session?.audition(pitches: [pitch], layer: layer)
+    }
+
+    func auditionGhost(_ ghost: GhostChordProposal) {
+        guard let session else { return }
+        do {
+            try session.auditionPreview(chord: ghost.chord, owner: ghost.id)
+        } catch { setError(error) }
+    }
+
+    func acceptGhost(_ ghost: GhostChordProposal) {
+        guard let session else { return }
+        let start = max(0, ghost.startStep)
+        let length = max(4, min(MusicDefaults.stepsPerBar * 4, ghost.lengthSteps))
+        do {
+            let previous = regions.filter { $0.end <= start }.max { $0.end < $1.end }
+            let pitches = try session.solver.solve([ghost.chord], vocabulary: session.vocabulary,
+                                                   preceding: previous?.pitches)[0]
+            try session.acceptGhostChords([(startStep: start, lengthSteps: length, chord: ghost.chord, pitches: pitches)])
+            sidekick.dismissGhost(id: ghost.id)
+            viewport.extend(through: totalSteps)
+            scheduleAutosave()
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func acceptAllGhosts() {
+        let ghosts = sidekick.activeGhosts
+        for ghost in ghosts {
+            acceptGhost(ghost)
+        }
+    }
+
+    func sendSidekickPrompt(_ text: String) {
+        guard let session else { return }
+        let context = SidekickSessionContext(
+            key: key,
+            tempo: tempo,
+            loopBars: max(1, loop.length / MusicDefaults.stepsPerBar),
+            regions: regions,
+            vocabulary: session.vocabulary
+        )
+        sidekick.send(text, context: context)
+    }
+
+    // MARK: Project Actions (Unified Wrench Settings -> Project Tab)
+    func captureABSnapshot() {
+        session?.captureABSnapshot()
+        knobReadout = "Snapshot A saved"
+    }
+
+    func toggleABSnapshot() {
+        guard let session else { return }
+        do {
+            if session.abSnapshot == nil {
+                session.captureABSnapshot()
+                knobReadout = "Snapshot A saved"
+            } else {
+                try session.toggleABSnapshot()
+                key = session.key
+                knobReadout = session.showingSnapshotB ? "Switched to Snapshot B" : "Switched to Snapshot A"
+            }
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func transposeAll(by semitones: Int) {
+        guard let session, semitones != 0 else { return }
+        do {
+            try session.transposeAll(semitones: semitones)
+            key = session.key
+            scheduleAutosave()
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func convertToRelativeKey() {
+        guard let session else { return }
+        do {
+            try session.switchRelativeKey()
+            key = session.key
+            scheduleAutosave()
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func duplicateLastBar() {
+        guard let session else { return }
+        let lastBar = max(0, (regions.map(\.end).max() ?? MusicDefaults.stepsPerBar) / MusicDefaults.stepsPerBar - 1)
+        do {
+            try session.duplicateBar(at: lastBar)
+            viewport.extend(through: totalSteps)
+            scheduleAutosave()
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func clearActiveLayer() {
+        guard let session else { return }
+        session.clearLayer(activeLayer)
+        selectedRegionID = nil
+        selectedNotes.removeAll()
+        selectedLayerNoteIDs.removeAll()
+        scheduleAutosave()
+    }
+
+    func resetZoom() {
+        viewport = EditorViewport(topMIDI: CodaDesignTokens.Geometry.pianoRollTopMIDI)
+    }
+
+    // MARK: Scale Lock & FL-style Velocity Lane
+    func snappedPitch(_ midi: Int) -> Int {
+        let clamped = min(127, max(0, midi))
+        guard scaleLockEnabled, !scaleContains(clamped) else { return clamped }
+        for offset in 1...6 {
+            let down = clamped - offset
+            if down >= 0, scaleContains(down) { return down }
+            let up = clamped + offset
+            if up <= 127, scaleContains(up) { return up }
+        }
+        return clamped
+    }
+
+    func setVelocity(_ velocity: Int, atStep step: Int) {
+        guard let session else { return }
+        let clamped = min(127, max(1, velocity))
+        let targetTick = step * MusicDefaults.ticksPerStep
+        let tolerance = MusicDefaults.ticksPerStep * 2
+        do {
+            if let extraID = activeExtraLayerID,
+               let extra = extraLayers.first(where: { $0.id == extraID }),
+               let match = extra.notes.min(by: { abs($0.startTick - targetTick) < abs($1.startTick - targetTick) }),
+               abs(match.startTick - targetTick) <= tolerance {
+                let updated = try extra.notes.map { n -> RollNote in
+                    guard n.id == match.id else { return n }
+                    return try RollNote(id: n.id, startTick: n.startTick, durationTicks: n.durationTicks,
+                                        pitch: n.pitch, velocity: clamped, slide: n.slide)
+                }
+                setExtraLayerNotes(updated, for: extraID)
+                scheduleAutosave()
+                inlineError = nil
+                return
+            }
+            switch activeLayer {
+            case .chords:
+                var best: (region: ChordRegion, note: RollNote, dist: Int)?
+                for region in regions {
+                    for note in region.notes {
+                        let absTick = region.start * MusicDefaults.ticksPerStep + note.startTick
+                        let dist = abs(absTick - targetTick)
+                        if dist <= tolerance, best == nil || dist < best!.dist {
+                            best = (region, note, dist)
+                        }
+                    }
+                }
+                if let match = best {
+                    let updatedNotes = try match.region.notes.map { n -> RollNote in
+                        guard n.id == match.note.id else { return n }
+                        return try RollNote(id: n.id, startTick: n.startTick, durationTicks: n.durationTicks,
+                                            pitch: n.pitch, velocity: clamped, slide: n.slide)
+                    }
+                    let updatedRegion = try ChordRollEditor.replacing(match.region, notes: updatedNotes,
+                                                                      vocabulary: session.vocabulary, detect: false)
+                    try session.edit([.replace(updatedRegion)])
+                    scheduleAutosave()
+                }
+            case .bass:
+                if let match = bassNotes.min(by: { abs($0.startTick - targetTick) < abs($1.startTick - targetTick) }),
+                   abs(match.startTick - targetTick) <= tolerance {
+                    let updated = try bassNotes.map { n -> BassNote in
+                        guard n.id == match.id else { return n }
+                        return try BassNote(id: n.id, startTick: n.startTick, durationTicks: n.durationTicks,
+                                            pitch: n.pitch, velocity: clamped, slide: n.slide,
+                                            provenance: n.provenance)
+                    }
+                    session.setBassTrack(try BassTrack(notes: updated))
+                    scheduleAutosave()
+                }
+            case .melody:
+                if let match = melodyNotes.min(by: { abs($0.startTick - targetTick) < abs($1.startTick - targetTick) }),
+                   abs(match.startTick - targetTick) <= tolerance {
+                    let updated = try melodyNotes.map { n -> MelodyNote in
+                        guard n.id == match.id else { return n }
+                        return try MelodyNote(id: n.id, startTick: n.startTick, durationTicks: n.durationTicks,
+                                              pitch: n.pitch, velocity: clamped, slide: n.slide,
+                                              nudgeTicks: n.nudgeTicks)
+                    }
+                    session.setMelodyTrack(try MelodyTrack(notes: updated))
+                    scheduleAutosave()
+                }
+            }
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    // MARK: Project Hub, Persistence, MIDI/JSON Export & SoundFont Import
+    func makeCurrentProjectDocument() -> CodaProjectDocument {
+        if let session {
+            var doc = session.makeProjectDocument()
+            doc.name = currentProjectName
+            return doc
+        }
+        return CodaProjectDocument(name: currentProjectName)
+    }
+
+    func applyProjectDocument(_ doc: CodaProjectDocument) {
+        currentProjectName = doc.name
+        key = doc.key
+        guard let session else { return }
+        do {
+            try session.loadProjectDocument(doc)
+            chorusAmount = Double(session.mixerControls.chorus_amount)
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func scheduleAutosave() {
+        autosaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            try? self.projectHub.saveAutosave(self.makeCurrentProjectDocument())
+        }
+        autosaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+
+    func saveCurrentProject() {
+        do {
+            let doc = makeCurrentProjectDocument()
+            try projectHub.save(doc)
+            knobReadout = "Saved \(doc.name)"
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func openProject(id: String) {
+        do {
+            let doc = try projectHub.load(id: id)
+            applyProjectDocument(doc)
+            projectHubOpen = false
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func createNewProject(name: String? = nil) {
+        let count = projectHub.summaries.count + 1
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? "Sketch \(count)" : trimmed
+        let doc = CodaProjectDocument(id: UUID().uuidString, name: title)
+        applyProjectDocument(doc)
+        try? projectHub.save(doc)
+        projectHubOpen = false
+    }
+
+    func duplicateProject(id: String) {
+        do {
+            _ = try projectHub.duplicate(id: id)
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func renameProject(id: String, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try projectHub.rename(id: id, to: trimmed)
+            if id == session?.projectID { currentProjectName = trimmed }
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func deleteProject(id: String) {
+        do {
+            try projectHub.delete(id: id)
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func exportMIDIURL(projectID: String? = nil) -> URL? {
+        do {
+            let doc = try projectID.map { try projectHub.load(id: $0) } ?? makeCurrentProjectDocument()
+            let data = StandardMIDIWriter.export(document: doc)
+            let safeName = doc.name.replacingOccurrences(of: "/", with: "-")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName).mid")
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            setError(error)
+            return nil
+        }
+    }
+
+    func exportProjectJSONURL(projectID: String? = nil) -> URL? {
+        do {
+            let doc = try projectID.map { try projectHub.load(id: $0) } ?? makeCurrentProjectDocument()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(doc)
+            let safeName = doc.name.replacingOccurrences(of: "/", with: "-")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName).coda.json")
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            setError(error)
+            return nil
+        }
+    }
+
+    func importProjectJSON(data: Data) {
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let doc = try decoder.decode(CodaProjectDocument.self, from: data)
+            try projectHub.save(doc)
+            applyProjectDocument(doc)
+            projectHubOpen = false
+            knobReadout = "Imported \(doc.name)"
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func importProjectJSON(from url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            importProjectJSON(data: data)
+        } catch { setError(error) }
+    }
+
+    func exportMIDIForProject(id: String? = nil) {
+        guard let url = exportMIDIURL(projectID: id) else { return }
+        presentShareSheet(for: url)
+    }
+
+    func exportJSONForProject(id: String? = nil) {
+        guard let url = exportProjectJSONURL(projectID: id) else { return }
+        presentShareSheet(for: url)
+    }
+
+    private func presentShareSheet(for url: URL) {
+        #if canImport(UIKit)
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController ?? scene.windows.first?.rootViewController else {
+            return
+        }
+        var presenter = root
+        while let presented = presenter.presentedViewController { presenter = presented }
+        let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = presenter.view
+        activity.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: 80, width: 1, height: 1)
+        presenter.present(activity, animated: true)
+        #endif
+    }
+
+    func importSoundFont(from url: URL) {
+        do {
+            let item = try pluginHost.importSoundFont(from: url)
+            if let extraID = activeExtraLayerID {
+                setExtraLayerPlugin(item.name, for: extraID)
+            } else {
+                pluginHost.assignSoundFont(item.id, to: activeLayer)
+            }
+            knobReadout = "Loaded \(item.name)"
+            inlineError = nil
+        } catch { setError(error) }
+    }
+
+    func restoreAutosaveRecovery() {
+        guard let doc = autosaveRecoveryDocument else { return }
+        applyProjectDocument(doc)
+        autosaveRecoveryDocument = nil
+        projectHub.clearAutosave()
+        projectHubOpen = false
+    }
+
+    func dismissAutosaveRecovery() {
+        autosaveRecoveryDocument = nil
+        projectHub.clearAutosave()
+    }
 }
 
 enum LoopEdge { case start, end }

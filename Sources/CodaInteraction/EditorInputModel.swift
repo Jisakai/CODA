@@ -44,9 +44,11 @@ public enum FingerShortcutRouter {
     }
 }
 
-/// Shared time/pitch transform for the timeline, chord strip, and read-only roll.
+/// Shared transform. The initial eight-bar view determines scale, never song
+/// length. Increasing the extent preserves every existing canvas coordinate.
 public struct EditorViewport: Equatable, Sendable {
-    public let totalSteps: Int
+    public private(set) var totalSteps: Int
+    public let initialVisibleSteps: Int
     public let topMIDI: Int
     public private(set) var horizontalZoom: Double
     public private(set) var horizontalOffset: Double
@@ -57,6 +59,7 @@ public struct EditorViewport: Equatable, Sendable {
                 horizontalZoom: Double = 1, horizontalOffset: Double = 0,
                 semitoneHeight: Double = 22, verticalOffset: Double = 0) {
         self.totalSteps = max(1, totalSteps)
+        self.initialVisibleSteps = min(128, max(1, totalSteps))
         self.topMIDI = topMIDI
         self.horizontalZoom = min(max(horizontalZoom, 1), 8)
         self.horizontalOffset = max(0, horizontalOffset)
@@ -65,7 +68,7 @@ public struct EditorViewport: Equatable, Sendable {
     }
 
     public func stepWidth(in width: Double) -> Double {
-        max(0, width) * horizontalZoom / Double(totalSteps)
+        max(0, width) * horizontalZoom / Double(initialVisibleSteps)
     }
 
     public func x(forStep step: Double, in width: Double) -> Double {
@@ -76,7 +79,7 @@ public struct EditorViewport: Equatable, Sendable {
         guard x.isFinite, width.isFinite, width > 0, x >= 0, x < width else { return nil }
         let unit = stepWidth(in: width)
         guard unit > 0 else { return nil }
-        let step = Int(floor((x + horizontalOffset) / unit))
+        guard let step = Int(exactly: floor((x + horizontalOffset) / unit)) else { return nil }
         return (0..<totalSteps).contains(step) ? step : nil
     }
 
@@ -104,7 +107,7 @@ public struct EditorViewport: Equatable, Sendable {
     public mutating func pan(horizontalBy deltaX: Double, verticalBy deltaY: Double,
                              canvasWidth: Double, canvasHeight: Double) {
         guard deltaX.isFinite, deltaY.isFinite else { return }
-        horizontalOffset = min(max(0, horizontalOffset - deltaX), maximumHorizontalOffset(width: canvasWidth))
+        horizontalOffset = max(0, horizontalOffset - deltaX)
         let minimum = Double(topMIDI - 127) * semitoneHeight
         let maximum = max(minimum, Double(topMIDI + 1) * semitoneHeight - canvasHeight)
         verticalOffset = min(max(minimum, verticalOffset - deltaY), maximum)
@@ -130,7 +133,25 @@ public struct EditorViewport: Equatable, Sendable {
     }
 
     public func maximumHorizontalOffset(width: Double) -> Double {
-        max(0, width * horizontalZoom - width)
+        max(0, Double(totalSteps) * stepWidth(in: width) - width)
+    }
+
+    public mutating func extend(through steps: Int) {
+        totalSteps = max(totalSteps, steps)
+    }
+
+    public func visibleSteps(in width: Double) -> Range<Int> {
+        let unit = stepWidth(in: width)
+        guard width.isFinite, width > 0, unit > 0,
+              let first = Int(exactly: floor(horizontalOffset / unit)),
+              let last = Int(exactly: ceil((horizontalOffset + width) / unit)), last < Int.max else { return 0..<0 }
+        return max(0, min(totalSteps, first))..<max(0, min(totalSteps, last + 1))
+    }
+
+    public func visibleBars(in width: Double, stepsPerBar: Int = 16) -> Range<Int> {
+        let steps = visibleSteps(in: width)
+        guard !steps.isEmpty, stepsPerBar > 0 else { return 0..<0 }
+        return steps.lowerBound / stepsPerBar..<(steps.upperBound - 1) / stepsPerBar + 1
     }
 }
 
@@ -158,10 +179,11 @@ public enum ChordStripHitTester {
             let nearEdge = abs(contentX - rightEdge) <= resizeTolerance
             return ChordStripHit(target: .region(id: region.id, resizeEdge: nearEdge))
         }
-        let barStart = (step / stepsPerBar) * stepsPerBar
-        let barEnd = barStart + stepsPerBar
-        guard !regions.contains(where: { $0.start < barEnd && $0.end > barStart }) else { return nil }
-        return ChordStripHit(target: .emptyBar(startStep: barStart))
+        // Allow chords to start on any beat/grid subdivision in empty space, not only bar starts.
+        let gridUnit = max(1, stepsPerBar / 4) // 4 steps = 1 beat by default
+        let snapped = (step / gridUnit) * gridUnit
+        let startStep = regions.contains(where: { snapped >= $0.start && snapped < $0.end }) ? step : snapped
+        return ChordStripHit(target: .emptyBar(startStep: startStep))
     }
 }
 
@@ -306,8 +328,8 @@ public struct RadialPlacement: Equatable, Sendable {
     }
 }
 
-/// A curved capsule: one centerline arc with semicircular end caps. Rendering
-/// and Pencil selection consume this same filled path (never a wedge envelope).
+/// Continuous ring backing with round ends. A zero-length centerline is one
+/// compact backing circle, used when a ring has exactly one choice.
 public struct RadialArc: Equatable, Sendable {
     public let radius: Double
     public let thickness: Double
@@ -317,7 +339,13 @@ public struct RadialArc: Equatable, Sendable {
     public func path(center: CGPoint = .zero, scale: Double = 1) -> CGPath {
         let outline = CGMutablePath()
         let halfWidth = thickness / 2
-        guard radius > halfWidth, thickness > 0, end > start, scale > 0 else { return outline }
+        guard radius > halfWidth, thickness > 0, end >= start, scale > 0 else { return outline }
+        if end == start {
+            return CGPath(ellipseIn: CGRect(
+                x: center.x + (cos(start) * radius - halfWidth) * scale,
+                y: center.y + (sin(start) * radius - halfWidth) * scale,
+                width: thickness * scale, height: thickness * scale), transform: nil)
+        }
         // One explicit closed contour, rather than a stroked-centerline result.
         // Both hit testing and SwiftUI receive these same filled arc/cap elements.
         let startCenter = CGPoint(x: cos(start) * radius, y: sin(start) * radius)
@@ -385,88 +413,90 @@ public struct RadialArc: Equatable, Sendable {
     }
 }
 
+/// The canonical visible ring: paths, centers, hit testing and placement all use
+/// this count-derived layout. End caps are centered on the first/last buttons.
+public struct RadialRingLayout: Equatable, Sendable {
+    public let count: Int
+    public let radius: Double
+    public let thickness: Double
+    public let direction: Double
+
+    public init(count: Int, radius: Double, thickness: Double,
+                direction: Double = RadialGeometry.defaultDirection) {
+        self.count = max(0, count)
+        self.radius = radius
+        self.thickness = thickness
+        self.direction = direction
+    }
+
+    public var buttonDiameter: Double { max(0, thickness - 2 * RadialGeometry.buttonInset) }
+    public var angularSpacing: Double {
+        guard radius > 0 else { return 0 }
+        // Chord distance, rather than arc length, preserves the exact visible gap.
+        return 2 * asin(min(1, (buttonDiameter + RadialGeometry.buttonGap) / (2 * radius)))
+    }
+    public var sweep: Double { Double(max(0, count - 1)) * angularSpacing }
+    public var backingLength: Double { count > 0 ? radius * sweep + thickness : 0 }
+    public var backing: RadialArc {
+        RadialArc(radius: radius, thickness: count > 0 ? thickness : 0,
+                  start: direction - sweep / 2, end: direction + sweep / 2)
+    }
+
+    public func oriented(_ direction: Double) -> Self {
+        Self(count: count, radius: radius, thickness: thickness, direction: direction)
+    }
+
+    public func buttonCenter(slot: Int, center: CGPoint = .zero, scale: Double = 1) -> CGPoint {
+        let angle = backing.start + Double(slot) * angularSpacing
+        return CGPoint(x: center.x + cos(angle) * radius * scale,
+                       y: center.y + sin(angle) * radius * scale)
+    }
+
+    public func buttonPath(slot: Int, center: CGPoint = .zero, scale: Double = 1) -> CGPath {
+        guard (0..<count).contains(slot), buttonDiameter > 0, scale > 0 else { return CGMutablePath() }
+        let point = buttonCenter(slot: slot)
+        let circle = CGPath(ellipseIn: CGRect(x: point.x - buttonDiameter / 2,
+            y: point.y - buttonDiameter / 2, width: buttonDiameter, height: buttonDiameter), transform: nil)
+        var transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: center.x, ty: center.y)
+        return circle.copy(using: &transform)!
+    }
+
+    public func slot(at point: CGPoint) -> Int? {
+        guard point.x.isFinite, point.y.isFinite else { return nil }
+        return (0..<count).first { buttonPath(slot: $0).contains(point) }
+    }
+
+    public func paintedBounds(center: CGPoint = .zero, scale: Double = 1) -> CGRect {
+        guard count > 0 else { return .null }
+        return (0..<count).reduce(backing.path(center: center, scale: scale).boundingBoxOfPath) {
+            $0.union(buttonPath(slot: $1, center: center, scale: scale).boundingBoxOfPath)
+        }
+    }
+}
+
 public enum RadialGeometry {
-    public static let sweep = 2 * Double.pi / 3
     public static let defaultDirection = -2 * Double.pi / 3 // 30 degrees CCW from up
     private static let downwardDirection = Double.pi / 3 // 30 degrees CCW from down
-    public static let slotGap = 0.015
-    public static let pillInset = 4.0 // exposed glass around each curved choice
+    public static let buttonInset = 4.0 // retain the established band interior
+    // Preserve the established 0.015-radian gap at each side of a choice on the
+    // nearest family ring (132 pt), now as one shared linear gap on every ring.
+    public static let buttonGap = 2 * 132 * sin(0.015)
     public static let minimumScale = 0.8
     public static let maximumDisplacement = 180.0
     private static let fittingScales = [1.0, 0.9, minimumScale]
 
-    public static func angle(forSlot slot: Int, count: Int, direction: Double = defaultDirection) -> Double {
-        direction - sweep / 2 + Double(slot) * sweep / Double(max(1, count))
-    }
-
-    public static func backing(radius: Double, thickness: Double,
-                               direction: Double = defaultDirection) -> RadialArc {
-        RadialArc(radius: radius, thickness: thickness,
-                  start: direction - sweep / 2, end: direction + sweep / 2)
-    }
-
-    public static func pill(slot: Int, count: Int, radius: Double, thickness: Double,
-                            direction: Double = defaultDirection) -> RadialArc {
-        let width = max(0, thickness - 2 * pillInset)
-        // Keep round caps inside their original angular slot, retaining the
-        // existing angular gap. Simply rounding a wedge would overlap neighbors.
-        let inset = asin(min(1, width / 2 / max(1, radius))) + slotGap
-        let start = angle(forSlot: slot, count: count, direction: direction)
-        return RadialArc(radius: radius, thickness: width, start: start + inset,
-                         end: start + sweep / Double(max(1, count)) - inset)
-    }
-
-    public static func slot(at point: CGPoint, count: Int, radius: Double, thickness: Double,
-                            direction: Double = defaultDirection) -> Int? {
-        guard count > 0, point.x.isFinite, point.y.isFinite else { return nil }
-        return (0..<count).first {
-            pill(slot: $0, count: count, radius: radius, thickness: thickness,
-                 direction: direction).path().contains(point)
+    public static func bounds(layouts: [RadialRingLayout], direction: Double, scale: Double = 1) -> CGRect {
+        layouts.reduce(CGRect(x: -4, y: -4, width: 8, height: 8)) {
+            $0.union($1.oriented(direction).paintedBounds(scale: scale))
         }
     }
 
-    /// Angular slot partition retained for sector-envelope callers. Curved pill
-    /// selection must use slot(at:count:radius:thickness:direction:) instead.
-    public static func slot(atAngle angle: Double, count: Int,
-                            direction: Double = defaultDirection) -> Int? {
-        guard angle.isFinite, count > 0 else { return nil }
-        let turn = 2 * Double.pi
-        let start = direction - sweep / 2
-        let relative = ((angle - start).truncatingRemainder(dividingBy: turn) + turn)
-            .truncatingRemainder(dividingBy: turn)
-        guard relative < sweep else { return nil }
-        let width = sweep / Double(count)
-        let index = Int(floor(relative / width))
-        let within = relative - Double(index) * width
-        guard within >= slotGap, within <= width - slotGap else { return nil }
-        return index
-    }
-
-    /// Conservative painted envelope including rounded backing caps. The sector
-    /// hull includes the center so this also encloses all smaller concentric rings.
-    public static func bounds(direction: Double, radius: Double, capRadius: Double = 0) -> CGRect {
-        let radius = max(0, radius - capRadius)
-        let start = direction - sweep / 2
-        let end = direction + sweep / 2
-        var points = [CGPoint.zero,
-                      CGPoint(x: cos(start) * radius, y: sin(start) * radius),
-                      CGPoint(x: cos(end) * radius, y: sin(end) * radius)]
-        for index in -8...8 {
-            let angle = Double(index) * .pi / 2
-            if angle >= start && angle <= end {
-                points.append(CGPoint(x: cos(angle) * radius, y: sin(angle) * radius))
-            }
-        }
-        let xs = points.map(\.x), ys = points.map(\.y)
-        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
-            .insetBy(dx: -capRadius, dy: -capRadius)
-    }
-
-    public static func placement(tip: CGPoint, viewport: CGSize, outerRadius: Double,
-                                 margin: Double = 8, minimumY: Double = 0,
-                                 capRadius: Double = 0) -> RadialPlacement? {
+    public static func placement(tip: CGPoint, viewport: CGSize, layouts: [RadialRingLayout],
+                                 margin: Double = 8, minimumY: Double = 0) -> RadialPlacement? {
         // Chrome is an exclusion, not an edge margin that anchoring may relax.
-        guard viewport.width > 2 * margin, viewport.height > minimumY + 2 * margin else { return nil }
+        guard layouts.contains(where: { $0.count > 0 }),
+              viewport.width > 2 * margin, viewport.height > minimumY + 2 * margin else { return nil }
+        let outerRadius = layouts.map { $0.radius + $0.thickness / 2 }.max() ?? 0
         let available = CGRect(x: margin, y: minimumY + margin,
             width: viewport.width - 2 * margin, height: viewport.height - minimumY - 2 * margin)
         // At a physical edge, relax only the margin needed to keep an in-viewport
@@ -477,7 +507,7 @@ public enum RadialGeometry {
             x: anchoredMinX, y: anchoredMinY,
             width: min(viewport.width, max(available.maxX, tip.x)) - anchoredMinX,
             height: min(viewport.height, max(available.maxY, tip.y)) - anchoredMinY)
-        let upwardBounds = bounds(direction: defaultDirection, radius: outerRadius, capRadius: capRadius)
+        let upwardBounds = bounds(layouts: layouts, direction: defaultDirection)
             .offsetBy(dx: tip.x, dy: tip.y)
         let preferred = upwardBounds.minY < anchoredAvailable.minY ? downwardDirection : defaultDirection
         func distance(_ angle: Double) -> Double { abs(atan2(sin(angle - preferred), cos(angle - preferred))) }
@@ -489,7 +519,7 @@ public enum RadialGeometry {
         }.map { preferred + Double($0) * .pi / 180 }
         for scale in fittingScales {
             for direction in directions {
-                let box = bounds(direction: direction, radius: outerRadius * scale, capRadius: capRadius * scale)
+                let box = bounds(layouts: layouts, direction: direction, scale: scale)
                     .offsetBy(dx: tip.x, dy: tip.y)
                 if anchoredAvailable.contains(box) {
                     return RadialPlacement(origin: tip, direction: direction, scale: scale)
@@ -503,7 +533,7 @@ public enum RadialGeometry {
         var bestCost = Double.infinity
         for scale in fittingScales {
             for direction in directions {
-                let box = bounds(direction: direction, radius: outerRadius * scale, capRadius: capRadius * scale)
+                let box = bounds(layouts: layouts, direction: direction, scale: scale)
                 guard box.width <= available.width, box.height <= available.height else { continue }
                 let x = min(available.maxX - box.maxX, max(available.minX - box.minX, tip.x))
                 let y = min(available.maxY - box.maxY, max(available.minY - box.minY, tip.y))

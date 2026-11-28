@@ -129,9 +129,21 @@ NSError *adapterError(NSString *text) {
     std::lock_guard<std::mutex> lock(_producer);
     return _gate?coda_transport_controls(_gate->transport,controls):-1;
 }
+- (int)publishMixerControls:(CodaMixerControls)controls {
+    std::lock_guard<std::mutex> lock(_producer);
+    return _gate?coda_transport_mixer_controls(_gate->transport,&controls):-1;
+}
+- (int)publishTrackControls:(CodaLayerControls)controls forTrack:(uint8_t)trackIndex eqProfile:(uint8_t)eqProfile {
+    std::lock_guard<std::mutex> lock(_producer);
+    return _gate?coda_transport_track_controls(_gate->transport,trackIndex,eqProfile,&controls):-1;
+}
 - (int)auditionPitches:(const uint8_t *)pitches count:(uint32_t)count frames:(uint32_t)frames {
     std::lock_guard<std::mutex> lock(_producer);
     return _gate?coda_transport_audition(_gate->transport,pitches,count,frames):-1;
+}
+- (int)auditionLayer:(uint8_t)layer pitches:(const uint8_t *)pitches count:(uint32_t)count frames:(uint32_t)frames {
+    std::lock_guard<std::mutex> lock(_producer);
+    return _gate?coda_transport_audition_layer(_gate->transport,layer,pitches,count,frames):-1;
 }
 - (CodaTransportStatus)transportStatus {
     std::lock_guard<std::mutex> lock(_producer); CodaTransportStatus s{};

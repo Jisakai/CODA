@@ -54,12 +54,21 @@ public enum NoteEventCompiler {
             let start = max(loop.start, region.start)
             let end = min(loop.end, region.end)
             guard start < end else { continue }
-            let on = try offset(start - loop.start)
-            let off = try offset(end - loop.start)
-            guard off > on else { throw MusicError.timingOverflow }
-            for (voice, pitch) in region.pitches.enumerated() {
-                events.append(NoteEvent(sampleOffset: on, stepOffset: start - loop.start, kind: .noteOn, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
-                events.append(NoteEvent(sampleOffset: off, stepOffset: end - loop.start, kind: .noteOff, pitch: UInt8(pitch), voiceIndex: voice, regionIndex: index))
+            for note in region.notes {
+                let lo = max((start - region.start) * MusicDefaults.ticksPerStep, note.startTick)
+                let hi = min((end - region.start) * MusicDefaults.ticksPerStep, note.endTick)
+                guard hi > lo else { continue }
+                func noteOffset(_ tick: Int) throws -> Int64 {
+                    let step = Double(cycleStartStep) + Double(region.start - loop.start) + Double(tick) / Double(MusicDefaults.ticksPerStep)
+                    let value = (step * samplesPerStep).rounded(.toNearestOrAwayFromZero)
+                    guard value.isFinite, value >= 0, value < Double(Int64.max) else { throw MusicError.timingOverflow }
+                    return Int64(value) - origin
+                }
+                let on = try noteOffset(lo), off = try noteOffset(hi)
+                guard off > on else { throw MusicError.timingOverflow }
+                let voice = region.pitches.firstIndex(of: note.pitch) ?? 0
+                events.append(NoteEvent(sampleOffset: on, stepOffset: region.start - loop.start + lo / MusicDefaults.ticksPerStep, kind: .noteOn, pitch: UInt8(note.pitch), voiceIndex: voice, regionIndex: index))
+                events.append(NoteEvent(sampleOffset: off, stepOffset: region.start - loop.start + hi / MusicDefaults.ticksPerStep, kind: .noteOff, pitch: UInt8(note.pitch), voiceIndex: voice, regionIndex: index))
             }
         }
         events.sort {

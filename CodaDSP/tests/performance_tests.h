@@ -71,16 +71,19 @@ static void test_performance_admission() {
     }
     require(inspect(d).delivered==0&&held_performance(d)==0,"invalid admission leaves render untouched");
     // Invalid future events must not change ordering/count admission.
-    for(int i=0;i<32;i++)if(i%2)push_performance(d,good);else event(d,24000,1,CODA_EVENT_ON,61);
-    require(!coda_dsp_push_performance_event(d,&good),"mixed 33rd same sample rejected");
+    auto badLayer=good;badLayer.layer=CODA_LAYER_COUNT;
+    require(!coda_dsp_push_performance_event(d,&badLayer),"reject out-of-range layer");
+    for(int i=0;i<CODA_DSP_MAX_EVENTS_PER_SAMPLE;i++)if(i%2)push_performance(d,good);else event(d,24000,1,CODA_EVENT_ON,61);
+    require(!coda_dsp_push_performance_event(d,&good),"mixed limit+1 same sample rejected");
     CodaNoteEvent legacy{24000,1,CODA_EVENT_ON,61,0,0};require(!coda_dsp_push_event(d,&legacy),"same shared limit for legacy");
-    frames(d,1);require(inspect(d).delivered==32&&inspect(d).late==0,"mixed FIFO delivered at exact sample");
+    frames(d,1);require(inspect(d).delivered==CODA_DSP_MAX_EVENTS_PER_SAMPLE&&inspect(d).late==0,"mixed FIFO delivered at exact sample");
     coda_dsp_reset(d);good=performance();
-    for(int i=0;i<1023;i++){good.sample_offset=i;if(i%2)push_performance(d,good);else event(d,i,1,CODA_EVENT_ON,60);}
-    good.sample_offset=1023;require(!coda_dsp_push_performance_event(d,&good),"shared queue full");
-    frames(d,256);push_performance(d,good);frames(d,768);
-    require(inspect(d).delivered==1024,"mixed FIFO backpressure recovery");
-    good.sample_offset=1024;push_performance(d,good);good.kind=CODA_EVENT_OFF;
+    constexpr int cap=CODA_DSP_QUEUE_CAPACITY-1;
+    for(int i=0;i<cap;i++){good.sample_offset=i;if(i%2)push_performance(d,good);else event(d,i,1,CODA_EVENT_ON,60);}
+    good.sample_offset=cap;require(!coda_dsp_push_performance_event(d,&good),"shared queue full");
+    frames(d,256);push_performance(d,good);frames(d,cap+1-256);
+    require(inspect(d).delivered==static_cast<uint64_t>(cap+1),"mixed FIFO backpressure recovery");
+    good.sample_offset=cap+1;push_performance(d,good);good.kind=CODA_EVENT_OFF;
     require(!coda_dsp_push_performance_event(d,&good),"off after on tie rejected");coda_dsp_destroy(d);
 }
 static std::vector<float> performance_audio(int preset,int attack,float velocity,float detune=0,float filter=0,int gate=1920,float effective=-1) {

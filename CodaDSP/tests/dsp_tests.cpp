@@ -187,9 +187,121 @@ static std::vector<float> render_progression(int preset,uint32_t block) {
 #include "pass2_tests.h"
 #include "performance_tests.h"
 
+static void test_three_layer_mixer() {
+    auto renderLayer=[](uint8_t layer,uint8_t preset,uint8_t muted,uint8_t pitch) {
+        CodaDSP *d=coda_dsp_create();require(d&&coda_dsp_prepare(d,48000,256),"3-layer prepare");
+        auto m=coda_dsp_default_mixer_controls();
+        m.delay_amount=0;m.reverb_amount=0;
+        m.layers[layer].preset=preset;m.layers[layer].muted=muted;
+        require(coda_dsp_publish_mixer_controls(d,&m),"3-layer mixer controls");
+        frames(d,1200);
+        auto e=performance(1200,pitch,0);e.layer=layer;e.owner.instance=10+layer;
+        require(coda_dsp_push_performance_event(d,&e),"3-layer push on");
+        std::vector<float> out(4800);
+        for(size_t at=0;at<out.size();at+=256) {
+            uint32_t n=static_cast<uint32_t>(std::min<size_t>(256,out.size()-at));
+            allocation_count=deallocation_count=0;count_allocations=true;
+            int ok=coda_dsp_process(d,out.data()+at,n);count_allocations=false;
+            require(ok&&allocation_count==0&&deallocation_count==0,"3-layer render zero allocations");
+        }
+        coda_dsp_destroy(d);return out;
+    };
+    // Independent presets on different layers produce distinct audio.
+    auto bassPluck=renderLayer(CODA_LAYER_BASS,CODA_PRESET_PLUCK,0,48);
+    auto bassWobble=renderLayer(CODA_LAYER_BASS,CODA_PRESET_WOBBLE,0,48);
+    auto melodyCurrents=renderLayer(CODA_LAYER_MELODY,CODA_PRESET_CURRENTS,0,72);
+    auto melodyPluck=renderLayer(CODA_LAYER_MELODY,CODA_PRESET_PLUCK,0,72);
+    require(energy(bassPluck,0,4800)>1e-4 && energy(bassWobble,0,4800)>1e-4,"bass layer audible");
+    require(difference(bassPluck,bassWobble)>0.01,"bass layer preset independent");
+    require(energy(melodyCurrents,0,4800)>1e-5 && difference(melodyCurrents,melodyPluck)>0.01,"melody layer preset independent");
+    auto bassMuted=renderLayer(CODA_LAYER_BASS,CODA_PRESET_WOBBLE,1,48);
+    require(energy(bassMuted,0,4800)<1e-12,"muted bass layer silent");
+
+    // Cross-layer unison pitch playback (MIDI 60 on Chords, Bass, Melody simultaneously)
+    // and independent per-layer mutes without collision or allocation.
+    CodaDSP *d=coda_dsp_create();require(d&&coda_dsp_prepare(d,48000,256),"unison prepare");
+    auto m=coda_dsp_default_mixer_controls();
+    m.delay_amount=0;m.reverb_amount=0;
+    m.layers[CODA_LAYER_CHORDS].preset=CODA_PRESET_CURRENTS;
+    m.layers[CODA_LAYER_BASS].preset=CODA_PRESET_WOBBLE;
+    m.layers[CODA_LAYER_MELODY].preset=CODA_PRESET_WOBBLE;
+    require(coda_dsp_publish_mixer_controls(d,&m),"unison mixer controls");
+    frames(d,1200);
+    for(uint8_t l=0;l<CODA_LAYER_COUNT;++l) {
+        auto on=performance(1200,60,0);on.layer=l;on.owner.instance=100+l;
+        require(coda_dsp_push_performance_event(d,&on),"unison layer on");
+    }
+    std::vector<float> allThree(4800);
+    for(size_t at=0;at<allThree.size();at+=256) {
+        uint32_t n=static_cast<uint32_t>(std::min<size_t>(256,allThree.size()-at));
+        allocation_count=deallocation_count=0;count_allocations=true;
+        int ok=coda_dsp_process(d,allThree.data()+at,n);count_allocations=false;
+        require(ok&&allocation_count==0&&deallocation_count==0,"unison render zero allocations");
+    }
+    require(energy(allThree,0,4800)>1e-3,"unison 3-layer audible");
+    // Mute Chords and Bass; Melody unison pitch 60 must remain audible.
+    m.layers[CODA_LAYER_CHORDS].muted=1;
+    m.layers[CODA_LAYER_BASS].muted=1;
+    m.layers[CODA_LAYER_MELODY].muted=0;
+    require(coda_dsp_publish_mixer_controls(d,&m),"mute chords and bass");
+    frames(d,1200);
+    std::vector<float> onlyMelody(4800);
+    for(size_t at=0;at<onlyMelody.size();at+=256) {
+        uint32_t n=static_cast<uint32_t>(std::min<size_t>(256,onlyMelody.size()-at));
+        require(coda_dsp_process(d,onlyMelody.data()+at,n),"only melody render");
+    }
+    require(energy(onlyMelody,0,4800)>1e-4,"melody unison survives muting chords+bass");
+    // Mute Melody too -> silence.
+    m.layers[CODA_LAYER_MELODY].muted=1;
+    require(coda_dsp_publish_mixer_controls(d,&m),"mute melody");
+    frames(d,1200);
+    std::vector<float> allMuted(1024);
+    for(size_t at=0;at<allMuted.size();at+=256) require(coda_dsp_process(d,allMuted.data()+at,256),"all muted render");
+    float peak=0;for(float x:allMuted) peak=std::max(peak,std::abs(x));
+    require(peak<1e-5f,"all layers muted silent");
+    coda_dsp_destroy(d);
+
+    // Master post-FX chorus changes output signal and extra multi-layer track slot (slot 3) renders with zero allocations.
+    auto renderChorus=[](float chorusAmt) {
+        CodaDSP *cd=coda_dsp_create();require(cd&&coda_dsp_prepare(cd,48000,256),"chorus prepare");
+        auto cm=coda_dsp_default_mixer_controls();
+        cm.chorus_amount=chorusAmt; cm.delay_amount=0; cm.reverb_amount=0;
+        require(coda_dsp_publish_mixer_controls(cd,&cm),"chorus controls");
+        frames(cd,1200);
+        auto e=performance(1200,60,0); e.layer=CODA_LAYER_CHORDS; e.owner.instance=501;
+        require(coda_dsp_push_performance_event(cd,&e),"chorus on");
+        std::vector<float> out(9600);
+        for(size_t at=0;at<out.size();at+=256) {
+            uint32_t n=static_cast<uint32_t>(std::min<size_t>(256,out.size()-at));
+            require(coda_dsp_process(cd,out.data()+at,n),"chorus render");
+        }
+        coda_dsp_destroy(cd); return out;
+    };
+    require(difference(renderChorus(0.0f),renderChorus(1.0f))>0.01,"master post-fx chorus changes signal");
+
+    CodaDSP *md=coda_dsp_create();require(md&&coda_dsp_prepare(md,48000,256),"multi-track prepare");
+    auto extra=coda_dsp_default_mixer_controls().layers[0];
+    extra.preset=CODA_PRESET_WOBBLE;
+    require(coda_dsp_publish_track_controls(md,3,CODA_LAYER_MELODY,&extra),"publish track 3 controls");
+    frames(md,1200);
+    auto e3=performance(1200,72,0); e3.layer=3; e3.owner.instance=700;
+    require(coda_dsp_push_performance_event(md,&e3),"push track 3 event");
+    std::vector<float> out3(4800);
+    for(size_t at=0;at<out3.size();at+=256) {
+        uint32_t n=static_cast<uint32_t>(std::min<size_t>(256,out3.size()-at));
+        allocation_count=deallocation_count=0; count_allocations=true;
+        int ok=coda_dsp_process(md,out3.data()+at,n); count_allocations=false;
+        require(ok&&allocation_count==0&&deallocation_count==0,"multi-track render zero allocations");
+    }
+    require(energy(out3,0,4800)>1e-4,"extra track slot 3 audible");
+    coda_dsp_destroy(md);
+}
+
 int main(int argc,char **argv) {
     std::setbuf(stderr,nullptr);std::fprintf(stderr,"DSP phase: performance calibration/tests\n");
     test_performance();
+    std::fprintf(stderr,"DSP phase: 3-layer mixer tests\n");
+    test_three_layer_mixer();
     std::fprintf(stderr,"DSP phase: legacy tests\n");
     test_core(CODA_PRESET_PLUCK);test_core(CODA_PRESET_CURRENTS);test_core(CODA_PRESET_WOBBLE);
     test_release_and_events();test_pass2();test_validation_and_queue();test_controls_change_signal();test_control_endpoints_and_sample_rates();test_mute_tail();test_dense_voice_stealing();

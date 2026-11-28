@@ -40,6 +40,7 @@ targets:
         buildPhase: resources
     dependencies:
       - target: CodaMusic
+      - target: CodaSidekick
       - target: CodaInteraction
       - target: CodaSession
       - target: CodaNative
@@ -119,6 +120,48 @@ targets:
 
     info:
       path: build/generated/CodaMusicTests-Info.plist
+
+  CodaSidekick:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Sources/CodaSidekick
+    dependencies:
+      - target: CodaMusic
+    settings:
+      base:
+        PRODUCT_NAME: CodaSidekick
+        PRODUCT_MODULE_NAME: CodaSidekick
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+
+  CodaSidekickTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "27.2"
+    sources:
+      - path: Tests/CodaSidekickTests
+      - path: Sources/CodaMusic/Resources/vocab.json
+        buildPhase: resources
+    dependencies:
+      - target: CodaSidekick
+      - target: CodaMusic
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.coda.sidekick.tests
+        SWIFT_VERSION: "6.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.2"
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: build/generated/CodaSidekickTests-Info.plist
 
   CodaInteraction:
     type: library.static
@@ -215,17 +258,17 @@ targets:
     deploymentTarget: "27.2"
     sources:
       - path: Tests/CodaAudioTests
-      # Compile the actual editor model into the offline integration-test target.
-      - path: Sources/CodaApp/CodaEditorStore.swift
-      - path: Sources/CodaApp/CodaDesignTokens.swift
-      - path: Sources/CodaApp/EditorViews.swift
-      - path: Sources/CodaApp/PencilInputBridge.swift
+      # Compile the actual editor model and UI views into the offline integration-test target.
+      - path: Sources/CodaApp
+        excludes:
+          - CodaApp.swift
       - path: Sources/CodaMusic/Resources/vocab.json
         buildPhase: resources
     dependencies:
       - target: CodaNative
       - target: CodaSession
       - target: CodaMusic
+      - target: CodaSidekick
       - target: CodaInteraction
       - sdk: libc++.tbd
     settings:
@@ -267,6 +310,7 @@ schemes:
       targets:
         - codaUITests
         - CodaMusicTests
+        - CodaSidekickTests
         - CodaInteractionTests
         - CodaAudioTests
   CodaMusic:

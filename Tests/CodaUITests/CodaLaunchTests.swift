@@ -197,6 +197,8 @@ final class CodaLaunchTests: XCTestCase {
             XCTAssertEqual(try musicState(in: state), retainedMusic)
         }
         let swingFrame = try XCTUnwrap(cachedDescendant("pattern.swing", in: state)).frame
+        let eventsBeforeSwing = cachedDescendant("editor.uiDiagnostics", in: state)?.value as? String
+        diagnosticReports.append("Production UI events before Swing (newest first): \(eventsBeforeSwing ?? "missing")")
         let start = CGPoint(x: swingFrame.midX, y: swingFrame.midY)
         let end = CGPoint(x: start.x, y: start.y - 16)
         XCTAssertTrue(state.frame.contains(start) && state.frame.contains(end), "Keep both finger endpoints on-screen")
@@ -205,6 +207,7 @@ final class CodaLaunchTests: XCTestCase {
             .press(forDuration: 0.1, thenDragTo:
                 origin.withOffset(CGVector(dx: end.x - state.frame.minX, dy: end.y - state.frame.minY)))
         state = try window.snapshot()
+        let firstSwingEvents = cachedDescendant("editor.uiDiagnostics", in: state)?.value as? String
         diagnosticReports.append("""
         After original short Swing drag \(start)->\(end):
         Swing=\(String(describing: cachedDescendant("pattern.swing", in: state)?.value))
@@ -216,6 +219,11 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertLessThanOrEqual(percent, 100)
         XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
         XCTAssertEqual(try musicState(in: state), retainedMusic)
+        XCTAssertNotNil(firstSwingEvents)
+        XCTAssertNotEqual(firstSwingEvents, eventsBeforeSwing, "Cached diagnostics must advance for the actual short drag")
+        XCTAssertLessThanOrEqual(firstSwingEvents?.utf16.count ?? Int.max, 480)
+        XCTAssertTrue(firstSwingEvents?.contains("pattern.swing.") == true,
+                      "Latest production ingress/callback evidence must survive the AX snapshot limit")
 
         let reverseEnd = CGPoint(x: start.x, y: start.y + 16)
         XCTAssertTrue(state.frame.contains(reverseEnd) && swingFrame.contains(reverseEnd))
@@ -223,6 +231,7 @@ final class CodaLaunchTests: XCTestCase {
             .press(forDuration: 0.1, thenDragTo:
                 origin.withOffset(CGVector(dx: reverseEnd.x - state.frame.minX, dy: reverseEnd.y - state.frame.minY)))
         state = try window.snapshot()
+        let secondSwingEvents = cachedDescendant("editor.uiDiagnostics", in: state)?.value as? String
         diagnosticReports.append("""
         After second, reversed Swing drag \(start)->\(reverseEnd):
         Swing=\(String(describing: cachedDescendant("pattern.swing", in: state)?.value))
@@ -234,6 +243,10 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(reversedPercent, 0)
         XCTAssertEqual(cachedDescendant("pattern.humanize", in: state)?.value as? String, "Tight")
         XCTAssertEqual(try musicState(in: state), retainedMusic)
+        XCTAssertNotNil(secondSwingEvents)
+        XCTAssertNotEqual(secondSwingEvents, firstSwingEvents, "The reverse drag needs its own fresh evidence")
+        XCTAssertLessThanOrEqual(secondSwingEvents?.utf16.count ?? Int.max, 480)
+        XCTAssertTrue(secondSwingEvents?.contains("pattern.swing.") == true)
     }
 
     @MainActor
@@ -493,6 +506,22 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["radial.option.inner.0"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["radial.option.outer.3"].exists)
         attachScreenshot(named: "M1-radial-primary-fixture", from: app)
+
+        // Relaunch the real production view with seven DEBUG-only root labels;
+        // paging and production action counts stay unchanged.
+        app.terminate()
+        app.launchArguments = ["--coda-ui-fixture-four-bar", "--coda-ui-fixture-radial-seven"]
+        launchAndDescribe(app)
+        XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["radial.menu.roots"].waitForExistence(timeout: 5))
+        for slot in 0..<7 {
+            let option = app.descendants(matching: .any)["radial.option.roots.\(slot)"]
+            XCTAssertTrue(option.exists)
+            XCTAssertEqual(option.frame.width, option.frame.height, accuracy: 0.5)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(option.frame))
+        }
+        XCTAssertFalse(app.descendants(matching: .any)["radial.option.roots.7"].exists)
+        attachScreenshot(named: "M1-radial-seven-fixture", from: app)
     }
 
     @MainActor

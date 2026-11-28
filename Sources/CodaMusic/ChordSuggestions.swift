@@ -1,8 +1,8 @@
 import Foundation
 
-public enum KeyMode: Equatable, Sendable { case major, naturalMinor }
+public enum KeyMode: String, Codable, Equatable, Hashable, Sendable { case major, naturalMinor }
 
-public struct MusicalKey: Sendable {
+public struct MusicalKey: Codable, Equatable, Hashable, Sendable {
     public let tonic: Int
     public let mode: KeyMode
     public init(tonic: Int, mode: KeyMode) {
@@ -12,11 +12,18 @@ public struct MusicalKey: Sendable {
     }
 }
 
-public enum HarmonicFunction: String, Sendable { case tonic, subdominant, dominant, borrowed }
+public enum HarmonicFunction: String, Codable, Equatable, Hashable, Sendable { case tonic, subdominant, dominant, borrowed }
 
-public struct ChordSuggestion: Equatable, Sendable {
+public struct ChordSuggestion: Equatable, Hashable, Sendable {
     public let chord: Chord
     public let function: HarmonicFunction
+    public let score: Double
+
+    public init(chord: Chord, function: HarmonicFunction, score: Double = 1.0) {
+        self.chord = chord
+        self.function = function
+        self.score = score
+    }
 }
 
 /// Replaceable rule interface for §7.4; has no UI, inference or edit side effects.

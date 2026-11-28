@@ -6,8 +6,11 @@ import UIKit.UIGestureRecognizerSubclass
 /// itself never participates in hit testing, so finger UI controls remain live.
 struct PencilInputBridge: UIViewRepresentable {
     let store: CodaEditorStore
+    var onPencilDoubleTap: (() -> Void)? = nil
 
-    func makeCoordinator() -> Coordinator { Coordinator(store: store) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(store: store, onPencilDoubleTap: onPencilDoubleTap)
+    }
 
     func makeUIView(context: Context) -> PencilInputAnchorView {
         let view = PencilInputAnchorView(frame: .zero)
@@ -23,6 +26,7 @@ struct PencilInputBridge: UIViewRepresentable {
 
     func updateUIView(_ uiView: PencilInputAnchorView, context: Context) {
         context.coordinator.store = store
+        context.coordinator.onPencilDoubleTap = onPencilDoubleTap
         if let window = uiView.window, let root = window.rootViewController?.view {
             context.coordinator.install(on: root, window: window)
         }
@@ -34,6 +38,7 @@ struct PencilInputBridge: UIViewRepresentable {
 
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
         var store: CodaEditorStore
+        var onPencilDoubleTap: (() -> Void)?
         private weak var rootView: UIView?
         private weak var installedWindow: UIWindow?
         private var pencilSequence: PencilSequenceRecognizer?
@@ -46,11 +51,13 @@ struct PencilInputBridge: UIViewRepresentable {
         private var hideChromeTap: UITapGestureRecognizer?
         private var canvasFeedback: UICanvasFeedbackGenerator?
         private var lastHapticTime = 0.0
+        private var lastDoubleTapTime = 0.0
         private var lastDetent = 0
         private var panStart: CGPoint = .zero
 
-        init(store: CodaEditorStore) {
+        init(store: CodaEditorStore, onPencilDoubleTap: (() -> Void)? = nil) {
             self.store = store
+            self.onPencilDoubleTap = onPencilDoubleTap
             super.init()
         }
 
@@ -140,7 +147,11 @@ struct PencilInputBridge: UIViewRepresentable {
                store.uiDiagnosticsEnabled, let rootView {
                 let point = touch.location(in: rootView)
                 let hit = touch.view.map { "\(type(of: $0)) frame=\($0.convert($0.bounds, to: rootView))" } ?? "nil"
-                store.recordUIEvent("touch.begin at=\(point) hit=\(hit) popup=\(store.popup?.rawValue ?? "nil") muted=\(store.controls.muted)")
+                if store.patternEditing, point.y < store.timelineTop, point.x > store.rootSize.width / 2 {
+                    store.recordUIEvent("pattern.swing.touch at=\(point) hit=\(hit) shortcuts=\(!store.shouldIgnoreFingerShortcut)")
+                } else {
+                    store.recordUIEvent("touch.begin at=\(point) hit=\(hit) popup=\(store.popup?.rawValue ?? "nil") muted=\(store.controls.muted)")
+                }
             }
             if gestureRecognizer === undoTap || gestureRecognizer === redoTap || gestureRecognizer === hideChromeTap {
                 return touch.type == .direct && !store.shouldIgnoreFingerShortcut
@@ -157,6 +168,11 @@ struct PencilInputBridge: UIViewRepresentable {
                 guard touch.type == .direct, let rootView else { return false }
                 let point = touch.location(in: rootView)
                 let accepted = store.beginFingerNavigation(at: point)
+                if store.uiDiagnosticsEnabled, store.patternEditing,
+                   point.y < store.timelineTop, point.x > store.rootSize.width / 2 {
+                    let name = gestureRecognizer === pan ? "pan" : "pinch"
+                    store.recordUIEvent("pattern.swing.admit.\(name) accepted=\(accepted) at=\(point)")
+                }
                 if accepted && gestureRecognizer === pan { panStart = point }
                 return accepted
             }
@@ -166,6 +182,27 @@ struct PencilInputBridge: UIViewRepresentable {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             true
+        }
+
+        func pencilInteraction(_ interaction: UIPencilInteraction,
+                               didReceiveTap tap: UIPencilInteraction.Tap) {
+            dispatchPencilDoubleTap()
+        }
+
+        func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+            dispatchPencilDoubleTap()
+        }
+
+        private func dispatchPencilDoubleTap() {
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastDoubleTapTime >= 0.08 else { return }
+            lastDoubleTapTime = now
+            if let onPencilDoubleTap {
+                onPencilDoubleTap()
+            } else {
+                store.handlePencilDoubleTap()
+            }
+            emitDetentIfNeeded()
         }
 
         func pencilInteraction(_ interaction: UIPencilInteraction,
@@ -254,6 +291,7 @@ struct PencilInputBridge: UIViewRepresentable {
         private func emitDetentIfNeeded() {
             guard store.pencilFeedbackSerial != lastDetent else { return }
             lastDetent = store.pencilFeedbackSerial
+            guard store.gestureSettings.hapticsEnabled else { return }
             let now = ProcessInfo.processInfo.systemUptime
             guard now - lastHapticTime >= CodaDesignTokens.Input.hapticMinimumInterval else { return }
             lastHapticTime = now

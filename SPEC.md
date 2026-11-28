@@ -1,5 +1,10 @@
 # coda — iPadOS Music Sketchpad — Unified Design & Build Spec (v2)
 
+## Latest owner correction — November 28: unbounded arrangement and save hub
+**LATEST DECIDED UI override:** owner requests a complete Procreate-style redesign of the entire interface, including icons, typography, bars, menus, text treatments and screens. This supersedes conflicting historical visual prescriptions (including Plus Jakarta-only/pastel/pill look and fixed chrome sizing), not music/input/audio-safety behavior. Recreate the interface vocabulary with original vector assets and licensed system fonts; keep coda branding and music semantics. The current implementation-only brief defines this direction; native/UI validation remains deferred.
+**DECIDED:** the app is not limited to eight bars; the owner can keep scrolling/extending the arrangement as needed. Eight bars in historical sections below describes only an initial view/default, never a maximum song, loop, validation or export length. Use virtualized drawing and bounded real-time playback windows without imposing a short fixed project cap.
+**DECIDED:** persistence includes a real save/project hub for creating, naming, saving, opening and managing multiple local projects, alongside import/export and safe autosave/recovery. A serializer or export button alone does not satisfy the requested hub. Apply this correction to §§4,18–20 and all arrangement/loop implementation paths.
+
 > Single source of truth for the app's design, sound, interaction, ML and build plan.
 > Written for an AI orchestrator/coding agent (Hermes → Codex CLI) and for second-opinion reviewers.
 > Date: 2026-11-25. The owner confirms no original blueprint exists; historical comparisons in §21 are not an external source or prerequisite.
@@ -226,6 +231,8 @@ Visual: dark-glass bar, no hard borders (§15). Icons solid, filled, rounded; no
 | Menu repositions away from screen edges so it never clips (the chord strip is near the top). | PROPOSED |
 | **Empty slot squeeze:** same two rings; outer ring = 3 predicted **next chords** + "All"; inner ring = tools (paste, rest…). | PROPOSED |
 | Prediction source: rule-based by key/function first; replaced by the Core ML ranker (§17) without changing the UI. | PROPOSED |
+
+**Owner correction — DECIDED:** Every radial option is a true circle, never a pill/capsule. Each visible ring's backing length and option spacing derive from its actual visible choice count, circle diameter, gap and radius. Seven visible choices require seven non-overlapping circles, not a fixed shorter menu. Drawing, selection and edge fitting share this count-derived geometry. This supersedes earlier pill presentation requirements, not action semantics.
 
 ### 7.5 Prediction hooks (from the Core ML model)
 - **Extension/substitution** (center-masked): fills the 3 outer-ring predictions on an existing chord.

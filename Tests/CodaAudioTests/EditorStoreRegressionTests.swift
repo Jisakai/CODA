@@ -10,6 +10,113 @@ import CodaNative
 /// dispatch/model regressions, not a substitute for real Pencil hardware tests.
 final class EditorStoreRegressionTests: XCTestCase {
     @MainActor
+    func testUIEventReadoutKeepsLatestSwingSequenceInsideSnapshotLimit() throws {
+        let store = try makeStore(uiDiagnosticsEnabled: true)
+        defer { store.session?.suspend() }
+        // Exercise the production report producer after more than a ring's
+        // worth of startup/layout events, as in the actual truncated attachment.
+        for index in 0..<120 {
+            store.recordUIEvent("anchors.test.\(index) \(String(repeating: "layout ", count: 30))")
+        }
+        let before = store.uiDiagnosticReport
+        let first = ["pattern.swing.admit.pan accepted=false at=(1293,26)",
+                     "pattern.swing.changed dy=0 start=0 draft=0",
+                     "pattern.swing.commit before=0 requested=0.133 after=0.133",
+                     "pattern.swing.ended dy=-16 retained=true requested=0.133 committed=0.133",
+                     "pattern.swing.reset committed=0.133"]
+        for event in first { store.recordUIEvent(event) }
+        let afterFirst = store.uiDiagnosticReport
+        XCTAssertLessThanOrEqual(afterFirst.utf16.count, 480)
+        XCTAssertNotEqual(afterFirst, before)
+        let reportEvents = afterFirst.components(separatedBy: "\n")
+        XCTAssertEqual(reportEvents.count, first.count)
+        for (line, event) in zip(reportEvents, first.reversed()) {
+            XCTAssertTrue(line.hasSuffix(event), "Newest-first diagnostics must retain complete event lines")
+        }
+        for event in first {
+            XCTAssertTrue(afterFirst.contains(event), "The cached AX prefix must include \(event)")
+        }
+        store.recordUIEvent("pattern.swing.ended dy=16 requested=0 committed=0")
+        XCTAssertTrue(store.uiDiagnosticReport.components(separatedBy: "\n")[0]
+            .contains("pattern.swing.ended dy=16 requested=0 committed=0"))
+        XCTAssertNotEqual(store.uiDiagnosticReport, afterFirst, "A second drag cannot expose the first drag's prefix")
+
+        let disabled = try makeStore()
+        defer { disabled.session?.suspend() }
+        disabled.recordUIEvent("pattern.swing.changed must-not-be-recorded")
+        XCTAssertTrue(disabled.uiDiagnosticReport.isEmpty, "Diagnostics remain opt-in")
+    }
+
+    @MainActor
+    func testHostedPatternControlsRejectNavigationAndRetainIdentityDuringDiagnostics() async throws {
+        let store = try makeStore(uiDiagnosticsEnabled: true)
+        let session = try XCTUnwrap(store.session)
+        let before = session.patterns
+        let chords = session.editor.progression
+        let canUndo = store.canUndo
+        let canRedo = store.canRedo
+        store.beginPatternEditing()
+        let host = UIHostingController(rootView: CodaCanvas(store: store))
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let previousKeyWindow = scene?.windows.first { $0.isKeyWindow }
+        let window = scene.map { UIWindow(windowScene: $0) }
+            ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 1376, height: 1032))
+        let measured = expectation(description: "Production Pattern controls measured")
+        let appeared = expectation(description: "Production Pattern controls appeared")
+        var receivedFrame = false
+        var appearances = 0
+        var disappearances = 0
+        store.uiEventObserver = { event in
+            if event == "pattern.controls.appear" {
+                appearances += 1
+                if appearances == 1 { appeared.fulfill() }
+            }
+            if event == "pattern.controls.disappear" { disappearances += 1 }
+            if event.hasPrefix("pattern.controls.frame"), !store.patternControlsFrame.isEmpty, !receivedFrame {
+                receivedFrame = true
+                measured.fulfill()
+            }
+        }
+        defer {
+            store.uiEventObserver = nil
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+            session.suspend()
+        }
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        await fulfillment(of: [measured, appeared], timeout: 5)
+        let frame = store.patternControlsFrame
+        XCTAssertEqual(frame.minY, 4, accuracy: 1)
+        XCTAssertEqual(frame.height, 44, accuracy: 1)
+        XCTAssertGreaterThan(frame.minX, window.bounds.midX)
+        // Same center and +/-16pt endpoints as the unchanged coordinate test,
+        // using the actual hosted layout rather than a fabricated control frame.
+        let center = CGPoint(x: frame.minX + 22, y: frame.midY)
+        for delta in [CGFloat(-16), 0, 16] {
+            let point = CGPoint(x: center.x, y: center.y + delta)
+            XCTAssertTrue(frame.contains(point))
+            XCTAssertFalse(store.beginFingerNavigation(at: point), "Root navigation must reject the short Swing sequence")
+        }
+        let initialAppearances = appearances
+        XCTAssertEqual(initialAppearances, 1)
+        for index in 0..<120 { store.recordUIEvent("diagnostic.identity.\(index)") }
+        // Wait for the real hosted SwiftUI update; no synthetic gesture/store edit.
+        try await Task.sleep(for: .milliseconds(50))
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        XCTAssertEqual(store.patternControlsFrame, frame)
+        XCTAssertEqual(appearances, initialAppearances)
+        XCTAssertEqual(disappearances, 0)
+        XCTAssertEqual(session.patterns, before)
+        XCTAssertEqual(session.editor.progression, chords)
+        XCTAssertEqual(store.canUndo, canUndo)
+        XCTAssertEqual(store.canRedo, canRedo)
+    }
+
+    @MainActor
     func testHostedProductionCanvasReceivesAnchorsAndRendersEverySettingsAction() async throws {
         let store = try makeStore(uiDiagnosticsEnabled: true)
         let host = UIHostingController(rootView: CodaCanvas(store: store))
@@ -172,36 +279,38 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testRenderedCurvedPillsMatchHitTestingAcrossTheirWidthCapsAndScale() {
-        for direction in [-Double.pi, -.pi / 3, .pi / 2] {
-            for count in [2, 3, 4] {
-                let radius = 132.0
-                let thickness = 48.0
-                for scale in [0.8, 0.9, 1.0] {
-                    let bounds = CGRect(x: 0, y: 0, width: 312 * scale, height: 312 * scale)
-                    for slot in 0..<count {
-                        let path = RingSlotShape(count: count, index: slot, radius: radius,
-                            thickness: thickness, direction: direction, scale: scale).path(in: bounds)
-                        let arc = RadialGeometry.pill(slot: slot, count: count, radius: radius,
-                            thickness: thickness, direction: direction)
-                        let placed = arc.path(center: CGPoint(x: bounds.midX, y: bounds.midY), scale: scale)
-                        for degree in 0..<360 {
-                            let angle = Double(degree) * .pi / 180 + 0.001
-                            for offset in [-25.0, -17, 0, 17, 25] {
-                                let local = CGPoint(x: cos(angle) * (radius + offset), y: sin(angle) * (radius + offset))
-                                let point = CGPoint(x: bounds.midX + local.x * scale, y: bounds.midY + local.y * scale)
-                                let expected = RadialGeometry.slot(at: local, count: count, radius: radius,
-                                    thickness: thickness, direction: direction) == slot
-                                let context = "direction=\(direction) count=\(count) slot=\(slot) scale=\(scale) degree=\(degree) offset=\(offset) local=\(local) placed=\(point)"
-                                XCTAssertEqual(placed.contains(point, using: .winding), expected,
-                                    "CGPath placement: \(context)")
-                                XCTAssertEqual(path.cgPath.contains(point, using: .winding), expected,
-                                    "SwiftUI bridge: \(context)")
-                                XCTAssertEqual(path.contains(point, eoFill: false), expected,
-                                    "SwiftUI containment: \(context)")
+    func testRenderedCirclesMatchHitTestingAcrossCountsPerimetersAndScale() {
+        for direction in [-Double.pi, RadialGeometry.defaultDirection, -.pi / 3, .pi / 3, .pi / 2, 2 * .pi] {
+            for (radius, thickness) in [(84.0, 40.0), (136, 40), (136, 48), (132, 48), (196, 48), (260, 48)] {
+                for count in 1...7 {
+                    let layout = RadialRingLayout(count: count, radius: radius, thickness: thickness, direction: direction)
+                    for scale in [0.8, 0.9, 1.0] {
+                        let extent = (radius + thickness / 2) * scale
+                        let bounds = CGRect(x: 0, y: 0, width: extent * 2, height: extent * 2)
+                        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+                        for slot in 0..<count {
+                            let shape = RingSlotShape(layout: layout, index: slot, scale: scale)
+                            let rendered = shape.path(in: bounds)
+                            let placed = layout.buttonPath(slot: slot, center: center, scale: scale)
+                            let localCenter = layout.buttonCenter(slot: slot)
+                            XCTAssertEqual(rendered.boundingRect.width, layout.buttonDiameter * scale, accuracy: 1e-9)
+                            XCTAssertEqual(rendered.boundingRect.height, layout.buttonDiameter * scale, accuracy: 1e-9)
+                            for degree in stride(from: 0, to: 360, by: 15) {
+                                let angle = Double(degree) * .pi / 180 + 0.001
+                                for fraction in [0.0, 0.5, 0.98, 1.02] {
+                                    let distance = layout.buttonDiameter / 2 * fraction
+                                    let local = CGPoint(x: localCenter.x + cos(angle) * distance,
+                                                        y: localCenter.y + sin(angle) * distance)
+                                    let point = CGPoint(x: center.x + local.x * scale, y: center.y + local.y * scale)
+                                    let expected = fraction < 1
+                                    let context = "direction=\(direction) count=\(count) slot=\(slot) scale=\(scale) degree=\(degree) fraction=\(fraction)"
+                                    XCTAssertEqual(layout.slot(at: local) == slot, expected, context)
+                                    XCTAssertEqual(placed.contains(point, using: .winding), expected, context)
+                                    XCTAssertEqual(rendered.cgPath.contains(point, using: .winding), expected, context)
+                                    XCTAssertEqual(rendered.contains(point, eoFill: false), expected, context)
+                                }
                             }
                         }
-                        XCTAssertFalse(path.contains(CGPoint(x: bounds.midX, y: bounds.midY)))
                     }
                 }
             }
@@ -209,79 +318,65 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testExplicitRoundedContoursContainReportedCapTipsInAllThreeConsumers() {
-        // Exact native failure coordinates, including the first and last reports.
-        let cases: [(direction: Double, count: Int, slot: Int, scale: Double, degree: Int)] = [
-            (-.pi, 2, 0, 0.8, 179),
-            (.pi / 2, 4, 3, 1, 149)
-        ]
-        for sample in cases {
-            let arc = RadialGeometry.pill(slot: sample.slot, count: sample.count,
-                radius: 132, thickness: 48, direction: sample.direction)
-            let localPath = arc.path()
-            var moves = 0
-            var closes = 0
-            var curves = 0
-            localPath.applyWithBlock { pointer in
-                switch pointer.pointee.type {
-                case .moveToPoint: moves += 1
-                case .closeSubpath: closes += 1
-                case .addCurveToPoint: curves += 1
-                default: break
+    func testSingleCircleAndBackingContoursCloseAndBridgeWithoutPillTails() {
+        for count in 1...7 {
+            let layout = RadialRingLayout(count: count, radius: 132, thickness: 48)
+            for slot in 0..<count {
+                let path = layout.buttonPath(slot: slot)
+                var moves = 0
+                var closes = 0
+                var curves = 0
+                path.applyWithBlock { pointer in
+                    switch pointer.pointee.type {
+                    case .moveToPoint: moves += 1
+                    case .closeSubpath: closes += 1
+                    case .addCurveToPoint: curves += 1
+                    default: break
+                    }
                 }
+                XCTAssertEqual(moves, 1, "One connected filled circle contour")
+                XCTAssertEqual(closes, 1, "The filled circle must close")
+                XCTAssertGreaterThanOrEqual(curves, 4, "Curved around its entire perimeter")
+                let box = path.boundingBoxOfPath
+                XCTAssertEqual(box.width, 40, accuracy: 1e-9)
+                XCTAssertEqual(box.height, 40, accuracy: 1e-9)
             }
-            XCTAssertEqual(moves, 1, "One connected filled pill contour")
-            XCTAssertEqual(closes, 1, "The filled contour must close explicitly")
-            XCTAssertGreaterThanOrEqual(curves, 6, "Retain curved sides and semicircular caps")
-            let angle = Double(sample.degree) * .pi / 180 + 0.001
-            let local = CGPoint(x: cos(angle) * 132, y: sin(angle) * 132)
-            let capCenter = CGPoint(x: cos(arc.end) * arc.radius, y: sin(arc.end) * arc.radius)
-            XCTAssertLessThan(hypot(local.x - capCenter.x, local.y - capCenter.y), arc.thickness / 2,
-                              "Reported points are inside the round cap, not on its boundary")
-            let center = CGPoint(x: 156 * sample.scale, y: 156 * sample.scale)
-            let point = CGPoint(x: center.x + local.x * sample.scale,
-                                y: center.y + local.y * sample.scale)
-            let placed = arc.path(center: center, scale: sample.scale)
-            let rendered = RingSlotShape(count: sample.count, index: sample.slot,
-                radius: 132, thickness: 48, direction: sample.direction, scale: sample.scale)
-                .path(in: CGRect(origin: .zero, size: CGSize(width: 312 * sample.scale,
-                                                           height: 312 * sample.scale)))
-            XCTAssertTrue(localPath.contains(local, using: .winding))
-            XCTAssertTrue(placed.contains(point, using: .winding))
-            XCTAssertTrue(rendered.cgPath.contains(point, using: .winding))
-            XCTAssertTrue(rendered.contains(point, eoFill: false))
+            if count == 1 {
+                let box = layout.backing.path().boundingBoxOfPath
+                XCTAssertEqual(box.width, 48, accuracy: 1e-9)
+                XCTAssertEqual(box.height, 48, accuracy: 1e-9)
+            }
         }
     }
 
     @MainActor
-    func testRoundedCapSubdivisionSeamsKeepNativeContainmentParity() {
+    func testCountFittedBackingCapSeamsKeepNativeContainmentParity() {
         for direction in [-Double.pi, .pi / 2] {
-            let arc = RadialGeometry.pill(slot: 0, count: 2, radius: 132,
-                                         thickness: 48, direction: direction)
-            let localPath = arc.path()
-            for scale in [0.8, 0.9, 1.0] {
-                let center = CGPoint(x: 156 * scale, y: 156 * scale)
-                let placed = arc.path(center: center, scale: scale)
-                let rendered = RingSlotShape(count: 2, index: 0, radius: 132,
-                    thickness: 48, direction: direction, scale: scale)
-                    .path(in: CGRect(x: 0, y: 0, width: 312 * scale, height: 312 * scale))
-                for isEnd in [false, true] {
-                    let angle = isEnd ? arc.end : arc.start
-                    let cap = CGPoint(x: cos(angle) * arc.radius, y: sin(angle) * arc.radius)
-                    // Probe both cap junctions, subdivision seams and the tip,
-                    // strictly inside the circle rather than on its boundary.
-                    for step in 0...16 {
-                        let normal = angle + (isEnd ? 0 : .pi) + Double(step) * .pi / 16
-                        let distance = arc.thickness / 2 * 0.98
-                        let local = CGPoint(x: cap.x + cos(normal) * distance,
-                                            y: cap.y + sin(normal) * distance)
-                        let point = CGPoint(x: center.x + local.x * scale,
-                                            y: center.y + local.y * scale)
-                        let context = "direction=\(direction) scale=\(scale) end=\(isEnd) step=\(step)"
-                        XCTAssertTrue(localPath.contains(local, using: .winding), context)
-                        XCTAssertTrue(placed.contains(point, using: .winding), context)
-                        XCTAssertTrue(rendered.cgPath.contains(point, using: .winding), context)
-                        XCTAssertTrue(rendered.contains(point, eoFill: false), context)
+            for count in 1...7 {
+                let layout = RadialRingLayout(count: count, radius: 132, thickness: 48, direction: direction)
+                let arc = layout.backing
+                let localPath = arc.path()
+                for scale in [0.8, 0.9, 1.0] {
+                    let center = CGPoint(x: 156 * scale, y: 156 * scale)
+                    let placed = arc.path(center: center, scale: scale)
+                    let rendered = RadialArcShape(arc: arc, scale: scale)
+                        .path(in: CGRect(x: 0, y: 0, width: 312 * scale, height: 312 * scale))
+                    for isEnd in [false, true] {
+                        let angle = isEnd ? arc.end : arc.start
+                        let cap = CGPoint(x: cos(angle) * arc.radius, y: sin(angle) * arc.radius)
+                        for step in 0...16 {
+                            let normal = angle + (isEnd ? 0 : .pi) + Double(step) * .pi / 16
+                            let distance = arc.thickness / 2 * 0.98
+                            let local = CGPoint(x: cap.x + cos(normal) * distance,
+                                                y: cap.y + sin(normal) * distance)
+                            let point = CGPoint(x: center.x + local.x * scale,
+                                                y: center.y + local.y * scale)
+                            let context = "direction=\(direction) count=\(count) scale=\(scale) end=\(isEnd) step=\(step)"
+                            XCTAssertTrue(localPath.contains(local, using: .winding), context)
+                            XCTAssertTrue(placed.contains(point, using: .winding), context)
+                            XCTAssertTrue(rendered.cgPath.contains(point, using: .winding), context)
+                            XCTAssertTrue(rendered.contains(point, eoFill: false), context)
+                        }
                     }
                 }
             }
@@ -289,7 +384,7 @@ final class EditorStoreRegressionTests: XCTestCase {
     }
 
     @MainActor
-    func testProductionHoverUsesRoundedPillsAndCancelsOnExposedBackingInEveryMode() throws {
+    func testProductionHoverUsesCirclesAndCancelsOnGapsAndExposedBackingInEveryMode() throws {
         let store = try makeStore()
         let session = try XCTUnwrap(store.session)
         defer { store.closeRadial(); session.suspend() }
@@ -302,24 +397,149 @@ final class EditorStoreRegressionTests: XCTestCase {
             assertRenderedRadialClearsChrome(store)
             let state = try XCTUnwrap(store.radial)
             for (ring, labels, radius, thickness) in store.radialRings() {
-                let pill = RadialGeometry.pill(slot: 0, count: labels.count, radius: radius,
+                let layout = RadialRingLayout(count: labels.count, radius: radius,
                     thickness: thickness, direction: state.placement.direction)
-                let cap = CGPoint(x: cos(pill.start) * radius + sin(pill.start) * pill.thickness * 0.45,
-                                  y: sin(pill.start) * radius - cos(pill.start) * pill.thickness * 0.45)
-                store.pencilHover(at: CGPoint(x: state.center.x + cap.x * state.placement.scale,
-                    y: state.center.y + cap.y * state.placement.scale), rollAngle: nil)
-                XCTAssertEqual(store.radial?.selectedRing, ring)
-                XCTAssertEqual(store.radial?.selectedSlot, 0)
-                let middle = (pill.start + pill.end) / 2
-                store.pencilHover(at: state.placement.point(radius: radius + thickness / 2 - 1,
-                    angle: middle), rollAngle: nil)
-                XCTAssertNil(store.radial?.selectedRing, "Exposed backing is not an option")
-                XCTAssertNil(store.radial?.selectedSlot)
-                XCTAssertNil(store.radialPreview)
-                XCTAssertEqual(store.radial?.placement, state.placement)
+                for slot in labels.indices {
+                    let center = layout.buttonCenter(slot: slot)
+                    for degree in stride(from: 0, to: 360, by: 30) {
+                        let angle = Double(degree) * .pi / 180
+                        let distance = layout.buttonDiameter / 2 * 0.98
+                        let local = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
+                        store.pencilHover(at: CGPoint(x: state.center.x + local.x * state.placement.scale,
+                            y: state.center.y + local.y * state.placement.scale), rollAngle: nil)
+                        XCTAssertEqual(store.radial?.selectedRing, ring)
+                        XCTAssertEqual(store.radial?.selectedSlot, slot)
+                    }
+                    let rim = CGPoint(x: center.x * (1 + (thickness / 2 - 1) / radius),
+                                      y: center.y * (1 + (thickness / 2 - 1) / radius))
+                    store.pencilHover(at: CGPoint(x: state.center.x + rim.x * state.placement.scale,
+                        y: state.center.y + rim.y * state.placement.scale), rollAngle: nil)
+                    XCTAssertNil(store.radial?.selectedRing, "Exposed backing is not an option")
+                    XCTAssertNil(store.radial?.selectedSlot)
+                    XCTAssertNil(store.radialPreview)
+                    if slot > 0 {
+                        let previous = layout.buttonCenter(slot: slot - 1)
+                        let gap = CGPoint(x: (previous.x + center.x) / 2, y: (previous.y + center.y) / 2)
+                        store.pencilHover(at: CGPoint(x: state.center.x + gap.x * state.placement.scale,
+                            y: state.center.y + gap.y * state.placement.scale), rollAngle: nil)
+                        XCTAssertNil(store.radial?.selectedRing, "Inter-circle backing is not an option")
+                        XCTAssertNil(store.radial?.selectedSlot)
+                        XCTAssertNil(store.radialPreview)
+                    }
+                    XCTAssertEqual(store.radial?.placement, state.placement)
+                }
             }
         }
         XCTAssertEqual(session.editor.progression, original, "Hover and swap draft must not commit music")
+    }
+
+    @MainActor
+    func testProductionCircleHoverAndLiftRejectGapsAcrossOneThroughSevenChoices() throws {
+        #if DEBUG
+        let store = try makeStore()
+        let session = try XCTUnwrap(store.session)
+        defer { store.closeRadial(); session.suspend() }
+        let original = session.editor.progression
+        for count in 1...7 {
+            for size in [CGSize(width: 1194, height: 834), CGSize(width: 1366, height: 1024),
+                         CGSize(width: 1376, height: 1032)] {
+                store.openSqueeze(at: CGPoint(x: 100, y: 100))
+                store.radialCircleFixtureCount = count
+                store.radial?.mode = .roots
+                store.setRootSize(size)
+                assertRenderedRadialClearsChrome(store)
+                let state = try XCTUnwrap(store.radial)
+                let ring = try XCTUnwrap(store.radialRings().first)
+                XCTAssertEqual(ring.1.count, count)
+                let layout = RadialRingLayout(count: count, radius: ring.2,
+                    thickness: ring.3, direction: state.placement.direction)
+                for slot in 0..<count {
+                    let center = layout.buttonCenter(slot: slot)
+                    for degree in stride(from: 0, to: 360, by: 15) {
+                        let angle = Double(degree) * .pi / 180 + 0.001
+                        for fraction in [0.0, 0.98, 1.02] {
+                            let distance = layout.buttonDiameter / 2 * fraction
+                            let local = CGPoint(x: center.x + cos(angle) * distance,
+                                                y: center.y + sin(angle) * distance)
+                            store.pencilHover(at: CGPoint(x: state.center.x + local.x * state.placement.scale,
+                                y: state.center.y + local.y * state.placement.scale), rollAngle: nil)
+                            XCTAssertEqual(store.radial?.selectedRing, fraction < 1 ? .roots : nil)
+                            XCTAssertEqual(store.radial?.selectedSlot, fraction < 1 ? slot : nil)
+                            XCTAssertEqual(store.radial?.placement, state.placement)
+                        }
+                    }
+                }
+                let cancelPoint: CGPoint
+                if count > 1 {
+                    let first = layout.buttonCenter(slot: 0), next = layout.buttonCenter(slot: 1)
+                    cancelPoint = CGPoint(x: (first.x + next.x) / 2, y: (first.y + next.y) / 2)
+                } else {
+                    let first = layout.buttonCenter(slot: 0)
+                    cancelPoint = CGPoint(x: first.x * (1 + (ring.3 / 2 - 1) / ring.2),
+                                          y: first.y * (1 + (ring.3 / 2 - 1) / ring.2))
+                }
+                XCTAssertTrue(layout.backing.path().contains(cancelPoint))
+                let placed = CGPoint(x: state.center.x + cancelPoint.x * state.placement.scale,
+                                     y: state.center.y + cancelPoint.y * state.placement.scale)
+                store.pencilHover(at: placed, rollAngle: nil)
+                XCTAssertNil(store.radial?.selectedSlot)
+                store.pencilTouchEnded(at: placed)
+                XCTAssertNil(store.radial, "Lifting over backing/gaps cancels without dispatch")
+                XCTAssertEqual(session.editor.progression, original)
+            }
+        }
+        #endif
+    }
+
+    @MainActor
+    func testEmptySlotFitsTwoVisibleChoicesAndPatternFitsOneWithoutBlankOptions() throws {
+        let store = try makeStore()
+        defer { store.closeRadial(); store.session?.suspend() }
+        store.openSqueeze(at: CGPoint(x: 300, y: 100))
+        XCTAssertEqual(store.radial?.context, .emptyBar)
+        XCTAssertEqual(store.radialRings().first?.1, ["Paste", "Rest"])
+        XCTAssertFalse(store.radialSlotEnabled(.inner, slot: 0))
+        XCTAssertTrue(store.radialSlotEnabled(.inner, slot: 1))
+        XCTAssertFalse(store.radialSlotEnabled(.inner, slot: 2))
+        assertRenderedRadialClearsChrome(store)
+        store.closeRadial()
+        store.beginPatternEditing()
+        store.openSqueeze(at: CGPoint(x: 100, y: store.patternFrame.midY))
+        XCTAssertEqual(store.radialRings().first?.1, ["Pattern"])
+        XCTAssertEqual(store.radialRings().count, 1)
+        assertRenderedRadialClearsChrome(store)
+    }
+
+    @MainActor
+    func testPagingRefitsFinalVisibleCountAndPreservesNavigationAndActions() throws {
+        let store = try makeStore()
+        defer { store.closeRadial(); store.session?.suspend() }
+        let session = try XCTUnwrap(store.session)
+        let original = session.editor.progression
+        store.openSqueeze(at: CGPoint(x: 60, y: 92))
+        store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+        for (family, ring) in [(ChordFamily.major, RadialRing.major), (.minor, .minor), (.odd, .odd)] {
+            let total = session.vocabulary.ring(family).count
+            let pages = RadialPage.count(total: total)
+            for page in 0..<pages {
+                let state = try XCTUnwrap(store.radial)
+                let band = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
+                let visible = RadialPage.indices(total: total, page: page).count
+                XCTAssertEqual(state.pages[ring, default: 0], page)
+                XCTAssertEqual(band.1.count, visible + (total > RadialPage.capacity ? 1 : 0))
+                assertRenderedRadialClearsChrome(store)
+                if total > RadialPage.capacity {
+                    let layout = RadialRingLayout(count: band.1.count, radius: band.2,
+                        thickness: band.3, direction: state.placement.direction)
+                    store.pencilTouchEnded(at: layout.buttonCenter(slot: band.1.count - 1,
+                        center: state.center, scale: state.placement.scale))
+                    XCTAssertEqual(store.radial?.mode, .all)
+                    XCTAssertEqual(store.radial?.pages[ring, default: 0], page + 1)
+                    XCTAssertNil(store.radial?.selectedSlot)
+                }
+            }
+        }
+        XCTAssertEqual(session.editor.progression, original)
     }
 
     @MainActor
@@ -336,10 +556,9 @@ final class EditorStoreRegressionTests: XCTestCase {
                 let state = try XCTUnwrap(store.radial)
                 assertRenderedRadialClearsChrome(store)
                 for (_, labels, radius, thickness) in store.radialRings() {
-                    let bounds = RadialGeometry.bounds(direction: state.placement.direction,
-                        radius: (radius + thickness / 2) * state.placement.scale,
-                        capRadius: thickness / 2 * state.placement.scale)
-                        .offsetBy(dx: state.center.x, dy: state.center.y)
+                    let layout = RadialRingLayout(count: labels.count, radius: radius,
+                        thickness: thickness, direction: state.placement.direction)
+                    let bounds = layout.paintedBounds(center: state.center, scale: state.placement.scale)
                     XCTAssertTrue(CGRect(origin: .zero, size: store.rootSize).contains(bounds))
                     XCTAssertLessThanOrEqual(labels.count, 4)
                 }
@@ -412,12 +631,11 @@ final class EditorStoreRegressionTests: XCTestCase {
             let scaledThickness = thickness * state.placement.scale
             let extent = scaledRadius + scaledThickness / 2
             let rect = CGRect(x: 0, y: 0, width: extent * 2, height: extent * 2)
-            let backing = RadialArcShape(arc: RadialGeometry.backing(radius: radius, thickness: thickness,
-                direction: state.placement.direction), scale: state.placement.scale).path(in: rect)
+            let layout = RadialRingLayout(count: labels.count, radius: radius,
+                thickness: thickness, direction: state.placement.direction)
+            let backing = RadialArcShape(arc: layout.backing, scale: state.placement.scale).path(in: rect)
             let paths = [backing] + labels.indices.map { slot in
-                RingSlotShape(count: labels.count, index: slot, radius: radius,
-                    thickness: thickness, direction: state.placement.direction,
-                    scale: state.placement.scale).path(in: rect)
+                RingSlotShape(layout: layout, index: slot, scale: state.placement.scale).path(in: rect)
             }
             for path in paths {
                 let box = path.boundingRect.offsetBy(dx: state.center.x - extent, dy: state.center.y - extent)
@@ -1260,17 +1478,18 @@ final class EditorStoreRegressionTests: XCTestCase {
             while store.radial?.pages[ring, default: 0] != desiredPage {
                 let state = try XCTUnwrap(store.radial)
                 let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
-                let angle = RadialGeometry.angle(forSlot: layout.1.count - 1, count: layout.1.count,
-                    direction: state.placement.direction) + RadialGeometry.sweep / Double(layout.1.count) / 2
-                store.pencilTouchEnded(at: state.placement.point(radius: layout.2, angle: angle))
+                let circles = RadialRingLayout(count: layout.1.count, radius: layout.2,
+                    thickness: layout.3, direction: state.placement.direction)
+                store.pencilTouchEnded(at: circles.buttonCenter(slot: layout.1.count - 1,
+                    center: state.center, scale: state.placement.scale))
             }
         }
         let state = try XCTUnwrap(store.radial)
         let layout = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
         let localSlot = ring == .inner || ring == .outer ? slot : slot % RadialPage.capacity
-        let angle = RadialGeometry.angle(forSlot: localSlot, count: layout.1.count,
-            direction: state.placement.direction) + RadialGeometry.sweep / Double(layout.1.count) / 2
-        return state.placement.point(radius: layout.2, angle: angle)
+        let circles = RadialRingLayout(count: layout.1.count, radius: layout.2,
+            thickness: layout.3, direction: state.placement.direction)
+        return circles.buttonCenter(slot: localSlot, center: state.center, scale: state.placement.scale)
     }
 
     @MainActor

@@ -8,7 +8,7 @@ public enum PatternError: Error, Equatable {
 }
 
 /// The single stored arrow magnitude drives drawing, readout and BASE playback.
-public struct ArrowLevel: Equatable, Sendable {
+public struct ArrowLevel: Codable, Equatable, Hashable, Sendable {
     public let value: Int
     public var normalizedLength: Double { Double(value) / 10 }
     public var baseVelocity: Double { normalizedLength }
@@ -30,7 +30,7 @@ public struct ArrowLevel: Equatable, Sendable {
     }
 }
 
-public struct ChuckSize: Equatable, Sendable {
+public struct ChuckSize: Codable, Equatable, Hashable, Sendable {
     public let normalizedSize: Double
     public var baseVelocity: Double { normalizedSize }
 
@@ -42,11 +42,11 @@ public struct ChuckSize: Equatable, Sendable {
     }
 }
 
-public enum StrokeDirection: Equatable, Sendable { case down, up }
-public enum PatternHumanize: Equatable, Sendable { case tight, loose }
+public enum StrokeDirection: String, Codable, Equatable, Hashable, Sendable { case down, up }
+public enum PatternHumanize: String, Codable, Equatable, Hashable, Sendable { case tight, loose }
 
-public struct PatternStroke: Equatable, Sendable {
-    public enum Content: Equatable, Sendable {
+public struct PatternStroke: Codable, Equatable, Hashable, Sendable {
+    public enum Content: Codable, Equatable, Hashable, Sendable {
         case arrow(direction: StrokeDirection, level: ArrowLevel)
         case chuck(ChuckSize)
 
@@ -70,14 +70,14 @@ public struct PatternStroke: Equatable, Sendable {
 }
 
 /// Absolute half-open bars [start, end), independent of chord identity.
-public struct PatternBarRange: Equatable, Sendable {
+public struct PatternBarRange: Codable, Equatable, Hashable, Sendable {
     public let start: Int
     public let length: Int
     public var end: Int { start + length }
 
     public init(start: Int, length: Int) throws {
         let (end, overflow) = start.addingReportingOverflow(length)
-        guard start >= 0, length > 0, !overflow, end <= MusicDefaults.canvasBars else {
+        guard start >= 0, length > 0, !overflow, end <= Int.max / MusicDefaults.stepsPerBar / MusicDefaults.ticksPerStep else {
             throw PatternError.invalidRange
         }
         self.start = start
@@ -89,7 +89,7 @@ public enum PatternScope: Equatable, Sendable {
     case wholeLoop
 
     public func resolve(loop: LoopSpan, barCount: Int) throws -> PatternBarRange {
-        guard (1...MusicDefaults.canvasBars).contains(barCount) else {
+        guard barCount > 0, barCount <= Int.max / MusicDefaults.stepsPerBar / MusicDefaults.ticksPerStep else {
             throw PatternError.invalidBarCount
         }
         switch self {
@@ -127,7 +127,7 @@ public enum PatternDefaults {
     public static let uncoveredBaseVelocity = 0.8
 }
 
-public struct PatternSettings: Equatable, Sendable {
+public struct PatternSettings: Codable, Equatable, Hashable, Sendable {
     public let swing: Double
     public let humanize: PatternHumanize
     public let spreadMilliseconds: Double
@@ -151,7 +151,7 @@ public struct PatternSettings: Equatable, Sendable {
     }
 }
 
-public struct PatternRegion: Equatable, Sendable {
+public struct PatternRegion: Codable, Equatable, Hashable, Sendable {
     public let id: String
     public let range: PatternBarRange
     /// Eight optional eighth-note strokes, repeated each bar. nil sustains.
@@ -171,12 +171,12 @@ public struct PatternRegion: Equatable, Sendable {
     }
 }
 
-public struct PatternArrangement: Equatable, Sendable {
+public struct PatternArrangement: Codable, Equatable, Hashable, Sendable {
     public let barCount: Int
     public let regions: [PatternRegion]
 
     public init(barCount: Int = MusicDefaults.canvasBars, regions: [PatternRegion] = []) throws {
-        guard (1...MusicDefaults.canvasBars).contains(barCount) else { throw PatternError.invalidBarCount }
+        guard barCount > 0, barCount <= Int.max / MusicDefaults.stepsPerBar / MusicDefaults.ticksPerStep else { throw PatternError.invalidBarCount }
         guard Set(regions.map(\.id)).count == regions.count else { throw PatternError.duplicateRegionID }
         let ids = regions.flatMap { $0.slots.compactMap { $0?.id } }
         guard Set(ids).count == ids.count else { throw PatternError.duplicateStrokeID }

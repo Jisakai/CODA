@@ -4,11 +4,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Central transport configuration: 128 grid steps, 12 voices, 3072 events,
+/* Central transport configuration: wide arrangement coordinates, 12 voices, 3072 events per window,
    four preallocated slots (one conservatively spare); no render heap ownership. */
 enum { CODA_PLAN_EVENTS = 3072, CODA_PLAN_SLOTS = 4 };
 typedef struct {
-    uint16_t step, region;
+    uint64_t step;
+    uint16_t region;
     uint8_t kind, pitch, rank, reserved;
 } CodaGridEvent;
 typedef struct {
@@ -16,11 +17,11 @@ typedef struct {
        Configuration copies both revisions/values unchanged; only a new explicit
        command increments its revision. Zero means no command. Playback is bounded
        by INT64_MAX, position by UINT64_MAX; exhaustion requires a fresh epoch.
-       Retained seek_step is 0...127, clamped if configuration shrinks the span. */
+       Retained seek_step is span-relative, clamped if configuration shrinks. */
     uint64_t playback_revision, position_revision;
     double samples_per_step;
     uint32_t count;
-    uint16_t length, seek_step;
+    uint64_t length, seek_step;
     uint8_t playing, looping;
     CodaGridEvent events[CODA_PLAN_EVENTS];
 } CodaPlan;
@@ -34,7 +35,10 @@ typedef struct {
 typedef struct {
     uint64_t playback_revision, position_revision;
     double samples_per_step;
-    uint16_t length, seek_step;
+    uint64_t length, seek_step;
+    /* Zero retains whole-cycle compatibility. Otherwise cycles are consecutive
+       precompiled windows of this many steps, dividing the full span length. */
+    uint64_t window_steps;
     uint8_t playing, looping;
     CodaPerformanceCycle initial_cycle;
 } CodaPerformancePlan;
@@ -51,8 +55,8 @@ typedef struct {
     uint64_t clock, cycle, delivered, late, hash;
     uint64_t playback_revision; // render-consumed command, not producer publication
     uint32_t acknowledged, failures, region;
-    uint16_t step;
-    uint8_t playing;
+    uint64_t step;
+    uint8_t playing, completed;
 } CodaTransportStatus;
 CodaTransport *coda_transport_create(void);
 /* ALL lifecycle calls require serialized producer and excluded render. */
@@ -83,10 +87,13 @@ void coda_transport_performance_status(const CodaTransport *, CodaPerformanceSta
 /* Consumer between callbacks or full quiescence ONLY. */
 void coda_transport_inspect_performance(const CodaTransport *, CodaPerformanceVoiceDiagnostic out[CODA_DSP_VOICES]);
 int coda_transport_controls(CodaTransport *, const CodaControls *);
+int coda_transport_mixer_controls(CodaTransport *, const CodaMixerControls *);
+int coda_transport_track_controls(CodaTransport *, uint8_t track_index, uint8_t eq_profile, const CodaLayerControls *);
 /* Audition overlays the transport in time, temporarily replacing chord notes.
    Musical clock continues; end restores current chord without editing history.
    Zero pitches cancels. One outstanding command; full is observable. */
 int coda_transport_audition(CodaTransport *, const uint8_t *, uint32_t count, uint32_t frames);
+int coda_transport_audition_layer(CodaTransport *, uint8_t layer, const uint8_t *pitches, uint32_t count, uint32_t frames);
 /* Single native render consumer. Output is mono float; no allocation/locks. */
 void coda_transport_render(CodaTransport *, float *, uint32_t frames);
 /* Atomically published control-side status; no reads of mutable DSP state. */
