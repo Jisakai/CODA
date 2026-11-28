@@ -259,7 +259,7 @@ struct HoveredRollNote: Equatable {
     @ObservationIgnored private var rollAccumulators: [EditorKnob: BarrelRollAccumulator] = [:]
     @ObservationIgnored private var activeRollKnob: EditorKnob?
     @ObservationIgnored private var lastPencilContactTime = 0.0
-    @ObservationIgnored private var lastPencilLocation: CGPoint?
+    @ObservationIgnored private(set) var lastPencilLocation: CGPoint?
     @ObservationIgnored private var lastParameterValues: [EditorKnob: Double] = [:]
     @ObservationIgnored private var fingerPanConsumed = false
     @ObservationIgnored private var previewTask: Task<Void, Never>?
