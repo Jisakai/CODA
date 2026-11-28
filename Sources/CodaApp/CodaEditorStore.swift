@@ -721,9 +721,9 @@ final class CodaEditorStore {
     func suggestions(for regionID: String?) -> [ChordSuggestion] {
         guard let session else { return [] }
         let region = regions.first(where: { $0.id == regionID })
-        let step = min(max(0, region?.start ?? radial?.startStep ?? hoveredStep ?? 0), max(0, session.progression.totalSteps - 1))
+        let step = min(max(0, region?.start ?? radial?.emptyStart ?? hoveredStep ?? 0), max(0, session.editor.progression.totalSteps - 1))
         if let predicted = try? session.predictor.steeredSuggestions(
-            in: session.progression,
+            in: session.editor.progression,
             at: step,
             key: key,
             vocabulary: session.vocabulary,
@@ -744,9 +744,9 @@ final class CodaEditorStore {
         let base = session.vocabulary.ring(family)
         guard base.count > 1 else { return base }
         let targetRegion = radial?.regionID.flatMap { id in regions.first(where: { $0.id == id }) }
-        let step = min(max(0, targetRegion?.start ?? radial?.startStep ?? hoveredStep ?? 0), max(0, session.progression.totalSteps - 1))
+        let step = min(max(0, targetRegion?.start ?? radial?.emptyStart ?? hoveredStep ?? 0), max(0, session.editor.progression.totalSteps - 1))
         guard let ranked = try? session.predictor.steeredSuggestions(
-            in: session.progression,
+            in: session.editor.progression,
             at: step,
             key: key,
             vocabulary: session.vocabulary,
@@ -1086,9 +1086,9 @@ final class CodaEditorStore {
                     if let region = region(at: point) {
                         finishMelodyNudgeRoll()
                         rollChordVoicing(region, angle: rollAngle, at: point)
-                    } else if activeLayer == .melody, let note = melodyNote(at: point) {
+                    } else if activeLayer == .melody, let (note, _) = melodyNoteHit(at: point) {
                         finishChordVoicingRoll()
-                        rollMelodyNoteNudge(note, angle: rollAngle, at: point)
+                        rollMelodyNudge(note, angle: rollAngle, at: point)
                     } else {
                         finishChordVoicingRoll()
                         finishMelodyNudgeRoll()
@@ -2034,12 +2034,16 @@ extension CodaEditorStore {
         }
     }
 
+    func ghostChordName(_ ghost: GhostChordProposal) -> String {
+        chordNameForSuggestion(ghost.chord)
+    }
+
     func sendSidekickPrompt(_ text: String) {
         guard let session else { return }
         sidekick.send(
             prompt: text,
             key: key,
-            progression: session.progression,
+            progression: session.editor.progression,
             tempo: tempo,
             vocabulary: session.vocabulary
         )

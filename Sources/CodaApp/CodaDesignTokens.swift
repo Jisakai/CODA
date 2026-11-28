@@ -1,4 +1,5 @@
 import SwiftUI
+import CodaMusic
 
 /// Named visual and interaction tuning from SPEC.md and docs/DESIGN.md.
 enum CodaDesignTokens {
@@ -15,7 +16,16 @@ enum CodaDesignTokens {
         static let bass = Color(red: 130.0 / 255, green: 167.0 / 255, blue: 146.0 / 255)
         static let melody = Color(red: 158.0 / 255, green: 146.0 / 255, blue: 184.0 / 255)
         static let sidekickAccent = Color(red: 221.0 / 255, green: 183.0 / 255, blue: 255.0 / 255)
+        static let sidekick = sidekickAccent
         static let danger = Color(red: 201.0 / 255, green: 138.0 / 255, blue: 138.0 / 255)
+
+        static func layerTint(_ layer: MusicLayer) -> Color {
+            switch layer {
+            case .chords: return chord
+            case .bass: return bass
+            case .melody: return melody
+            }
+        }
     }
 
     enum Radii {

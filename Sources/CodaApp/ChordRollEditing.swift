@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import CodaMusic
 import CodaInteraction
+import CodaSession
 
 enum PianoRollTool: String { case drawErase, razor, selection }
 struct RollNoteReference: Hashable {
@@ -299,7 +300,7 @@ extension CodaEditorStore {
                         let nextStart = regions.filter { $0.start > coordinates.step }.map(\.start).min() ?? barStart + MusicDefaults.stepsPerBar
                         let start = max(barStart, previousEnd)
                         let end = min(barStart + MusicDefaults.stepsPerBar, nextStart)
-                        let chord = regions.last(where: { $0.end <= start })?.chord ?? (try Chord(root: coordinates.pitch % 12, qualityID: "major"))
+                        let chord = try regions.last(where: { $0.end <= start })?.chord ?? Chord(root: coordinates.pitch % 12, qualityID: "major")
                         let seed = try RollNote(startTick: (coordinates.step - start) * MusicDefaults.ticksPerStep,
                             durationTicks: MusicDefaults.ticksPerStep, pitch: coordinates.pitch)
                         region = try ChordRegion(id: UUID().uuidString, chord: chord, start: start,
@@ -871,7 +872,7 @@ extension CodaEditorStore {
                             let note = try RollNote(startTick: max(0, absolute - cursor * MusicDefaults.ticksPerStep),
                                 durationTicks: min(endTick, end * MusicDefaults.ticksPerStep) - max(absolute, cursor * MusicDefaults.ticksPerStep),
                                 pitch: copied.pitch, velocity: copied.velocity, slide: copied.slide)
-                            let chord = next.last(where: { $0.end <= cursor })?.chord ?? (try Chord(root: copied.pitch % 12, qualityID: "major"))
+                            let chord = try next.last(where: { $0.end <= cursor })?.chord ?? Chord(root: copied.pitch % 12, qualityID: "major")
                             let region = try ChordRegion(id: UUID().uuidString, chord: chord, start: cursor, length: end - cursor, pitches: [], notes: [note])
                             next.append(region); selection.insert(RollNoteReference(regionID: region.id, noteID: note.id)); cursor = end
                         }

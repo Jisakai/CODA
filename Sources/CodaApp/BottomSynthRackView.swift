@@ -221,7 +221,7 @@ struct BottomSynthRackView: View {
 
     private func baseLayerMixerChannel(_ layer: MusicLayer) -> some View {
         let muted = store.isLayerMuted(layer)
-        let level = store.layerLevel(for: layer)
+        let level = store.layerLevel(layer)
         let active = store.activeExtraLayerID == nil && store.activeLayer == layer
         return VStack(spacing: 8) {
             Button {

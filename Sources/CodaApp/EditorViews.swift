@@ -3,6 +3,7 @@ import UIKit
 import CodaMusic
 import CodaSession
 import CodaInteraction
+import CodaSidekick
 
 struct KnobFramesKey: PreferenceKey {
     static let defaultValue: [EditorKnob: CGRect] = [:]
@@ -213,232 +214,11 @@ private struct EditorTopBar: View {
     var body: some View {
         ZStack(alignment: .center) {
             HStack(spacing: CodaDesignTokens.Geometry.topBarControlGap) {
-                // Left cluster: Gallery, Unified Procreate Wrench, Key/Scale, Tempo, 4/4
-                Button {
-                    store.projectHub.refreshIndex()
-                    withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
-                        store.projectHubOpen = true
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Gallery")
-                            .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
-                    }
-                    .padding(.horizontal, 8).frame(height: 32)
-                    .background(.white.opacity(0.06), in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .accessibilityLabel("Project Gallery")
-                .accessibilityIdentifier("top.gallery")
-
-                Button {
-                    store.wrenchTab = .project
-                    store.presentSettings(.appSettings)
-                } label: {
-                    Image(systemName: "wrench.and.screwdriver")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 32, height: 32)
-                        .background(store.popup == .appSettings ? .white.opacity(0.14) : .clear, in: Circle())
-                        .contentShape(Rectangle())
-                }
-                .modifier(SettingsAnchor(store: store, popup: .appSettings))
-                .accessibilityLabel("Actions & Settings")
-                .accessibilityIdentifier("top.appSettings")
-
-                Rectangle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.08))
-                    .frame(width: 1, height: 20)
-                    .padding(.horizontal, 2)
-
-                Button { store.presentSettings(.keyScale) } label: {
-                    HStack(spacing: 6) {
-                        Text("\(CodaEditorStore.pitchName(for: store.key.tonic)) \(store.key.mode == .major ? "Maj" : "Min")")
-                            .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
-                        Text(store.key.mode == .major ? "MAJ" : "NAT")
-                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                            .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    }
-                    .padding(.horizontal, 9).frame(height: 32)
-                    .background(.white.opacity(0.06), in: Capsule())
-                }
-                .modifier(SettingsAnchor(store: store, popup: .keyScale))
-                .accessibilityLabel("Key and scale")
-                .accessibilityIdentifier("top.keyScale")
-                .accessibilityValue("\(store.key.tonic)-\(store.key.mode == .major ? "major" : "natural minor")")
-
-                HStack(spacing: 4) {
-                    Text("\(Int(store.tempo.rounded()))")
-                        .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
-                    Text("BPM").font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                        .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                }
-                .padding(.horizontal, 9).frame(height: 32)
-                .background(.white.opacity(0.06), in: Capsule())
-                .contentShape(Capsule())
-                .onTapGesture { store.presentSettings(.tempo) }
-                .gesture(DragGesture(minimumDistance: 4).onChanged { value in
-                    if tempoDragStart == nil { tempoDragStart = store.tempo }
-                    guard let tempoDragStart else { return }
-                    store.setTempo(tempoDragStart + Double((value.translation.width / 8).rounded()))
-                }.onEnded { _ in tempoDragStart = nil })
-                .modifier(SettingsAnchor(store: store, popup: .tempo))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Tempo")
-                .accessibilityValue("\(Int(store.tempo.rounded())) BPM")
-                .accessibilityIdentifier("top.tempo")
-
-                Text("4/4")
-                    .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
-                    .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    .frame(height: 32).padding(.horizontal, 6)
-                    .accessibilityIdentifier("top.timeSignature")
-
+                leftCluster
                 Spacer(minLength: 8)
-
-                // Right cluster: Multi-layer pills + Layers popover + Synth Rack + AI Sidekick
-                HStack(spacing: 3) {
-                    layerPill(.bass, title: "BASS")
-                    layerPill(.chords, title: "CHORD")
-                    layerPill(.melody, title: "MEL")
-                    Button { store.presentSettings(.layers) } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "square.3.layers.3d")
-                                .font(.system(size: 11, weight: .bold))
-                            if !store.extraLayers.isEmpty {
-                                Text("+\(store.extraLayers.count)")
-                                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                            }
-                        }
-                        .foregroundStyle(store.popup == .layers ? CodaDesignTokens.Colors.primaryInk : CodaDesignTokens.Colors.mutedInk)
-                        .padding(.horizontal, 7).frame(height: 28)
-                        .background(.white.opacity(store.popup == .layers ? 0.14 : 0.05), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.innerPill))
-                        .contentShape(Rectangle())
-                    }
-                    .modifier(SettingsAnchor(store: store, popup: .layers))
-                    .accessibilityLabel("Layers")
-                    .accessibilityIdentifier("top.layers")
-                }
-                .padding(2)
-                .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.control))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("top.activeLayer")
-
-                Button { store.toggleSynthRack() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "slider.vertical.3")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("SYNTH")
-                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                    }
-                    .foregroundStyle(store.synthRackOpen ? Color.black : CodaDesignTokens.Colors.primaryInk)
-                    .padding(.horizontal, 9).frame(height: 30)
-                    .background(store.synthRackOpen ? CodaDesignTokens.Colors.chord : .white.opacity(0.07), in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .accessibilityLabel("Toggle Synth & Plugin Rack")
-                .accessibilityIdentifier("top.synthRack")
-
-                Button { store.openDrawer() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("coda")
-                            .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
-                    }
-                    .foregroundStyle(store.drawerOpen ? Color.black : CodaDesignTokens.Colors.sidekick)
-                    .padding(.horizontal, 9).frame(height: 30)
-                    .background(store.drawerOpen ? CodaDesignTokens.Colors.sidekick : CodaDesignTokens.Colors.sidekick.opacity(0.12), in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .accessibilityLabel("Toggle AI Sidekick")
-                .accessibilityIdentifier("top.sidekick")
-
-                if store.patternEditing {
-                    PatternControlsView(store: store)
-                        .onGeometryChange(for: CGRect.self) {
-                            $0.frame(in: .named("editor.root"))
-                        } action: {
-                            store.recordPatternControlsFrame($0)
-                        }
-                        .onDisappear { store.recordPatternControlsFrame(.zero) }
-                }
-
-                // Hidden AX readouts preserved for CI UI tests
-                HStack(spacing: 0) {
-                    Text("Font registration")
-                        .font(CodaDesignTokens.Typography.font(size: 1))
-                        .frame(width: 1, height: 1).opacity(0.01)
-                        .accessibilityIdentifier("font.registration")
-                        .accessibilityValue(UIFont(name: CodaDesignTokens.Typography.lightFontPostScriptName, size: 12) == nil ? "font-missing" : "font-registered")
-                    Text(store.audioAvailable ? "available" : "inactive")
-                        .font(CodaDesignTokens.Typography.font(size: 1))
-                        .frame(width: 1, height: 1).opacity(0.01)
-                        .accessibilityIdentifier("editor.audioAvailability")
-                    Text("\(store.regionCount) chords")
-                        .font(CodaDesignTokens.Typography.font(size: 1))
-                        .frame(width: 1, height: 1).opacity(0.01)
-                        .accessibilityIdentifier("editor.regionCount")
-                    Text(store.canUndo ? "available" : "unavailable")
-                        .font(CodaDesignTokens.Typography.font(size: 1))
-                        .accessibilityIdentifier("editor.undoState")
-                        .accessibilityHidden(false)
-                        .frame(width: 1, height: 1)
-                    Text(store.canRedo ? "available" : "unavailable")
-                        .font(CodaDesignTokens.Typography.font(size: 1))
-                        .accessibilityIdentifier("editor.redoState")
-                        .accessibilityHidden(false)
-                        .frame(width: 1, height: 1)
-                    if store.uiDiagnosticsEnabled {
-                        Text("UI events")
-                            .font(CodaDesignTokens.Typography.font(size: 1))
-                            .frame(width: 1, height: 1).opacity(0.01)
-                            .accessibilityIdentifier("editor.uiDiagnostics")
-                            .accessibilityValue(store.uiDiagnosticReport)
-                    }
-                }
+                rightCluster
             }
-
-            // Mathematically DEAD-CENTER Play/Pause button flanked symmetrically by Loop & Layer Mutes
-            HStack(spacing: 8) {
-                HStack(spacing: 6) {
-                    Button { store.toggleLooping() } label: {
-                        Image(systemName: "repeat").font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(store.looping ? CodaDesignTokens.Colors.chord : CodaDesignTokens.Colors.mutedInk)
-                            .frame(width: 32, height: 32)
-                            .shadow(color: store.looping ? CodaDesignTokens.Colors.chord.opacity(0.24) : .clear, radius: 8)
-                    }
-                    .accessibilityIdentifier("top.loop")
-                    .accessibilityValue(store.looping ? "on" : "off")
-                }
-                .frame(width: 108, alignment: .trailing)
-
-                Button { store.togglePlayback() } label: {
-                    Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.black)
-                        .frame(width: CodaDesignTokens.Geometry.playWidth, height: CodaDesignTokens.Geometry.playHeight)
-                        .background(Color.white, in: Capsule())
-                        .shadow(color: .white.opacity(0.18), radius: 12)
-                }
-                .accessibilityIdentifier("top.play")
-                .accessibilityValue(store.isPlaying ? "playing" : "paused")
-
-                HStack(spacing: 0) {
-                    layerMuteDot(.bass, identifier: "top.bassMute")
-                    Button { store.toggleChordMute() } label: {
-                        Circle().fill(store.controls.muted == 0 ? CodaDesignTokens.Colors.chord : .clear)
-                            .overlay(Circle().stroke(CodaDesignTokens.Colors.chord.opacity(0.55), lineWidth: 1.5))
-                            .frame(width: 14, height: 14)
-                            .frame(width: 28, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityIdentifier("top.chordMute")
-                    .accessibilityValue(store.controls.muted == 0 ? "sounding" : "muted")
-                    layerMuteDot(.melody, identifier: "top.melodyMute")
-                }
-                .frame(width: 108, alignment: .leading)
-            }
+            centerCluster
         }
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
         .padding(.horizontal, CodaDesignTokens.Geometry.topBarHorizontalPadding)
@@ -451,6 +231,238 @@ private struct EditorTopBar: View {
         // propagate to (and replace the identifiers of) the controls inside.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.topBar")
+    }
+
+    @ViewBuilder
+    private var leftCluster: some View {
+        // Left cluster: Gallery, Unified Procreate Wrench, Key/Scale, Tempo, 4/4
+        Button {
+            store.projectHub.refreshIndex()
+            withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
+                store.projectHubOpen = true
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Gallery")
+                    .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+            }
+            .padding(.horizontal, 8).frame(height: 32)
+            .background(.white.opacity(0.06), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Project Gallery")
+        .accessibilityIdentifier("top.gallery")
+
+        Button {
+            store.wrenchTab = .project
+            store.presentSettings(.appSettings)
+        } label: {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.system(size: 15, weight: .bold))
+                .frame(width: 32, height: 32)
+                .background(store.popup == .appSettings ? .white.opacity(0.14) : .clear, in: Circle())
+                .contentShape(Rectangle())
+        }
+        .modifier(SettingsAnchor(store: store, popup: .appSettings))
+        .accessibilityLabel("Actions & Settings")
+        .accessibilityIdentifier("top.appSettings")
+
+        Rectangle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.08))
+            .frame(width: 1, height: 20)
+            .padding(.horizontal, 2)
+
+        Button { store.presentSettings(.keyScale) } label: {
+            HStack(spacing: 6) {
+                Text("\(CodaEditorStore.pitchName(for: store.key.tonic)) \(store.key.mode == .major ? "Maj" : "Min")")
+                    .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
+                Text(store.key.mode == .major ? "MAJ" : "NAT")
+                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                    .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+            }
+            .padding(.horizontal, 9).frame(height: 32)
+            .background(.white.opacity(0.06), in: Capsule())
+        }
+        .modifier(SettingsAnchor(store: store, popup: .keyScale))
+        .accessibilityLabel("Key and scale")
+        .accessibilityIdentifier("top.keyScale")
+        .accessibilityValue("\(store.key.tonic)-\(store.key.mode == .major ? "major" : "natural minor")")
+
+        HStack(spacing: 4) {
+            Text("\(Int(store.tempo.rounded()))")
+                .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
+            Text("BPM").font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+        }
+        .padding(.horizontal, 9).frame(height: 32)
+        .background(.white.opacity(0.06), in: Capsule())
+        .contentShape(Capsule())
+        .onTapGesture { store.presentSettings(.tempo) }
+        .gesture(DragGesture(minimumDistance: 4).onChanged { value in
+            if tempoDragStart == nil { tempoDragStart = store.tempo }
+            guard let tempoDragStart else { return }
+            store.setTempo(tempoDragStart + Double((value.translation.width / 8).rounded()))
+        }.onEnded { _ in tempoDragStart = nil })
+        .modifier(SettingsAnchor(store: store, popup: .tempo))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tempo")
+        .accessibilityValue("\(Int(store.tempo.rounded())) BPM")
+        .accessibilityIdentifier("top.tempo")
+
+        Text("4/4")
+            .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
+            .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+            .frame(height: 32).padding(.horizontal, 6)
+            .accessibilityIdentifier("top.timeSignature")
+    }
+
+    @ViewBuilder
+    private var rightCluster: some View {
+        // Right cluster: Multi-layer pills + Layers popover + Synth Rack + AI Sidekick
+        HStack(spacing: 3) {
+            layerPill(.bass, title: "BASS")
+            layerPill(.chords, title: "CHORD")
+            layerPill(.melody, title: "MEL")
+            Button { store.presentSettings(.layers) } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.3.layers.3d")
+                        .font(.system(size: 11, weight: .bold))
+                    if !store.extraLayers.isEmpty {
+                        Text("+\(store.extraLayers.count)")
+                            .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+                    }
+                }
+                .foregroundStyle(store.popup == .layers ? CodaDesignTokens.Colors.primaryInk : CodaDesignTokens.Colors.mutedInk)
+                .padding(.horizontal, 7).frame(height: 28)
+                .background(.white.opacity(store.popup == .layers ? 0.14 : 0.05), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.innerPill))
+                .contentShape(Rectangle())
+            }
+            .modifier(SettingsAnchor(store: store, popup: .layers))
+            .accessibilityLabel("Layers")
+            .accessibilityIdentifier("top.layers")
+        }
+        .padding(2)
+        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.control))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("top.activeLayer")
+
+        Button { store.toggleSynthRack() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "slider.vertical.3")
+                    .font(.system(size: 12, weight: .bold))
+                Text("SYNTH")
+                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
+            }
+            .foregroundStyle(store.synthRackOpen ? Color.black : CodaDesignTokens.Colors.primaryInk)
+            .padding(.horizontal, 9).frame(height: 30)
+            .background(store.synthRackOpen ? CodaDesignTokens.Colors.chord : .white.opacity(0.07), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Toggle Synth & Plugin Rack")
+        .accessibilityIdentifier("top.synthRack")
+
+        Button { store.openDrawer() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .bold))
+                Text("coda")
+                    .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
+            }
+            .foregroundStyle(store.drawerOpen ? Color.black : CodaDesignTokens.Colors.sidekick)
+            .padding(.horizontal, 9).frame(height: 30)
+            .background(store.drawerOpen ? CodaDesignTokens.Colors.sidekick : CodaDesignTokens.Colors.sidekick.opacity(0.12), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Toggle AI Sidekick")
+        .accessibilityIdentifier("top.sidekick")
+
+        if store.patternEditing {
+            PatternControlsView(store: store)
+                .onGeometryChange(for: CGRect.self) {
+                    $0.frame(in: .named("editor.root"))
+                } action: {
+                    store.recordPatternControlsFrame($0)
+                }
+                .onDisappear { store.recordPatternControlsFrame(.zero) }
+        }
+
+        // Hidden AX readouts preserved for CI UI tests
+        HStack(spacing: 0) {
+            Text("Font registration")
+                .font(CodaDesignTokens.Typography.font(size: 1))
+                .frame(width: 1, height: 1).opacity(0.01)
+                .accessibilityIdentifier("font.registration")
+                .accessibilityValue(UIFont(name: CodaDesignTokens.Typography.lightFontPostScriptName, size: 12) == nil ? "font-missing" : "font-registered")
+            Text(store.audioAvailable ? "available" : "inactive")
+                .font(CodaDesignTokens.Typography.font(size: 1))
+                .frame(width: 1, height: 1).opacity(0.01)
+                .accessibilityIdentifier("editor.audioAvailability")
+            Text("\(store.regionCount) chords")
+                .font(CodaDesignTokens.Typography.font(size: 1))
+                .frame(width: 1, height: 1).opacity(0.01)
+                .accessibilityIdentifier("editor.regionCount")
+            Text(store.canUndo ? "available" : "unavailable")
+                .font(CodaDesignTokens.Typography.font(size: 1))
+                .accessibilityIdentifier("editor.undoState")
+                .accessibilityHidden(false)
+                .frame(width: 1, height: 1)
+            Text(store.canRedo ? "available" : "unavailable")
+                .font(CodaDesignTokens.Typography.font(size: 1))
+                .accessibilityIdentifier("editor.redoState")
+                .accessibilityHidden(false)
+                .frame(width: 1, height: 1)
+            if store.uiDiagnosticsEnabled {
+                Text("UI events")
+                    .font(CodaDesignTokens.Typography.font(size: 1))
+                    .frame(width: 1, height: 1).opacity(0.01)
+                    .accessibilityIdentifier("editor.uiDiagnostics")
+                    .accessibilityValue(store.uiDiagnosticReport)
+            }
+        }
+    }
+
+    private var centerCluster: some View {
+        // Mathematically DEAD-CENTER Play/Pause button flanked symmetrically by Loop & Layer Mutes
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                Button { store.toggleLooping() } label: {
+                    Image(systemName: "repeat").font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(store.looping ? CodaDesignTokens.Colors.chord : CodaDesignTokens.Colors.mutedInk)
+                        .frame(width: 32, height: 32)
+                        .shadow(color: store.looping ? CodaDesignTokens.Colors.chord.opacity(0.24) : .clear, radius: 8)
+                }
+                .accessibilityIdentifier("top.loop")
+                .accessibilityValue(store.looping ? "on" : "off")
+            }
+            .frame(width: 108, alignment: .trailing)
+
+            Button { store.togglePlayback() } label: {
+                Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .frame(width: CodaDesignTokens.Geometry.playWidth, height: CodaDesignTokens.Geometry.playHeight)
+                    .background(Color.white, in: Capsule())
+                    .shadow(color: .white.opacity(0.18), radius: 12)
+            }
+            .accessibilityIdentifier("top.play")
+            .accessibilityValue(store.isPlaying ? "playing" : "paused")
+
+            HStack(spacing: 0) {
+                layerMuteDot(.bass, identifier: "top.bassMute")
+                Button { store.toggleChordMute() } label: {
+                    Circle().fill(store.controls.muted == 0 ? CodaDesignTokens.Colors.chord : .clear)
+                        .overlay(Circle().stroke(CodaDesignTokens.Colors.chord.opacity(0.55), lineWidth: 1.5))
+                        .frame(width: 14, height: 14)
+                        .frame(width: 28, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("top.chordMute")
+                .accessibilityValue(store.controls.muted == 0 ? "sounding" : "muted")
+                layerMuteDot(.melody, identifier: "top.melodyMute")
+            }
+            .frame(width: 108, alignment: .leading)
+        }
     }
 
     private func layerPill(_ layer: MusicLayer, title: String) -> some View {
@@ -723,7 +735,7 @@ private struct ChordStripView: View {
                             let x = CGFloat(store.viewport.x(forStep: Double(ghost.startStep), in: Double(strip.size.width)))
                             let width = max(24, CGFloat(store.viewport.stepWidth(in: Double(strip.size.width)) * Double(ghost.lengthSteps)))
                             VStack(spacing: 4) {
-                                Text(ghost.displayName)
+                                Text(store.ghostChordName(ghost))
                                     .font(CodaDesignTokens.Typography.font(size: 16, weight: .bold))
                                     .foregroundStyle(CodaDesignTokens.Colors.sidekick)
                                     .lineLimit(1)
@@ -1750,7 +1762,7 @@ private struct RadialMenuView: View {
                             .position(center)
                         Group {
                             if store.isPatternSqueezeMenu {
-                                Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot))
+                                Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot).symbol)
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .bold))
                                     .accessibilityLabel(labels[slot])
                             } else if labels[slot].hasPrefix("More ") {
