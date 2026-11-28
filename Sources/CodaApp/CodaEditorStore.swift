@@ -216,9 +216,17 @@ final class CodaEditorStore {
     @ObservationIgnored private var patternGestureWasActive = false
     @ObservationIgnored private var discardPencilLift = false
     private var patternSqueezeMenu = false
+struct HoveredRollNote: Equatable {
+    let id: String
+    let pitch: Int
+    let frame: CGRect
+    let roleLabel: String
+}
+
     var selectedRegionID: String?
     var hoveredRegionID: String?
     var hoveredStep: Int?
+    var hoveredRollNote: HoveredRollNote?
     var playheadStep = 0
     var radial: RadialMenuState?
     #if DEBUG
@@ -518,6 +526,38 @@ final class CodaEditorStore {
         guard let session else { setError(startupError ?? "Audio session is unavailable."); return }
         var defaults = CodaControls()
         guard coda_dsp_default_controls(preset, &defaults) != 0 else { return }
+
+        if let extraID = activeExtraLayerID,
+           let extra = extraLayers.first(where: { $0.id == extraID }) {
+            var next = extra.layerControls
+            next.preset = preset
+            next.wobble = defaults.wobble
+            next.warmth = defaults.warmth
+            next.cutoff = defaults.cutoff
+            next.resonance = defaults.resonance
+            next.shape = defaults.shape
+            next.detune = defaults.detune
+            next.glide = defaults.glide
+            session.setExtraLayerControls(next, for: extraID)
+            inlineError = nil
+            return
+        }
+
+        if activeLayer != .chords {
+            var next = session.layerControls(for: activeLayer)
+            next.preset = preset
+            next.wobble = defaults.wobble
+            next.warmth = defaults.warmth
+            next.cutoff = defaults.cutoff
+            next.resonance = defaults.resonance
+            next.shape = defaults.shape
+            next.detune = defaults.detune
+            next.glide = defaults.glide
+            session.setLayerControls(next, for: activeLayer)
+            inlineError = nil
+            return
+        }
+
         var next = session.controls
         next.preset = preset
         next.wobble = defaults.wobble
@@ -531,7 +571,30 @@ final class CodaEditorStore {
         guard publish(next) else { return }
     }
 
+    private func activeSynthLayerControls() -> CodaLayerControls? {
+        if let extraID = activeExtraLayerID,
+           let extra = extraLayers.first(where: { $0.id == extraID }) {
+            return extra.layerControls
+        }
+        if activeLayer != .chords {
+            return session?.layerControls(for: activeLayer)
+        }
+        return nil
+    }
+
     func value(for knob: EditorKnob) -> Double {
+        if let layerCtrl = activeSynthLayerControls() {
+            switch knob {
+            case .wobble: return Double(layerCtrl.wobble)
+            case .warmth: return Double(layerCtrl.warmth)
+            case .cutoff: return Double(layerCtrl.cutoff)
+            case .resonance: return Double(layerCtrl.resonance)
+            case .shape: return Double(layerCtrl.shape)
+            case .detune: return Double(layerCtrl.detune)
+            case .glide: return Double(layerCtrl.glide)
+            case .chorus, .delay, .reverb, .chordLevel: break
+            }
+        }
         let value = controls
         return switch knob {
         case .wobble: Double(value.wobble)
@@ -553,9 +616,42 @@ final class CodaEditorStore {
         guard let session else { setError(startupError ?? "Audio session is unavailable."); return }
         let normalized = min(1, max(0, value))
         let oldValue = lastParameterValues[knob] ?? self.value(for: knob)
+        let isLayerSynthKnob: Bool = switch knob {
+        case .wobble, .warmth, .cutoff, .resonance, .shape, .detune, .glide: true
+        case .chorus, .delay, .reverb, .chordLevel: false
+        }
         if knob == .chorus {
             chorusAmount = normalized
             setSharedFX(chorus: normalized, delay: Double(session.controls.delay_amount), reverb: Double(session.controls.reverb_amount))
+        } else if isLayerSynthKnob, let extraID = activeExtraLayerID,
+                  let extra = extraLayers.first(where: { $0.id == extraID }) {
+            var next = extra.layerControls
+            switch knob {
+            case .wobble: next.wobble = Float(normalized)
+            case .warmth: next.warmth = Float(normalized)
+            case .cutoff: next.cutoff = Float(normalized)
+            case .resonance: next.resonance = Float(normalized)
+            case .shape: next.shape = Float(normalized)
+            case .detune: next.detune = Float(normalized)
+            case .glide: next.glide = Float(normalized)
+            case .chorus, .delay, .reverb, .chordLevel: break
+            }
+            session.setExtraLayerControls(next, for: extraID)
+            inlineError = nil
+        } else if isLayerSynthKnob, activeLayer != .chords {
+            var next = session.layerControls(for: activeLayer)
+            switch knob {
+            case .wobble: next.wobble = Float(normalized)
+            case .warmth: next.warmth = Float(normalized)
+            case .cutoff: next.cutoff = Float(normalized)
+            case .resonance: next.resonance = Float(normalized)
+            case .shape: next.shape = Float(normalized)
+            case .detune: next.detune = Float(normalized)
+            case .glide: next.glide = Float(normalized)
+            case .chorus, .delay, .reverb, .chordLevel: break
+            }
+            session.setLayerControls(next, for: activeLayer)
+            inlineError = nil
         } else {
             var next = session.controls
             switch knob {
@@ -602,7 +698,7 @@ final class CodaEditorStore {
 
     func presetDefault(for knob: EditorKnob) -> Double {
         var defaults = CodaControls()
-        guard coda_dsp_default_controls(controls.preset, &defaults) != 0 else { return 0 }
+        guard coda_dsp_default_controls(activeLayerPreset, &defaults) != 0 else { return 0 }
         return switch knob {
         case .wobble: Double(defaults.wobble)
         case .warmth: Double(defaults.warmth)
@@ -656,6 +752,20 @@ final class CodaEditorStore {
         }
     }
 
+    func triggerVisualDetent(at point: CGPoint?, intensity: CGFloat = 0.85, isCompletion: Bool = true) {
+        visualDetentIntensity = intensity
+        visualDetent += 1
+        pencilFeedbackSerial += 1
+        pencilFeedbackIsCompletion = isCompletion
+        transientPoint = point
+        let detent = visualDetent
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
+            guard let self, self.visualDetent == detent else { return }
+            self.visualDetent = 0
+            self.transientPoint = nil
+        }
+    }
+
     func clearRollTracking(commitVoicing: Bool = true) {
         finishChordVoicingRoll(commit: commitVoicing)
         finishMelodyNudgeRoll(commit: commitVoicing)
@@ -663,6 +773,10 @@ final class CodaEditorStore {
         rollAccumulators.removeAll(keepingCapacity: true)
         activeRollKnob = nil
         cutoffRollAngle = nil
+        hoveredRollNote = nil
+        visualDetent = 0
+        transientPoint = nil
+        knobReadout = nil
     }
 
     func chordName(_ region: ChordRegion) -> String {
@@ -718,6 +832,11 @@ final class CodaEditorStore {
         return offsets.contains(pc)
     }
 
+    static let radialOuterSuggestionCapacity = 7
+    static let radialOuterAllSlotIndex = 7
+
+    private static let richChordBias = HarmonicSteeringBias(tensionLevel: 0.72)
+
     func suggestions(for regionID: String?) -> [ChordSuggestion] {
         guard let session else { return [] }
         let region = regions.first(where: { $0.id == regionID })
@@ -727,10 +846,27 @@ final class CodaEditorStore {
             at: step,
             key: key,
             vocabulary: session.vocabulary,
-            bias: .neutral,
-            limit: 12
+            bias: Self.richChordBias,
+            limit: 24
         ), !predicted.isEmpty {
-            return predicted
+            // Put in-key predictions first (still ordered by predictor probability), then chromatic/borrowed.
+            let inKey = predicted.filter { scaleContains($0.chord.root) }
+            let outKey = predicted.filter { !scaleContains($0.chord.root) }
+            // Keep one top chord per root first when adding a new chord so all 7 scale degrees can appear at once.
+            if region == nil {
+                var seenRoots: Set<Int> = []
+                var diverseInKey: [ChordSuggestion] = []
+                var remainingInKey: [ChordSuggestion] = []
+                for item in inKey {
+                    if seenRoots.insert(item.chord.root).inserted {
+                        diverseInKey.append(item)
+                    } else {
+                        remainingInKey.append(item)
+                    }
+                }
+                return diverseInKey + remainingInKey + outKey
+            }
+            return inKey + outKey
         }
         let previous = region.map { target in
             regions.filter { $0.id != target.id && $0.end <= target.start }.max { $0.end < $1.end }?.chord
@@ -750,12 +886,12 @@ final class CodaEditorStore {
             at: step,
             key: key,
             vocabulary: session.vocabulary,
-            bias: .neutral,
-            limit: max(24, session.vocabulary.qualities.count * 2)
+            bias: Self.richChordBias,
+            limit: max(36, session.vocabulary.qualities.count * 3)
         ), !ranked.isEmpty else {
             return base
         }
-        let preferredRoot = targetRegion?.chord.root
+        let preferredRoot = radial?.swapping == true ? radial?.draft?.root : targetRegion?.chord.root
         var rankByQuality: [String: Int] = [:]
         // Prioritize predictions matching the target chord's root first, then any root in the progression context.
         for suggestion in ranked {
@@ -775,6 +911,98 @@ final class CodaEditorStore {
             if lRank != rRank { return lRank < rRank }
             return lhs.offset < rhs.offset
         }.map(\.element)
+    }
+
+    /// Returns all 12 pitch classes with the 7 in-key roots first (ranked by small Chord AI probability),
+    /// followed by the 5 out-of-key chromatic roots (also ranked by AI).
+    func rankedRoots(for state: RadialMenuState?) -> [Int] {
+        let offsets = key.mode == .major ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10]
+        let inKeyOrder = offsets.map { (key.tonic + $0) % 12 }
+        let inKeySet = Set(inKeyOrder)
+        let outKeyOrder = (0..<12).filter { !inKeySet.contains($0) }
+
+        guard let session else { return inKeyOrder + outKeyOrder }
+        let targetRegion = state?.regionID.flatMap { id in regions.first(where: { $0.id == id }) }
+        let step = min(max(0, targetRegion?.start ?? state?.emptyStart ?? hoveredStep ?? 0), max(0, session.editor.progression.totalSteps - 1))
+        guard let ranked = try? session.predictor.steeredSuggestions(
+            in: session.editor.progression,
+            at: step,
+            key: key,
+            vocabulary: session.vocabulary,
+            bias: Self.richChordBias,
+            limit: max(48, session.vocabulary.qualities.count * 4)
+        ), !ranked.isEmpty else {
+            return inKeyOrder + outKeyOrder
+        }
+        var rootRank: [Int: Int] = [:]
+        for item in ranked {
+            if rootRank[item.chord.root] == nil {
+                rootRank[item.chord.root] = rootRank.count
+            }
+        }
+        let sortedInKey = inKeyOrder.enumerated().sorted { lhs, rhs in
+            let l = rootRank[lhs.element] ?? Int.max
+            let r = rootRank[rhs.element] ?? Int.max
+            return l != r ? l < r : lhs.offset < rhs.offset
+        }.map(\.element)
+        let sortedOutKey = outKeyOrder.enumerated().sorted { lhs, rhs in
+            let l = rootRank[lhs.element] ?? Int.max
+            let r = rootRank[rhs.element] ?? Int.max
+            return l != r ? l < r : lhs.offset < rhs.offset
+        }.map(\.element)
+        return sortedInKey + sortedOutKey
+    }
+
+    func updateHoveredRollNote(at point: CGPoint) {
+        guard rollFrame.contains(point), radial == nil, holdMenu == nil, !hasActiveRollDraft else {
+            hoveredRollNote = nil
+            return
+        }
+        if activeLayer == .chords, let (region, note, _) = rollNoteHit(at: point) {
+            let absTick = region.start * MusicDefaults.ticksPerStep + note.startTick
+            let frame = noteFrame(note, in: region)
+            hoveredRollNote = HoveredRollNote(
+                id: "\(region.id)-\(note.id)",
+                pitch: note.pitch,
+                frame: frame,
+                roleLabel: relativeRoleLabel(pitch: note.pitch, atTick: absTick, preferredChord: region.chord)
+            )
+            return
+        }
+        if activeLayer == .bass, let (note, _) = bassNoteHit(at: point) {
+            let frame = bassNoteFrame(note)
+            hoveredRollNote = HoveredRollNote(
+                id: note.id,
+                pitch: note.pitch,
+                frame: frame,
+                roleLabel: relativeRoleLabel(pitch: note.pitch, atTick: note.startTick, preferredChord: nil)
+            )
+            return
+        }
+        if activeLayer == .melody, let (note, _) = melodyNoteHit(at: point) {
+            let frame = melodyNoteFrame(note)
+            hoveredRollNote = HoveredRollNote(
+                id: note.id,
+                pitch: note.pitch,
+                frame: frame,
+                roleLabel: relativeRoleLabel(pitch: note.pitch, atTick: note.effectiveStartTick, preferredChord: nil)
+            )
+            return
+        }
+        hoveredRollNote = nil
+    }
+
+    func relativeRoleLabel(pitch: Int, atTick tick: Int, preferredChord: Chord?) -> String {
+        let step = tick / MusicDefaults.ticksPerStep
+        let activeChord = preferredChord ?? regions.first(where: { step >= $0.start && step < $0.end })?.chord
+        if let activeChord, let vocabulary = session?.vocabulary {
+            let tone = ChordDetector.toneLabel(pitch: pitch, chord: activeChord, vocabulary: vocabulary)
+            let chordName = chordNameForSuggestion(activeChord)
+            return "\(tone) of \(chordName)"
+        }
+        let interval = (pitch - key.tonic + 120) % 12
+        let degreeNames = ["1", "♭2", "2", "♭3", "3", "4", "♯4", "5", "♭6", "6", "♭7", "7"]
+        return "Scale \(degreeNames[interval])"
     }
 
     func patternControlExcludes(_ point: CGPoint) -> Bool {
@@ -851,6 +1079,11 @@ final class CodaEditorStore {
     }
 
     var patternFrame: CGRect {
+        CGRect(x: CodaDesignTokens.Geometry.pitchGutterWidth, y: stripTop,
+               width: contentWidth, height: CodaDesignTokens.Geometry.chordStripHeight)
+    }
+
+    var rollFrame: CGRect {
         CGRect(x: CodaDesignTokens.Geometry.pitchGutterWidth, y: rollTop,
                width: contentWidth, height: max(1, rootSize.height - rollTop))
     }
@@ -1051,6 +1284,7 @@ final class CodaEditorStore {
         lastPencilLocation = point
         hoveredRegionID = region(at: point)?.id
         hoveredStep = viewport.step(atX: Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth))
+        updateHoveredRollNote(at: point)
         updateRadialHover(at: point)
         if let reset = knobReset {
             let distance = hypot(point.x - reset.center.x, point.y - reset.center.y)
@@ -1135,7 +1369,7 @@ final class CodaEditorStore {
         guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
         guard !patternControlExcludes(point) else { return }
         let initialPlacement = RadialPlacement(origin: point, direction: RadialGeometry.defaultDirection)
-        if patternFrame.contains(point), gestureSettings.pencilSqueeze == .radialPalette {
+        if rollFrame.contains(point), gestureSettings.pencilSqueeze == .radialPalette {
             discardPencilLift = false
             patternSqueezeMenu = true
             var state = RadialMenuState(mode: .primary, context: .emptyBar, regionID: nil,
@@ -1256,8 +1490,38 @@ final class CodaEditorStore {
         return radialRings(for: radial)
     }
 
+    private func orderedAllFamilies(for state: RadialMenuState) -> [(ChordFamily, RadialRing)] {
+        let families: [(ChordFamily, RadialRing)] = [
+            (.major, .major), (.minor, .minor), (.odd, .odd)
+        ]
+        guard let session else { return families }
+        let quality = state.regionID.flatMap { id in regions.first(where: { $0.id == id })?.chord }
+        let currentFamily = quality.flatMap { try? session.vocabulary.quality($0.qualityID).family }
+        return families.sorted { lhs, rhs in
+            if lhs.0 == rhs.0 { return false }
+            if lhs.0 == currentFamily { return true }
+            if rhs.0 == currentFamily { return false }
+            return families.firstIndex(where: { $0.0 == lhs.0 })! < families.firstIndex(where: { $0.0 == rhs.0 })!
+        }
+    }
+
+    /// Pie-slice capacities: inner rings are shorter, outer rings hold more options at once.
+    func radialPageCapacity(for ring: RadialRing, state: RadialMenuState) -> Int {
+        switch ring {
+        case .roots:
+            return 7 // All 7 in-key roots on page 1; remaining 5 chromatic roots on page 2.
+        case .major, .minor, .odd:
+            let ordered = orderedAllFamilies(for: state)
+            let ringIndex = ordered.firstIndex(where: { $0.1 == ring }) ?? 0
+            // Inner (r=92): 4 options (+More=5), Middle (r=144): 6 options (+More=7), Outer (r=196): 8 options (+More=9)
+            return 4 + ringIndex * 2
+        default:
+            return RadialPage.capacity
+        }
+    }
+
     private func radialRings(for radial: RadialMenuState) -> [(RadialRing, [String], Double, Double)] {
-        guard let session else { return [] }
+        guard session != nil else { return [] }
         #if DEBUG
         if let count = radialCircleFixtureCount {
             return [(.roots, Array(Self.pitchNames.prefix(max(1, min(7, count)))),
@@ -1266,7 +1530,6 @@ final class CodaEditorStore {
         }
         #endif
         if patternSqueezeMenu { return [(.inner, ["Draw/Erase", "Razor", "Select", "Copy", "Paste", "Pattern"], CodaDesignTokens.EditorSurface.radialOuterRadius, CodaDesignTokens.EditorSurface.radialInnerBand)] }
-        let quality = radial.regionID.flatMap { id in regions.first(where: { $0.id == id })?.chord }
         switch radial.mode {
         case .primary:
             return [(.inner, radial.context == .existingChord ? ["Swap", "Duplicate", "Copy", "Delete"] : ["Paste", "Rest"],
@@ -1274,34 +1537,29 @@ final class CodaEditorStore {
                     (.outer, outerLabels(for: radial), CodaDesignTokens.EditorSurface.radialOuterRadius,
                      CodaDesignTokens.EditorSurface.radialOuterBand)]
         case .roots:
-            let roots = pageLabels(Self.pitchNames, ring: .roots, state: radial)
+            let orderedRootNames = rankedRoots(for: radial).map { Self.pitchNames[$0] }
+            let cap = radialPageCapacity(for: .roots, state: radial)
+            let roots = pageLabels(orderedRootNames, ring: .roots, state: radial, capacity: cap)
             return [(.roots, roots, CodaDesignTokens.EditorSurface.radialOuterRadius,
-                     CodaDesignTokens.EditorSurface.radialInnerBand)]
+                     CodaDesignTokens.EditorSurface.radialOuterBand)]
         case .all:
-            let families: [(ChordFamily, RadialRing)] = [
-                (.major, .major), (.minor, .minor), (.odd, .odd)
-            ]
-            let currentFamily = quality.flatMap { try? session.vocabulary.quality($0.qualityID).family }
-            let ordered = families.sorted { lhs, rhs in
-                if lhs.0 == rhs.0 { return false }
-                if lhs.0 == currentFamily { return true }
-                if rhs.0 == currentFamily { return false }
-                return families.firstIndex(where: { $0.0 == lhs.0 })! < families.firstIndex(where: { $0.0 == rhs.0 })!
-            }
+            let ordered = orderedAllFamilies(for: radial)
             return ordered.enumerated().map { index, value in
-                (value.1, pageLabels(session.vocabulary.ring(value.0).map { $0.symbol.isEmpty ? "Maj" : $0.symbol },
-                                     ring: value.1, state: radial),
-                 CodaDesignTokens.EditorSurface.radialFamilyRadius + Double(index) * CodaDesignTokens.EditorSurface.radialFamilySpacing,
-                 CodaDesignTokens.EditorSurface.radialFamilyBand)
+                let aiRankedLabels = qualities(for: value.0).map { $0.symbol.isEmpty ? "Maj" : $0.symbol }
+                let cap = radialPageCapacity(for: value.1, state: radial)
+                return (value.1, pageLabels(aiRankedLabels, ring: value.1, state: radial, capacity: cap),
+                        CodaDesignTokens.EditorSurface.radialFamilyRadius + Double(index) * CodaDesignTokens.EditorSurface.radialFamilySpacing,
+                        CodaDesignTokens.EditorSurface.radialFamilyBand)
             }
         }
     }
 
-    private func pageLabels(_ labels: [String], ring: RadialRing, state: RadialMenuState) -> [String] {
-        let page = state.pages[ring, default: 0] % RadialPage.count(total: labels.count)
-        let visible = RadialPage.indices(total: labels.count, page: page).map { labels[$0] }
-        guard labels.count > RadialPage.capacity else { return visible }
-        return visible + ["More \(page + 1)/\(RadialPage.count(total: labels.count))"]
+    private func pageLabels(_ labels: [String], ring: RadialRing, state: RadialMenuState, capacity: Int = RadialPage.capacity) -> [String] {
+        let totalPages = RadialPage.count(total: labels.count, capacity: capacity)
+        let page = state.pages[ring, default: 0] % totalPages
+        let visible = RadialPage.indices(total: labels.count, page: page, capacity: capacity).map { labels[$0] }
+        guard labels.count > capacity else { return visible }
+        return visible + ["More \(page + 1)/\(totalPages)"]
     }
 
     func radialTool(ring: RadialRing, slot: Int) -> ChordTool? {
@@ -1337,7 +1595,7 @@ final class CodaEditorStore {
             if ring == .inner {
                 return state.context == .existingChord ? slot < 4 : slot == 1 || (slot == 0 && clipboard != nil)
             }
-            return ring == .outer && (slot == 3 || suggestions(for: state.regionID).indices.contains(slot))
+            return ring == .outer && (slot == Self.radialOuterAllSlotIndex || (slot < Self.radialOuterSuggestionCapacity && suggestions(for: state.regionID).indices.contains(slot)))
         case .roots:
             return ring == .roots && slot < (radialRings().first?.1.count ?? 0)
         case .all:
@@ -1530,6 +1788,10 @@ final class CodaEditorStore {
         touchLast = nil
         touchMoved = false
         holdTriggered = false
+        visualDetent = 0
+        transientPoint = nil
+        knobReadout = nil
+        hoveredRollNote = nil
     }
 
     private func pencilTarget(at point: CGPoint) -> PencilTarget? {
@@ -1598,7 +1860,7 @@ final class CodaEditorStore {
 
     private func outerLabels(for state: RadialMenuState) -> [String] {
         let values = suggestions(for: state.regionID)
-        return (0..<3).map { index in
+        return (0..<Self.radialOuterSuggestionCapacity).map { index in
             guard values.indices.contains(index) else { return "" }
             return chordNameForSuggestion(values[index].chord)
         } + ["All"]
@@ -1730,13 +1992,20 @@ final class CodaEditorStore {
         var slot = hit.1
         let total = hit.0 == .roots ? 12 : qualityIDs.count
         if state.mode != .primary {
-            let indices = RadialPage.indices(total: total, page: state.pages[hit.0, default: 0])
-            if total > RadialPage.capacity && slot == indices.count { return .nextPage(hit.0) }
+            let cap = radialPageCapacity(for: hit.0, state: state)
+            let indices = RadialPage.indices(total: total, page: state.pages[hit.0, default: 0], capacity: cap)
+            if total > cap && slot == indices.count { return .nextPage(hit.0) }
             guard slot < indices.count else { return nil }
             slot += indices.lowerBound
+            if hit.0 == .roots {
+                let roots = rankedRoots(for: state)
+                guard roots.indices.contains(slot) else { return nil }
+                return .chooseRoot(roots[slot])
+            }
         }
         return RadialChoiceResolver.resolve(context: state.context, ring: hit.0, slot: slot,
-            suggestionCount: suggestionCount, hasClipboard: clipboard != nil, qualityIDs: qualityIDs)
+            suggestionCount: suggestionCount, hasClipboard: clipboard != nil, qualityIDs: qualityIDs,
+            allSlotIndex: Self.radialOuterAllSlotIndex)
     }
 
     private func radialPreviewText(_ state: RadialMenuState) -> String? {
@@ -1745,8 +2014,10 @@ final class CodaEditorStore {
         if state.mode == .primary {
             if ring == .outer {
                 let values = suggestions(for: state.regionID)
-                if values.indices.contains(slot) { return chordNameForSuggestion(values[slot].chord) }
-                if slot == 3 { return "All qualities" }
+                if slot < Self.radialOuterSuggestionCapacity && values.indices.contains(slot) {
+                    return chordNameForSuggestion(values[slot].chord)
+                }
+                if slot == Self.radialOuterAllSlotIndex { return "All qualities" }
             }
             let labels = radialRings().first(where: { $0.0 == ring })?.1 ?? []
             return labels.indices.contains(slot) ? labels[slot] : nil
@@ -1779,11 +2050,7 @@ final class CodaEditorStore {
             radial = nil
             return
         }
-        visualDetentIntensity = 0.85
-        visualDetent += 1
-        pencilFeedbackSerial += 1
-        pencilFeedbackIsCompletion = true
-        transientPoint = point
+        triggerVisualDetent(at: point, intensity: 0.85, isCompletion: true)
         switch intent {
         case .nextPage(let ring):
             var next = state
@@ -1858,7 +2125,6 @@ extension CodaEditorStore {
         switch gestureSettings.pencilDoubleTap {
         case .toggleDrawErase:
             rollTool = (rollTool == .drawErase) ? .razor : .drawErase
-            knobReadout = "Tool: \(rollTool == .drawErase ? "Draw" : "Razor")"
         case .togglePlayPause:
             togglePlayback()
         case .toggleSynthRack:

@@ -292,7 +292,6 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertEqual(rack.maxY, window.maxY, accuracy: 1)
         XCTAssertLessThanOrEqual(rack.height, window.height * 0.50 + 1)
         XCTAssertFalse(app.buttons["top.drawer"].exists)
-        XCTAssertEqual(app.buttons["drawer.fxMix"].value as? String, "collapsed")
         for index in 0...2 {
             let preset = app.buttons["drawer.preset.\(index)"]
             XCTAssertTrue(preset.exists)
@@ -302,21 +301,13 @@ final class CodaLaunchTests: XCTestCase {
         attachScreenshot(named: "M1-synth-drawer", from: app)
         let synth = app.scrollViews["drawer.synthScroll"].frame
         XCTAssertEqual(synth.minY, rack.minY + 44, accuracy: 2)
-        for knob in ["cutoff", "resonance", "shape", "detune", "glide"] {
+        for knob in ["cutoff", "resonance", "shape", "detune", "glide", "chorus", "delay", "reverb"] {
             let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
             revealDrawerElement(control, in: app)
             XCTAssertTrue(control.exists)
-            XCTAssertTrue(synth.contains(control.frame), "All five controls must be reachable in the synth rack")
+            XCTAssertTrue(synth.contains(control.frame), "Synth & Post-FX controls must be directly reachable in the synth rack")
         }
-        let fx = app.buttons["drawer.fxMix"]
-        revealDrawerElement(fx, in: app)
-        fx.tap()
-        XCTAssertEqual(fx.value as? String, "expanded")
-        for knob in ["delay", "reverb", "chordLevel"] {
-            let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
-            revealDrawerElement(control, in: app)
-            XCTAssertTrue(synth.contains(control.frame))
-        }
+        XCTAssertFalse(app.buttons["drawer.fxMix"].exists, "Extra FX dropdown must stay removed")
         app.buttons["synthRack.close"].tap()
         XCTAssertTrue(rackElement.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["editor.bottomSynthRack"].exists)
@@ -495,7 +486,7 @@ final class CodaLaunchTests: XCTestCase {
             XCTAssertTrue(preset.waitForExistence(timeout: 5))
             preset.tap()
             app.buttons["synthRack.close"].tap()
-            XCTAssertTrue(app.buttons["rack.pullTab"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["top.synthRack"].waitForExistence(timeout: 5))
             play.tap()
             XCTAssertEqual(play.value as? String, "playing")
             XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, "available")

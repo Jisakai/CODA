@@ -14,7 +14,7 @@
   - `scripts/train_chord_predictor.py`: verified Chordonomicon pipeline + baseline + Core ML export + 3 passing Python unit tests.
 - [done] **Wave 2 — `CodaSession` 3-Layer Wiring + Complete Procreate-Style UI Redesign + Save Hub + Sidekick Drawer** (committed in `4d8321d`, `c876c50`)
 - [done] **Wave 3 — Local Scaffold/C++ Verification + Push to GitHub Actions CI (`coda/owner-pattern-topbar-four-ui`)**
-- [in_progress] **Wave 4 — Fix Any CI Failures, Verify Green Exact-Head `App.ipa`, Download & Inspect Locally**
+- [done] **Wave 4 — Fix Any CI Failures, Verify Green Exact-Head `App.ipa`, Download & Inspect Locally**
   - Recovery resumed at `2026-11-28 00:56 UTC`.
   - Fixed `CodaSidekick` (`a4f0be7`: `DirectiveStreamParser` throwing `vocabulary.quality`), `CodaSession` (`edd0908`: `CODA_LAYER_COUNT.rawValue`), and all `CodaApp` compile errors (`ecd8623`).
   - Fixed all 20 simulator unit test failures and all 9 simulator UI test failures from run `46092044447`: chunked `MusicSession.renderOffline`, tightened `knob(at:)` guard, moved `PatternControlsView` flush-right with hit-testable `highPriorityGesture` on `pattern.swing`, wrapped `RadialMenuView` slots in `ZStack` with `.accessibilityElement(children: .combine)`, and updated unit/UI tests to match the redesigned Bottom Synth Rack, 28x32 chordMute, unified Wrench + Layers popups, and collapsed velocity-lane piano-roll height. Pushing to CI now.
@@ -26,5 +26,15 @@
     1. `BottomSynthRackView.swift` (`testDrawerAndAllThreeProductionPresetsAreReachable`): `synthRack.close` (`chevron.down.circle.fill`) had no `.background(...)` or `.contentShape(Rectangle())`, so XCUITest's center tap fell through the SF Symbol's transparent chevron cutout. Added a `32×32` subtle circular backing + `.contentShape(Rectangle())`.
     2. `EditorViews.swift` — `RadialMenuView` (`testPrimaryRadialScreenshotFixture`): `.accessibilityElement(children: .ignore)` was placed AFTER `.position(point)` and without a frame-filling backing view, so AX frames still collapsed to inner `Text` glyph bounds. Added `Color.white.opacity(0.001)` inside the `ZStack`, `.contentShape(Rectangle())`, and moved `.accessibilityElement(children: .ignore)` + label/id/value BEFORE `.position(point)`. Pushing to CI now.
 
+  - **ALL 7 CI JOBS PASSED on `69f010c312a86f65071d524d9d2dc56b26fca4b8`** in clean single-attempt `workflow_dispatch` run [`46113829427`](https://github.com/Jisakai/CODA/actions/runs/46113829427):
+    - `native + archive` (2m42s), `simulator (unit)` (9m30s), `simulator (ui-a)` (14m56s), `simulator (ui-b)` (17m49s), `simulator (ui-c)` (22m23s), `simulator_delayed (ui-d)` (16m37s), and `publish` (10s) all `success`.
+  - Downloaded & inspected `coda-unsigned-ipa` locally (`C:/Users/jisak/AppData/Local/hermes/cache/scratch/coda-ipa-46113829427`):
+    - `App.ipa`: `1,346,623` bytes, SHA-256 `41093ea8a06f79302373cddb8c0799c92a9983dbe0921045fbb91c2fd9b0da97` (matches `App-verification.txt`), `Payload/coda.app`, `com.coda.sketchpad`, `arm64`, iPad-only (`UIDeviceFamily 2`), landscape-only, iOS SDK `27.2`, all 6 `PlusJakartaSans-*.ttf` weights + `OFL.txt` + `vocab.json` bundled.
+    - `DSP-verification.txt`: `dsp_tests` + `four-bar` passed (Pluck/Currents/Wobble).
+    - 6 UI verification screenshots present in `ui-screenshots/`.
+
+## Completion
+MISSION_COMPLETE=true
+
 ## Last Updated
-2026-11-28 06:34 UTC+03:00 (2026-11-28 03:34 UTC) — Committed & pushed fixes for final 2 UI-A failures (`synthRack.close` hit target + `RadialMenuView` AX frame); awaiting 6/6 green CI run + unsigned `App.ipa` verification.
+2026-11-28 09:14 UTC+03:00 (2026-11-28 06:14 UTC) — Mission complete. Clean single-attempt CI run `46113829427` on `coda/owner-pattern-topbar-four-ui` @ `69f010c312a86f65071d524d9d2dc56b26fca4b8` passed all 7 jobs including `publish`, and `App.ipa` was downloaded and verified locally.

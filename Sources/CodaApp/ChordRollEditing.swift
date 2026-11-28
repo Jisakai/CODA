@@ -177,6 +177,21 @@ extension CodaEditorStore {
         return Int(exactly: (ticks / quantum).rounded() * quantum) ?? 0
     }
 
+    /// Snaps a root-space X coordinate to the nearest grid tick (1/16 step when Grid Snap is on)
+    /// and returns both the absolute tick and its snapped root-space X for the visual razor guide.
+    func snappedRazorLocation(at point: CGPoint) -> (tick: Int, snappedPoint: CGPoint)? {
+        let stepWidth = viewport.stepWidth(in: Double(contentWidth))
+        guard stepWidth > 0 else { return nil }
+        let localX = Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth)
+        let rawSteps = (localX + viewport.horizontalOffset) / stepWidth
+        let rawTicks = rawSteps * Double(MusicDefaults.ticksPerStep)
+        let quantum = gridSnap ? Double(MusicDefaults.ticksPerStep) : 1.0
+        let snappedTicks = max(0, Int((rawTicks / quantum).rounded() * quantum))
+        let snappedSteps = Double(snappedTicks) / Double(MusicDefaults.ticksPerStep)
+        let snappedX = CGFloat(viewport.x(forStep: snappedSteps, in: Double(contentWidth))) + CodaDesignTokens.Geometry.pitchGutterWidth
+        return (snappedTicks, CGPoint(x: snappedX, y: point.y))
+    }
+
     /// Trims or removes any existing chord notes of the same pitch that overlap `incoming`.
     private func mergeRollNote(_ incoming: RollNote, into existing: [RollNote]) throws -> [RollNote] {
         var result: [RollNote] = []
@@ -484,19 +499,19 @@ extension CodaEditorStore {
                 rollMarquee = rect
                 selectedNotes = Set(draft.original.flatMap { region in region.notes.filter { noteFrame($0, in: region).intersects(rect) }.map { RollNoteReference(regionID: region.id, noteID: $0.id) } })
             case .razor:
-                razorPoint = point
+                guard let snapped = snappedRazorLocation(at: point) else { break }
+                razorPoint = snapped.snappedPoint
+                let absCutTick = snapped.tick
+                let minY = min(point.y, draft.lastPoint.y)
+                let maxY = max(point.y, draft.lastPoint.y)
                 for region in draft.original {
+                    let regionStartTick = region.start * MusicDefaults.ticksPerStep
+                    let localCut = absCutTick - regionStartTick
                     for note in region.notes {
                         let frame = noteFrame(note, in: region)
-                        let y = frame.midY
-                        let dy = point.y - draft.lastPoint.y
-                        guard dy != 0, y >= min(point.y, draft.lastPoint.y), y <= max(point.y, draft.lastPoint.y) else { continue }
-                        let fraction = (y - draft.lastPoint.y) / dy
-                        let x = draft.lastPoint.x + (point.x - draft.lastPoint.x) * fraction
-                        guard x > frame.minX, x < frame.maxX else { continue }
-                        let localTicks = Double(x - frame.minX) / Double(frame.width) * Double(note.durationTicks)
-                        let cut = note.startTick + (Int(exactly: localTicks.rounded()) ?? 0)
-                        draft.cuts[region.id, default: [:]][note.id] = cut
+                        let overlapsY = frame.maxY >= minY && frame.minY <= maxY
+                        guard overlapsY, localCut > note.startTick, localCut < note.endTick else { continue }
+                        draft.cuts[region.id, default: [:]][note.id] = localCut
                     }
                 }
                 draft.preview = try draft.original.flatMap { region in
@@ -555,18 +570,16 @@ extension CodaEditorStore {
                 rollMarquee = rect
                 selectedLayerNoteIDs = Set(draft.original.filter { bassNoteFrame($0).intersects(rect) }.map(\.id))
             case .razor:
-                razorPoint = point
+                guard let snapped = snappedRazorLocation(at: point) else { break }
+                razorPoint = snapped.snappedPoint
+                let cut = snapped.tick
+                let minY = min(point.y, draft.lastPoint.y)
+                let maxY = max(point.y, draft.lastPoint.y)
                 for note in draft.original {
                     let frame = bassNoteFrame(note)
-                    let y = frame.midY
-                    let dy = point.y - draft.lastPoint.y
-                    guard dy != 0, y >= min(point.y, draft.lastPoint.y), y <= max(point.y, draft.lastPoint.y) else { continue }
-                    let fraction = (y - draft.lastPoint.y) / dy
-                    let x = draft.lastPoint.x + (point.x - draft.lastPoint.x) * fraction
-                    guard x > frame.minX, x < frame.maxX else { continue }
-                    let localTicks = Double(x - frame.minX) / Double(frame.width) * Double(note.durationTicks)
-                    let cut = note.startTick + (Int(exactly: localTicks.rounded()) ?? 0)
-                    if cut > note.startTick && cut < note.endTick { draft.cuts[note.id] = cut }
+                    let overlapsY = frame.maxY >= minY && frame.minY <= maxY
+                    guard overlapsY, cut > note.startTick, cut < note.endTick else { continue }
+                    draft.cuts[note.id] = cut
                 }
                 var track = try BassTrack(notes: draft.original)
                 for (id, cut) in draft.cuts {
@@ -623,18 +636,16 @@ extension CodaEditorStore {
                 rollMarquee = rect
                 selectedLayerNoteIDs = Set(draft.original.filter { melodyNoteFrame($0).intersects(rect) }.map(\.id))
             case .razor:
-                razorPoint = point
+                guard let snapped = snappedRazorLocation(at: point) else { break }
+                razorPoint = snapped.snappedPoint
+                let cut = snapped.tick
+                let minY = min(point.y, draft.lastPoint.y)
+                let maxY = max(point.y, draft.lastPoint.y)
                 for note in draft.original {
                     let frame = melodyNoteFrame(note)
-                    let y = frame.midY
-                    let dy = point.y - draft.lastPoint.y
-                    guard dy != 0, y >= min(point.y, draft.lastPoint.y), y <= max(point.y, draft.lastPoint.y) else { continue }
-                    let fraction = (y - draft.lastPoint.y) / dy
-                    let x = draft.lastPoint.x + (point.x - draft.lastPoint.x) * fraction
-                    guard x > frame.minX, x < frame.maxX else { continue }
-                    let localTicks = Double(x - frame.minX) / Double(frame.width) * Double(note.durationTicks)
-                    let cut = note.startTick + (Int(exactly: localTicks.rounded()) ?? 0)
-                    if cut > note.startTick && cut < note.endTick { draft.cuts[note.id] = cut }
+                    let overlapsY = frame.maxY >= minY && frame.minY <= maxY
+                    guard overlapsY, cut > note.startTick, cut < note.endTick else { continue }
+                    draft.cuts[note.id] = cut
                 }
                 var track = try MelodyTrack(notes: draft.original)
                 for (id, cut) in draft.cuts {
@@ -650,7 +661,7 @@ extension CodaEditorStore {
     func finishRollGesture(at point: CGPoint, moved: Bool) {
         guard let session else { cancelRollGesture(); return }
         rollHoldWork?.cancel(); rollHoldWork = nil
-        if moved { moveRollGesture(to: point) }
+        if moved || rollTool == .razor { moveRollGesture(to: point) }
 
         if let draft = bassRollDraft {
             var next = draft.preview
@@ -1088,8 +1099,8 @@ extension CodaEditorStore {
             let pitches = candidates[index]
             chordRollPreview = try ChordRollEditor.voicing(base, pitches: pitches)
             try session.audition(pitches: pitches)
-            radialPreview = "Voicing \(index + 1) / \(candidates.count)"; transientPoint = point
-            visualDetent += 1; pencilFeedbackSerial += 1; pencilFeedbackIsCompletion = false
+            radialPreview = "Voicing \(index + 1) / \(candidates.count)"
+            triggerVisualDetent(at: point, intensity: 0.45, isCompletion: false)
         } catch { inlineError = String(describing: error) }
     }
 
@@ -1131,8 +1142,7 @@ extension CodaEditorStore {
                 pitch: base.pitch, velocity: base.velocity, slide: base.slide, nudgeTicks: nextNudge)
             let sign = nextNudge > 0 ? "+" : ""
             radialPreview = "Nudge \(sign)\(nextNudge)t"
-            transientPoint = point
-            visualDetent += 1; pencilFeedbackSerial += 1; pencilFeedbackIsCompletion = false
+            triggerVisualDetent(at: point, intensity: 0.45, isCompletion: false)
         } catch { inlineError = String(describing: error) }
     }
 

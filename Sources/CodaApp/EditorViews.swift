@@ -53,11 +53,6 @@ struct CodaCanvas: View {
                             .transition(.move(edge: .trailing))
                             .zIndex(4)
                     }
-                    DrawerPullTab(store: store)
-                        .position(x: geometry.size.width - (store.drawerOpen ? store.drawerWidth : 0)
-                                  + (store.drawerOpen ? 1 : -1) * CodaDesignTokens.EditorSurface.drawerTabWidth / 2,
-                                  y: (store.drawerTop + geometry.size.height) / 2)
-                        .zIndex(5)
 
                     if store.synthRackOpen {
                         BottomSynthRackView(store: store)
@@ -66,10 +61,6 @@ struct CodaCanvas: View {
                             .transition(.move(edge: .bottom))
                             .zIndex(6)
                     }
-                    SynthRackPullTab(store: store)
-                        .position(x: geometry.size.width / 2,
-                                  y: geometry.size.height - (store.synthRackOpen ? rackHeight + 10 : 12))
-                        .zIndex(7)
                 }
 
                 if store.patternEditing {
@@ -225,6 +216,9 @@ private struct EditorTopBar: View {
         .frame(height: CodaDesignTokens.Geometry.topBarHeight)
         .onPreferenceChange(SettingsFramesKey.self) { store.recordSettingsFrames($0, stage: "topBar.content") }
         .background { CodaAcrylic(store: store) }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+        }
         .onPreferenceChange(SettingsFramesKey.self) { store.recordSettingsFrames($0, stage: "topBar.acrylic") }
         .buttonStyle(.plain)
         // Give the container its own AX node so its identifier does not
@@ -242,14 +236,15 @@ private struct EditorTopBar: View {
                 store.projectHubOpen = true
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                 Text("Gallery")
                     .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
             }
-            .padding(.horizontal, 8).frame(height: 32)
+            .padding(.horizontal, 9).frame(height: 32)
             .background(.white.opacity(0.06), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.65))
             .contentShape(Capsule())
         }
         .accessibilityLabel("Project Gallery")
@@ -260,17 +255,18 @@ private struct EditorTopBar: View {
             store.presentSettings(.appSettings)
         } label: {
             Image(systemName: "wrench.and.screwdriver")
-                .font(.system(size: 15, weight: .bold))
+                .font(.system(size: 13.5, weight: .semibold))
                 .frame(width: 32, height: 32)
-                .background(store.popup == .appSettings ? .white.opacity(0.14) : .clear, in: Circle())
-                .contentShape(Rectangle())
+                .background(store.popup == .appSettings ? .white.opacity(0.16) : .white.opacity(0.06), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(store.popup == .appSettings ? 0.22 : 0.08), lineWidth: 0.65))
+                .contentShape(Circle())
         }
         .modifier(SettingsAnchor(store: store, popup: .appSettings))
         .accessibilityLabel("Actions & Settings")
         .accessibilityIdentifier("top.appSettings")
 
         Rectangle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.08))
-            .frame(width: 1, height: 20)
+            .frame(width: 1, height: 18)
             .padding(.horizontal, 2)
 
         Button { store.presentSettings(.keyScale) } label: {
@@ -281,8 +277,9 @@ private struct EditorTopBar: View {
                     .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
             }
-            .padding(.horizontal, 9).frame(height: 32)
+            .padding(.horizontal, 10).frame(height: 32)
             .background(.white.opacity(0.06), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.65))
         }
         .modifier(SettingsAnchor(store: store, popup: .keyScale))
         .accessibilityLabel("Key and scale")
@@ -295,8 +292,9 @@ private struct EditorTopBar: View {
             Text("BPM").font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
                 .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
         }
-        .padding(.horizontal, 9).frame(height: 32)
+        .padding(.horizontal, 10).frame(height: 32)
         .background(.white.opacity(0.06), in: Capsule())
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 0.65))
         .contentShape(Capsule())
         .onTapGesture { store.presentSettings(.tempo) }
         .gesture(DragGesture(minimumDistance: 4).onChanged { value in
@@ -311,9 +309,11 @@ private struct EditorTopBar: View {
         .accessibilityIdentifier("top.tempo")
 
         Text("4/4")
-            .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
+            .font(CodaDesignTokens.Typography.font(size: 11.5, weight: .bold))
             .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-            .frame(height: 32).padding(.horizontal, 6)
+            .padding(.horizontal, 9).frame(height: 32)
+            .background(.white.opacity(0.045), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.07), lineWidth: 0.65))
             .accessibilityIdentifier("top.timeSignature")
     }
 
@@ -324,6 +324,10 @@ private struct EditorTopBar: View {
             layerPill(.bass, title: "BASS")
             layerPill(.chords, title: "CHORD")
             layerPill(.melody, title: "MEL")
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(width: 1, height: 16)
+                .padding(.horizontal, 2)
             Button { store.presentSettings(.layers) } label: {
                 HStack(spacing: 3) {
                     Image(systemName: "square.3.layers.3d")
@@ -343,7 +347,11 @@ private struct EditorTopBar: View {
             .accessibilityIdentifier("top.layers")
         }
         .padding(2)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.control))
+        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.control))
+        .overlay(
+            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.control)
+                .stroke(Color.white.opacity(0.08), lineWidth: 0.65)
+        )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("top.activeLayer")
 
@@ -355,8 +363,9 @@ private struct EditorTopBar: View {
                     .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
             }
             .foregroundStyle(store.synthRackOpen ? Color.black : CodaDesignTokens.Colors.primaryInk)
-            .padding(.horizontal, 9).frame(height: 32)
-            .background(store.synthRackOpen ? CodaDesignTokens.Colors.chord : .white.opacity(0.07), in: Capsule())
+            .padding(.horizontal, 10).frame(height: 32)
+            .background(store.synthRackOpen ? CodaDesignTokens.Colors.chord : .white.opacity(0.065), in: Capsule())
+            .overlay(Capsule().stroke(store.synthRackOpen ? CodaDesignTokens.Colors.chord.opacity(0.8) : Color.white.opacity(0.08), lineWidth: 0.65))
             .contentShape(Capsule())
         }
         .accessibilityLabel("Toggle Synth & Plugin Rack")
@@ -371,8 +380,9 @@ private struct EditorTopBar: View {
                     .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
             }
             .foregroundStyle(store.drawerOpen ? Color.black : CodaDesignTokens.Colors.sidekick)
-            .padding(.horizontal, 9).frame(height: 30)
-            .background(store.drawerOpen ? CodaDesignTokens.Colors.sidekick : CodaDesignTokens.Colors.sidekick.opacity(0.12), in: Capsule())
+            .padding(.horizontal, 10).frame(height: 32)
+            .background(store.drawerOpen ? CodaDesignTokens.Colors.sidekick : CodaDesignTokens.Colors.sidekick.opacity(0.11), in: Capsule())
+            .overlay(Capsule().stroke(CodaDesignTokens.Colors.sidekick.opacity(store.drawerOpen ? 0.9 : 0.24), lineWidth: 0.65))
             .contentShape(Capsule())
         }
         .accessibilityLabel("Toggle AI Sidekick")
@@ -428,10 +438,11 @@ private struct EditorTopBar: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Button { store.toggleLooping() } label: {
-                    Image(systemName: "repeat").font(.system(size: 14, weight: .bold))
+                    Image(systemName: "repeat").font(.system(size: 13, weight: .bold))
                         .foregroundStyle(store.looping ? CodaDesignTokens.Colors.chord : CodaDesignTokens.Colors.mutedInk)
                         .frame(width: 32, height: 32)
-                        .shadow(color: store.looping ? CodaDesignTokens.Colors.chord.opacity(0.24) : .clear, radius: 8)
+                        .background(store.looping ? CodaDesignTokens.Colors.chord.opacity(0.14) : Color.white.opacity(0.05), in: Circle())
+                        .overlay(Circle().stroke(store.looping ? CodaDesignTokens.Colors.chord.opacity(0.35) : Color.white.opacity(0.07), lineWidth: 0.65))
                 }
                 .accessibilityIdentifier("top.loop")
                 .accessibilityValue(store.looping ? "on" : "off")
@@ -441,10 +452,11 @@ private struct EditorTopBar: View {
             Button { store.togglePlayback() } label: {
                 Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(Color(red: 14.0 / 255, green: 14.0 / 255, blue: 16.0 / 255))
                     .frame(width: CodaDesignTokens.Geometry.playWidth, height: CodaDesignTokens.Geometry.playHeight)
-                    .background(Color.white, in: Capsule())
-                    .shadow(color: .white.opacity(0.18), radius: 12)
+                    .background(Color(red: 232.0 / 255, green: 235.0 / 255, blue: 242.0 / 255), in: Capsule())
+                    .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 0.65))
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
             }
             .accessibilityIdentifier("top.play")
             .accessibilityValue(store.isPlaying ? "playing" : "paused")
@@ -454,14 +466,18 @@ private struct EditorTopBar: View {
                 Button { store.toggleChordMute() } label: {
                     Circle().fill(store.controls.muted == 0 ? CodaDesignTokens.Colors.chord : .clear)
                         .overlay(Circle().stroke(CodaDesignTokens.Colors.chord.opacity(0.55), lineWidth: 1.5))
-                        .frame(width: 14, height: 14)
-                        .frame(width: 28, height: 32)
+                        .frame(width: 12, height: 12)
+                        .frame(width: 26, height: 30)
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("top.chordMute")
                 .accessibilityValue(store.controls.muted == 0 ? "sounding" : "muted")
                 layerMuteDot(.melody, identifier: "top.melodyMute")
             }
+            .padding(.horizontal, 4)
+            .frame(height: 32)
+            .background(Color.white.opacity(0.045), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.07), lineWidth: 0.65))
             .frame(width: 108, alignment: .leading)
         }
     }
@@ -685,18 +701,34 @@ private struct ChordStripView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("CHORDS")
-                        .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                        .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    Text("Poly 12")
-                        .font(CodaDesignTokens.Typography.font(size: 9))
-                        .foregroundStyle(CodaDesignTokens.Colors.mutedInkAlternate)
-                    Text("BAR")
-                        .font(CodaDesignTokens.Typography.font(size: 9, weight: .bold))
-                        .foregroundStyle(CodaDesignTokens.Colors.mutedInkAlternate)
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("CHORDS")
+                            .font(CodaDesignTokens.Typography.font(size: 9.5, weight: .bold))
+                            .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
+                        Text("12v")
+                            .font(CodaDesignTokens.Typography.font(size: 8.5, weight: .medium))
+                            .foregroundStyle(CodaDesignTokens.Colors.mutedInkAlternate.opacity(0.75))
+                    }
+                    Spacer(minLength: 4)
+                    Button { store.scaleLockEnabled.toggle() } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: store.scaleLockEnabled ? "lock.fill" : "lock.open")
+                                .font(.system(size: 8.5, weight: .bold))
+                            Text("SCL")
+                                .font(CodaDesignTokens.Typography.font(size: 8, weight: .black))
+                        }
+                        .foregroundStyle(store.scaleLockEnabled ? Color.black : CodaDesignTokens.Colors.mutedInk)
+                        .padding(.horizontal, 6).padding(.vertical, 3.5)
+                        .background(store.scaleLockEnabled ? CodaDesignTokens.Colors.chord : Color.white.opacity(0.06), in: Capsule())
+                        .overlay(Capsule().stroke(store.scaleLockEnabled ? CodaDesignTokens.Colors.chord : Color.white.opacity(0.09), lineWidth: 0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(store.scaleLockEnabled ? "Scale Lock On" : "Scale Lock Off")
+                    .accessibilityIdentifier("roll.scaleLock")
                 }
-                .padding(.leading, 8)
+                .padding(.leading, 6)
+                .padding(.vertical, 10)
                 .frame(width: CodaDesignTokens.Geometry.pitchGutterWidth, alignment: .leading)
                 .frame(height: geometry.size.height)
                 GeometryReader { strip in
@@ -707,7 +739,11 @@ private struct ChordStripView: View {
                             let occupied = store.displayedRegions.contains { $0.start < start + MusicDefaults.stepsPerBar && $0.end > start }
                             if !occupied {
                                 RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
-                                    .fill(CodaDesignTokens.Colors.darkGlass.opacity(0.40))
+                                    .fill(CodaDesignTokens.Colors.darkGlass.opacity(0.32))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                                            .stroke(Color.white.opacity(0.06), lineWidth: 0.65)
+                                    )
                                     .frame(width: max(8, CGFloat(store.viewport.stepWidth(in: Double(strip.size.width)) * Double(MusicDefaults.stepsPerBar)) - 6), height: 92)
                                     .overlay {
                                         VStack(spacing: 4) {
@@ -812,21 +848,29 @@ private struct ChordBlockView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .multilineTextAlignment(.center)
         .clipped()
-        .background(CodaDesignTokens.Colors.chord.opacity(playing ? 0.28 : 0.14),
-                    in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card))
-        .overlay(alignment: .trailing) {
-            if store.hoveredRegionID == region.id {
-                Capsule().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.45))
-                    .frame(width: 2, height: 24).padding(.trailing, 4)
-            }
+        .background {
+            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                .fill(LinearGradient(
+                    colors: [
+                        CodaDesignTokens.Colors.chord.opacity(playing ? 0.30 : 0.16),
+                        CodaDesignTokens.Colors.chord.opacity(playing ? 0.18 : 0.08)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                ))
         }
         .overlay {
-            if selected {
-                RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
-                    .stroke(CodaDesignTokens.Colors.chord.opacity(0.45), lineWidth: 1.5)
-                    .padding(1.5)
+            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                .stroke(selected ? CodaDesignTokens.Colors.chord.opacity(0.70) : Color.white.opacity(0.08),
+                        lineWidth: selected ? 1.4 : 0.65)
+                .padding(0.75)
+        }
+        .overlay(alignment: .trailing) {
+            if store.hoveredRegionID == region.id {
+                Capsule().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.5))
+                    .frame(width: 2.5, height: 24).padding(.trailing, 4)
             }
         }
+        .opacity(store.patternEditing ? 0.45 : 1.0)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(store.chordName(region)), \(store.romanNumeral(region.chord)), bar \(region.start / MusicDefaults.stepsPerBar + 1)")
         .accessibilityIdentifier("music.chord.\(region.id)")
@@ -842,30 +886,11 @@ private struct PianoRollView: View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
                 HStack(spacing: 0) {
-                    ZStack(alignment: .top) {
-                        pitchGutter(height: geometry.size.height)
-                        Button { store.scaleLockEnabled.toggle() } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: store.scaleLockEnabled ? "lock.fill" : "lock.open")
-                                    .font(.system(size: 9, weight: .bold))
-                                Text("SCL")
-                                    .font(CodaDesignTokens.Typography.font(size: 8, weight: .black))
-                            }
-                            .foregroundStyle(store.scaleLockEnabled ? Color.black : CodaDesignTokens.Colors.mutedInk)
-                            .padding(.horizontal, 5).padding(.vertical, 3)
-                            .background(store.scaleLockEnabled ? CodaDesignTokens.Colors.chord : Color.black.opacity(0.65), in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 4)
-                        .accessibilityLabel(store.scaleLockEnabled ? "Scale Lock On" : "Scale Lock Off")
-                        .accessibilityIdentifier("roll.scaleLock")
-                    }
+                    pitchGutter(height: geometry.size.height)
                     ZStack(alignment: .topLeading) {
                         Canvas { context, size in
                             drawGrid(in: &context, size: size)
-                            var notes = context
-                            notes.opacity = store.patternEditing ? 0.25 : 1
-                            drawNotes(in: &notes, size: size)
+                            drawNotes(in: &context, size: size)
                             drawPlayhead(in: &context, size: size)
                         }
                         .background(CodaDesignTokens.Colors.oled)
@@ -874,6 +899,23 @@ private struct PianoRollView: View {
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("Chord piano roll, Pencil \(store.rollTool.rawValue)")
                         .accessibilityIdentifier("editor.pianoRoll")
+
+                        if let hovered = store.hoveredRollNote {
+                            let localX = hovered.frame.midX - CodaDesignTokens.Geometry.pitchGutterWidth
+                            let localY = hovered.frame.minY - store.rollTop
+                            let clampedX = min(max(56, localX), max(56, geometry.size.width - CodaDesignTokens.Geometry.pitchGutterWidth - 56))
+                            let clampedY = max(14, localY - 14)
+                            Text("\(store.pitchName(hovered.pitch)) · \(hovered.roleLabel)")
+                                .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
+                                .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
+                                .padding(.horizontal, 8).padding(.vertical, 3.5)
+                                .background(CodaDesignTokens.ProcreateChrome.surfaceElevated, in: Capsule())
+                                .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 0.75))
+                                .shadow(color: .black.opacity(0.45), radius: 6, y: 2)
+                                .position(x: clampedX, y: clampedY)
+                                .allowsHitTesting(false)
+                                .accessibilityIdentifier("roll.hoverRole")
+                        }
                     }
                 }
                 .background(CodaDesignTokens.Colors.oled)
@@ -888,31 +930,84 @@ private struct PianoRollView: View {
     }
 
     private func pitchGutter(height: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
-            CodaDesignTokens.Colors.coalGutter
+        let gutterWidth = CodaDesignTokens.Geometry.pitchGutterWidth
+        let blackKeyWidth = gutterWidth * 0.62
+        return ZStack(alignment: .topLeading) {
+            CodaDesignTokens.Colors.oled
             ForEach(store.viewport.visiblePitches(in: Double(height)), id: \.self) { midi in
-                let accidental = [1, 3, 6, 8, 10].contains(midi % 12)
-                let octave = midi.isMultiple(of: 12)
+                let pc = ((midi % 12) + 12) % 12
+                let accidental = [1, 3, 6, 8, 10].contains(pc)
+                let octave = pc == 0
                 let row = CGFloat(store.viewport.semitoneHeight)
                 let y = CGFloat(store.viewport.y(forMIDI: midi))
-                Rectangle()
-                    .fill(CodaDesignTokens.Colors.primaryInk.opacity(accidental
-                        ? CodaDesignTokens.EditorSurface.keyboardAccidentalOpacity
-                        : CodaDesignTokens.EditorSurface.keyboardNaturalOpacity))
-                    .frame(width: accidental ? CodaDesignTokens.EditorSurface.keyboardAccidentalWidth
-                                            : CodaDesignTokens.Geometry.pitchGutterWidth,
-                           height: row - CodaDesignTokens.Geometry.noteMicroInset)
+                let inScale = store.scaleContains(midi)
+
+                if accidental {
+                    // Sleek recessed dark black key with subtle bevel
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color(red: 9.0 / 255, green: 9.5 / 255, blue: 11.0 / 255))
+                            .frame(width: gutterWidth, height: row)
+                        UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0,
+                                               bottomTrailingRadius: 3.5, topTrailingRadius: 3.5)
+                            .fill(LinearGradient(
+                                colors: [Color(red: 16.0 / 255, green: 17.0 / 255, blue: 20.0 / 255),
+                                         Color(red: 6.0 / 255, green: 6.5 / 255, blue: 8.0 / 255)],
+                                startPoint: .top, endPoint: .bottom
+                            ))
+                            .overlay(
+                                UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0,
+                                                       bottomTrailingRadius: 3.5, topTrailingRadius: 3.5)
+                                    .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                            )
+                            .frame(width: blackKeyWidth, height: max(4, row - 1.5))
+                    }
                     .offset(y: y)
-                Text(store.pitchName(midi))
-                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                    .foregroundStyle(CodaDesignTokens.Colors.primaryInk.opacity(octave ? 0.9 : 0.65))
-                    .frame(width: CodaDesignTokens.Geometry.pitchGutterWidth - CodaDesignTokens.EditorSurface.keyboardLabelInset,
-                           height: row, alignment: .trailing)
+                } else {
+                    // Clean modern charcoal natural key
+                    Rectangle()
+                        .fill(Color(red: 22.0 / 255, green: 23.0 / 255, blue: 27.0 / 255)
+                            .opacity(store.scaleLockEnabled && !inScale ? 0.45 : 1.0))
+                        .frame(width: gutterWidth, height: max(4, row - 0.75))
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Color.black.opacity(0.75)).frame(height: 0.75)
+                        }
+                        .offset(y: y)
+                }
+
+                // Crisp modern pitch label (always prominent on C octaves, subtle on other natural keys)
+                if octave || (!accidental && row >= 17) {
+                    HStack(spacing: 3) {
+                        Spacer(minLength: 0)
+                        if octave {
+                            Circle()
+                                .fill(store.activeTrackColor.opacity(0.85))
+                                .frame(width: 3.5, height: 3.5)
+                        }
+                        Text(store.pitchName(midi))
+                            .font(CodaDesignTokens.Typography.font(size: octave ? 9.5 : 8.5, weight: octave ? .bold : .medium))
+                            .foregroundStyle(octave ? CodaDesignTokens.Colors.primaryInk.opacity(0.92)
+                                                    : CodaDesignTokens.Colors.mutedInk.opacity(0.55))
+                    }
+                    .padding(.trailing, 5)
+                    .frame(width: gutterWidth, height: row, alignment: .trailing)
                     .offset(y: y)
                     .accessibilityIdentifier("roll.pitch.\(midi)")
+                } else {
+                    Color.clear
+                        .frame(width: gutterWidth, height: row)
+                        .offset(y: y)
+                        .accessibilityLabel(store.pitchName(midi))
+                        .accessibilityIdentifier("roll.pitch.\(midi)")
+                }
             }
+            // Crisp vertical hairline divider separating piano keys from grid
+            Rectangle()
+                .fill(Color.white.opacity(0.09))
+                .frame(width: 0.75, height: height)
+                .offset(x: gutterWidth - 0.75)
         }
-        .frame(width: CodaDesignTokens.Geometry.pitchGutterWidth, height: height)
+        .frame(width: gutterWidth, height: height)
         .clipped()
     }
 
@@ -936,74 +1031,96 @@ private struct PianoRollView: View {
             var horizontal = Path(); horizontal.move(to: CGPoint(x: 0, y: y)); horizontal.addLine(to: CGPoint(x: size.width, y: y))
             context.stroke(horizontal, with: .color(CodaDesignTokens.Colors.primaryInk.opacity(0.025)), lineWidth: 0.5)
         }
+        let stepPx = store.viewport.stepWidth(in: Double(size.width))
+        let showSubdivisions = stepPx >= 13
         for step in store.viewport.visibleSteps(in: Double(size.width)) {
             let x = CGFloat(store.viewport.x(forStep: Double(step), in: Double(size.width)))
             guard x >= 0, x <= size.width else { continue }
             let isBar = step.isMultiple(of: MusicDefaults.stepsPerBar)
             let isBeat = step.isMultiple(of: MusicDefaults.stepsPerBeat)
-            guard isBar || isBeat else { continue }
+            guard isBar || isBeat || showSubdivisions else { continue }
             var line = Path(); line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
-            let opacity = isBar ? 0.11 : 0.05
+            let opacity = isBar ? 0.13 : (isBeat ? 0.065 : 0.025)
             context.stroke(line, with: .color(CodaDesignTokens.Colors.primaryInk.opacity(opacity)), lineWidth: isBar ? 1 : 0.5)
         }
     }
 
     private func drawNotes(in context: inout GraphicsContext, size: CGSize) {
-        let chordOpacity = store.activeLayer == .chords ? 0.78 : store.ghostLayersOpacity
+        let chordOpacity = store.activeLayer == .chords ? 0.84 : store.ghostLayersOpacity
         for region in store.visibleRegions {
-            let liveChord: Chord? = store.noteLabelsVisible
-                ? (store.session.flatMap { ChordDetector.detect(notes: region.notes, previous: region.chord, vocabulary: $0.vocabulary) } ?? region.chord)
-                : nil
             for value in region.notes {
                 let rootFrame = store.noteFrame(value, in: region)
                 let rect = rootFrame.offsetBy(dx: -CodaDesignTokens.Geometry.pitchGutterWidth, dy: -store.rollTop)
                     .insetBy(dx: 0.75, dy: CodaDesignTokens.Geometry.noteMicroInset)
                 guard rect.maxY > 0, rect.minY < size.height, rect.maxX > 0, rect.minX < size.width else { continue }
+                let noteKey = "\(region.id)-\(value.id)"
                 let selected = store.activeLayer == .chords && store.selectedNotes.contains(RollNoteReference(regionID: region.id, noteID: value.id))
+                let hovered = store.hoveredRollNote?.id == noteKey
                 let path = Path(roundedRect: rect, cornerRadius: 4)
                 context.fill(path, with: .color(CodaDesignTokens.Colors.chord.opacity(selected ? 1 : chordOpacity)))
-                if selected { context.stroke(path, with: .color(.white.opacity(0.65)), lineWidth: 1.2) }
+                if selected || hovered {
+                    context.stroke(path, with: .color(.white.opacity(selected ? 0.8 : 0.45)), lineWidth: selected ? 1.25 : 0.9)
+                } else if store.activeLayer == .chords {
+                    context.stroke(path, with: .color(.white.opacity(0.14)), lineWidth: 0.5)
+                }
                 if value.slide {
                     var slide = Path(); slide.move(to: CGPoint(x: rect.minX + 4, y: rect.maxY - 3))
                     slide.addLine(to: CGPoint(x: min(rect.maxX - 3, rect.minX + 14), y: rect.minY + 3))
                     context.stroke(slide, with: .color(.white.opacity(0.6)), lineWidth: 1)
                 }
-                if store.noteLabelsVisible, store.activeLayer == .chords, rect.width > 35 {
+                if store.activeLayer == .chords, rect.width > 18 {
                     var labels = context
                     labels.clip(to: path)
                     labels.draw(Text(store.pitchName(value.pitch)).font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.black.opacity(0.8)), at: CGPoint(x: rect.minX + 5, y: rect.midY), anchor: .leading)
-                    if rect.width > 86, let liveChord, let vocabulary = store.session?.vocabulary {
-                        let function = ChordDetector.toneLabel(pitch: value.pitch, chord: liveChord, vocabulary: vocabulary)
-                        labels.draw(Text(function).font(.system(size: 10, weight: .medium)).foregroundColor(.black.opacity(0.7)),
-                            at: CGPoint(x: rect.maxX - 5, y: rect.midY), anchor: .trailing)
-                    }
+                        .foregroundColor(.black.opacity(0.84)), at: CGPoint(x: rect.minX + 5, y: rect.midY), anchor: .leading)
                 }
             }
         }
         // Bass layer notes (full opacity when active, ghost opacity when inactive)
-        let bassOpacity = store.activeLayer == .bass ? 0.85 : store.ghostLayersOpacity
+        let bassOpacity = store.activeLayer == .bass ? 0.88 : store.ghostLayersOpacity
         for note in store.displayedBassNotes {
             let rect = store.bassNoteFrame(note)
                 .offsetBy(dx: -CodaDesignTokens.Geometry.pitchGutterWidth, dy: -store.rollTop)
                 .insetBy(dx: 0.75, dy: CodaDesignTokens.Geometry.noteMicroInset)
             guard rect.maxY > 0, rect.minY < size.height, rect.maxX > 0, rect.minX < size.width else { continue }
             let selected = store.activeLayer == .bass && store.selectedLayerNoteIDs.contains(note.id)
+            let hovered = store.hoveredRollNote?.id == note.id
             let path = Path(roundedRect: rect, cornerRadius: 4)
             context.fill(path, with: .color(CodaDesignTokens.Colors.bass.opacity(selected ? 1 : bassOpacity)))
-            if selected { context.stroke(path, with: .color(.white.opacity(0.7)), lineWidth: 1.2) }
+            if selected || hovered {
+                context.stroke(path, with: .color(.white.opacity(selected ? 0.8 : 0.45)), lineWidth: selected ? 1.25 : 0.9)
+            } else if store.activeLayer == .bass {
+                context.stroke(path, with: .color(.white.opacity(0.14)), lineWidth: 0.5)
+            }
+            if store.activeLayer == .bass, rect.width > 18 {
+                var labels = context
+                labels.clip(to: path)
+                labels.draw(Text(store.pitchName(note.pitch)).font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.84)), at: CGPoint(x: rect.minX + 5, y: rect.midY), anchor: .leading)
+            }
         }
         // Melody layer notes (full opacity when active, ghost opacity when inactive)
-        let melodyOpacity = store.activeLayer == .melody ? 0.88 : store.ghostLayersOpacity
+        let melodyOpacity = store.activeLayer == .melody ? 0.90 : store.ghostLayersOpacity
         for note in store.displayedMelodyNotes {
             let rect = store.melodyNoteFrame(note)
                 .offsetBy(dx: -CodaDesignTokens.Geometry.pitchGutterWidth, dy: -store.rollTop)
                 .insetBy(dx: 0.75, dy: CodaDesignTokens.Geometry.noteMicroInset)
             guard rect.maxY > 0, rect.minY < size.height, rect.maxX > 0, rect.minX < size.width else { continue }
             let selected = store.activeLayer == .melody && store.selectedLayerNoteIDs.contains(note.id)
+            let hovered = store.hoveredRollNote?.id == note.id
             let path = Path(roundedRect: rect, cornerRadius: 4)
             context.fill(path, with: .color(CodaDesignTokens.Colors.melody.opacity(selected ? 1 : melodyOpacity)))
-            if selected { context.stroke(path, with: .color(.white.opacity(0.7)), lineWidth: 1.2) }
+            if selected || hovered {
+                context.stroke(path, with: .color(.white.opacity(selected ? 0.8 : 0.45)), lineWidth: selected ? 1.25 : 0.9)
+            } else if store.activeLayer == .melody {
+                context.stroke(path, with: .color(.white.opacity(0.14)), lineWidth: 0.5)
+            }
+            if store.activeLayer == .melody, rect.width > 18 {
+                var labels = context
+                labels.clip(to: path)
+                labels.draw(Text(store.pitchName(note.pitch)).font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.black.opacity(0.84)), at: CGPoint(x: rect.minX + 5, y: rect.midY), anchor: .leading)
+            }
         }
         if let marquee = store.rollMarquee {
             let rect = marquee.offsetBy(dx: -CodaDesignTokens.Geometry.pitchGutterWidth, dy: -store.rollTop)
@@ -1013,10 +1130,9 @@ private struct PianoRollView: View {
         if let point = store.razorPoint {
             let x = point.x - CodaDesignTokens.Geometry.pitchGutterWidth
             var line = Path(); line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
-            context.stroke(line, with: .color(.white.opacity(0.7)), lineWidth: 1)
+            context.stroke(line, with: .color(CodaDesignTokens.Colors.chord.opacity(0.35)), lineWidth: 4)
+            context.stroke(line, with: .color(.white.opacity(0.85)), lineWidth: 1.2)
         }
-        context.draw(Text(store.rollTool == .drawErase ? "Draw / Erase" : store.rollTool == .razor ? "Razor" : "Selection")
-            .font(.system(size: 11, weight: .medium)).foregroundColor(.white.opacity(0.35)), at: CGPoint(x: 12, y: 14), anchor: .leading)
     }
 
     private func drawPlayhead(in context: inout GraphicsContext, size: CGSize) {
@@ -1077,8 +1193,11 @@ private struct VelocityLaneView: View {
                             .font(.system(size: 8, weight: .bold))
                     }
                     .foregroundStyle(store.velocityLaneVisible ? store.activeTrackColor : CodaDesignTokens.Colors.mutedInk)
-                    .frame(width: CodaDesignTokens.Geometry.pitchGutterWidth, height: 18)
+                    .frame(width: CodaDesignTokens.Geometry.pitchGutterWidth, height: 22)
                     .background(CodaDesignTokens.Colors.coalGutter)
+                    .overlay(alignment: .trailing) {
+                        Rectangle().fill(Color.white.opacity(0.08)).frame(width: 0.75)
+                    }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1086,10 +1205,10 @@ private struct VelocityLaneView: View {
                 .accessibilityIdentifier("roll.velocityToggle")
 
                 Rectangle()
-                    .fill(CodaDesignTokens.Colors.primaryInk.opacity(0.08))
-                    .frame(height: 1)
+                    .fill(CodaDesignTokens.Colors.primaryInk.opacity(0.09))
+                    .frame(height: 0.75)
             }
-            .frame(height: 18)
+            .frame(height: 22)
             .background(CodaDesignTokens.Colors.oled)
 
             if store.velocityLaneVisible {
@@ -1748,23 +1867,32 @@ private struct RadialMenuView: View {
                     let thickness = CGFloat(thicknessValue * placement.scale)
                     CodaAcrylic(store: store)
                         .clipShape(RadialArcShape(arc: layout.backing, scale: placement.scale))
+                        .overlay {
+                            RadialArcShape(arc: layout.backing, scale: placement.scale)
+                                .stroke(Color.white.opacity(0.09), lineWidth: 0.75)
+                        }
                         .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
                         .position(center)
                     ForEach(labels.indices, id: \.self) { slot in
                         let enabled = store.radialSlotEnabled(ring, slot: slot)
                         let point = layout.buttonCenter(slot: slot, center: center, scale: placement.scale)
                         let shape = RingSlotShape(layout: layout, index: slot, scale: placement.scale)
+                        let isSelectedSlot = store.radial?.selectedRing == ring && store.radial?.selectedSlot == slot
                         shape.fill(CodaDesignTokens.Colors.primaryInk.opacity(!enabled
                             ? CodaDesignTokens.EditorSurface.radialDisabledPillOpacity
-                            : store.radial?.selectedRing == ring && store.radial?.selectedSlot == slot
+                            : isSelectedSlot
                             ? CodaDesignTokens.EditorSurface.radialSelectedPillOpacity
                             : CodaDesignTokens.EditorSurface.radialPillOpacity))
+                            .overlay {
+                                shape.stroke(Color.white.opacity(!enabled ? 0.03 : (isSelectedSlot ? 0.30 : 0.10)),
+                                             lineWidth: isSelectedSlot ? 1.0 : 0.65)
+                            }
                             .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
                             .position(center)
                         let slotAccessibilityLabel: String = {
                             if store.isPatternSqueezeMenu { return labels[slot] }
                             if labels[slot].hasPrefix("More ") { return labels[slot] }
-                            if ring == .outer && slot == 3 { return "All chord qualities" }
+                            if ring == .outer && slot == CodaEditorStore.radialOuterAllSlotIndex { return "All chord qualities" }
                             if let tool = store.radialTool(ring: ring, slot: slot) { return tool.title }
                             return labels[slot]
                         }()
@@ -1772,29 +1900,32 @@ private struct RadialMenuView: View {
                             Color.white.opacity(0.001)
                             if store.isPatternSqueezeMenu {
                                 Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot).symbol)
-                                    .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .bold))
+                                    .font(.system(size: CodaDesignTokens.EditorSurface.radialSymbolSize,
+                                                  weight: CodaDesignTokens.EditorSurface.radialSymbolWeight))
                             } else if labels[slot].hasPrefix("More ") {
                                 Image(systemName: "arrow.right.circle.fill")
-                                    .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .black))
-                            } else if ring == .outer && slot == 3 {
+                                    .font(.system(size: CodaDesignTokens.EditorSurface.radialSymbolSize,
+                                                  weight: CodaDesignTokens.EditorSurface.radialSymbolWeight))
+                            } else if ring == .outer && slot == CodaEditorStore.radialOuterAllSlotIndex {
                                 Image(systemName: "square.grid.2x2.fill")
-                                    .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .black))
+                                    .font(.system(size: CodaDesignTokens.EditorSurface.radialSymbolSize,
+                                                  weight: CodaDesignTokens.EditorSurface.radialSymbolWeight))
                             } else if let tool = store.radialTool(ring: ring, slot: slot) {
                                 Image(systemName: tool.symbol)
-                                    .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize,
-                                                  weight: CodaDesignTokens.EditorSurface.toolIconWeight))
+                                    .font(.system(size: CodaDesignTokens.EditorSurface.radialSymbolSize,
+                                                  weight: CodaDesignTokens.EditorSurface.radialSymbolWeight))
                             } else {
                                 Text(labels[slot])
-                                    .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
+                                    .font(CodaDesignTokens.Typography.font(size: 10.5, weight: .bold))
                             }
                         }
                             .foregroundStyle(!enabled
                                              ? CodaDesignTokens.Colors.mutedInk.opacity(0.35)
-                                             : store.radial?.selectedRing == ring && store.radial?.selectedSlot == slot
+                                             : isSelectedSlot
                                              ? CodaDesignTokens.Colors.primaryInk
-                                             : store.currentRingIsSelected(ring) ? CodaDesignTokens.Colors.primaryInk
-                                             : CodaDesignTokens.Colors.mutedInk)
-                            .lineLimit(1).minimumScaleFactor(0.85)
+                                             : store.currentRingIsSelected(ring) ? CodaDesignTokens.Colors.primaryInk.opacity(0.95)
+                                             : CodaDesignTokens.Colors.primaryInk.opacity(0.78))
+                            .lineLimit(1).minimumScaleFactor(0.82)
                             .frame(width: layout.buttonDiameter * placement.scale,
                                    height: layout.buttonDiameter * placement.scale)
                             .contentShape(Rectangle())
@@ -1805,8 +1936,13 @@ private struct RadialMenuView: View {
                             .position(point)
                     }
                 }
-                Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.6))
-                    .frame(width: 8, height: 8).position(center)
+                ZStack {
+                    Circle().stroke(CodaDesignTokens.Colors.primaryInk.opacity(0.24), lineWidth: 1)
+                        .frame(width: 14, height: 14)
+                    Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.75))
+                        .frame(width: 6, height: 6)
+                }
+                .position(center)
                 if let preview = store.radialPreview {
                     Text(preview).font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
                         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
@@ -1903,11 +2039,6 @@ private struct EditorInlineStatus: View {
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background { CodaAcrylic(store: store).clipShape(Capsule()) }
                     .accessibilityIdentifier("editor.inlineError")
-            } else if store.audioAvailable {
-                Text("Audio active")
-                    .font(CodaDesignTokens.Typography.font(size: 9, weight: .bold))
-                    .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    .accessibilityIdentifier("editor.audioState")
             } else {
                 EmptyView()
             }

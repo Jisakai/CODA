@@ -274,7 +274,8 @@ public enum ChordTool: String, CaseIterable, Sendable {
 public enum RadialChoiceResolver {
     public static func resolve(context: RadialContext, ring: RadialRing, slot: Int,
                                suggestionCount: Int, hasClipboard: Bool,
-                               qualityIDs: [String] = []) -> RadialIntent? {
+                               qualityIDs: [String] = [],
+                               allSlotIndex: Int = 3) -> RadialIntent? {
         guard slot >= 0 else { return nil }
         switch (context, ring) {
         case (.existingChord, .inner):
@@ -292,8 +293,8 @@ public enum RadialChoiceResolver {
             default: nil
             }
         case (_, .outer):
-            if slot < 3 && slot < suggestionCount { return .suggestion(slot) }
-            return slot == 3 ? .showAll : nil
+            if slot == allSlotIndex { return .showAll }
+            return slot < allSlotIndex && slot < suggestionCount ? .suggestion(slot) : nil
         case (_, .roots):
             return slot < 12 ? .chooseRoot(slot) : nil
         case (_, .major), (_, .minor), (_, .odd):
@@ -304,13 +305,17 @@ public enum RadialChoiceResolver {
     }
 }
 
-/// Three readable options plus one navigation slot, on every large band.
+/// Paging helper for radial bands; default capacity is 3, with per-ring pie-slice overrides.
 public enum RadialPage {
     public static let capacity = 3
-    public static func count(total: Int) -> Int { max(1, (total + capacity - 1) / capacity) }
-    public static func indices(total: Int, page: Int) -> Range<Int> {
-        let start = (max(0, page) % count(total: total)) * capacity
-        return start..<min(total, start + capacity)
+    public static func count(total: Int, capacity: Int = RadialPage.capacity) -> Int {
+        let cap = max(1, capacity)
+        return max(1, (total + cap - 1) / cap)
+    }
+    public static func indices(total: Int, page: Int, capacity: Int = RadialPage.capacity) -> Range<Int> {
+        let cap = max(1, capacity)
+        let start = (max(0, page) % count(total: total, capacity: cap)) * cap
+        return start..<min(total, start + cap)
     }
 }
 

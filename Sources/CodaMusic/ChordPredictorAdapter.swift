@@ -401,6 +401,16 @@ public final class CoreMLChordPredictor: SteerableChordSuggestionProvider, @unch
                     if dist == 5 || dist == 7 { score += 0.45 }
                 }
 
+                // Favor richer harmonic colors (7ths, 9ths, sus, add9, extensions) over plain triads
+                // so suggestions don't collapse to repetitive basic triads.
+                if quality.intervals.count >= 5 || quality.intervals.contains(where: { $0 >= 14 }) {
+                    score += 0.65
+                } else if quality.intervals.count == 4 {
+                    score += 0.50
+                } else if quality.id == "major" || quality.id == "minor" {
+                    score -= 0.35
+                }
+
                 // Strong prior from RuleBasedChordSuggestions
                 if let rank = ruleTop.firstIndex(where: { $0.chord.root == root && $0.chord.qualityID == quality.id }) {
                     score += 2.2 - Double(rank) * 0.35

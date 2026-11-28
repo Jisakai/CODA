@@ -105,9 +105,9 @@ struct BottomSynthRackView: View {
     // MARK: - CODA Synth Tab
 
     private var codaSynthContent: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 18) {
-                // Left column: Presets + Macros
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
+                // Left card: Presets + Macros
                 VStack(alignment: .leading, spacing: 14) {
                     sectionLabel("PRESETS")
                     HStack(spacing: 8) {
@@ -115,17 +115,24 @@ struct BottomSynthRackView: View {
                         presetCard("Currents Pad", index: 1)
                         presetCard("Wobble Lead", index: 2)
                     }
-                    .frame(height: 52)
+                    .frame(height: 50)
 
                     sectionLabel("MACROS")
-                    HStack(spacing: 16) {
+                    HStack(spacing: 14) {
                         RackKnobControl(store: store, knob: .wobble, diameter: CodaDesignTokens.EditorSurface.drawerMacroDiameter)
                         RackKnobControl(store: store, knob: .warmth, diameter: CodaDesignTokens.EditorSurface.drawerMacroDiameter)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(CodaDesignTokens.ProcreateChrome.surfaceElevated.opacity(0.45),
+                            in: RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 0.75)
+                )
 
-                // Middle column: 5 Sound Knobs
+                // Middle card: 5 Sound Knobs
                 VStack(alignment: .leading, spacing: 14) {
                     sectionLabel("SOUND ENGINE")
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 14) {
@@ -134,52 +141,40 @@ struct BottomSynthRackView: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(CodaDesignTokens.ProcreateChrome.surfaceElevated.opacity(0.45),
+                            in: RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 0.75)
+                )
 
-                // Right column: Post-FX Rack (Chorus, Delay, Reverb) + Mixer
+                // Right card: Post-FX Rack (Chorus, Delay, Reverb directly visible — no extra dropdown)
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        sectionLabel("POST-FX RACK")
-                        Spacer()
-                        Button {
-                            store.fxExpanded.toggle()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text("FX & Mix")
-                                    .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
-                                Image(systemName: store.fxExpanded ? "minus.circle.fill" : "plus.circle.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                            .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
-                            .padding(.horizontal, 8).frame(height: 24)
-                            .background(.white.opacity(0.07), in: Capsule())
-                        }
-                        .accessibilityIdentifier("drawer.fxMix")
-                        .accessibilityValue(store.fxExpanded ? "expanded" : "collapsed")
-                    }
-
+                    sectionLabel("POST-FX RACK")
                     HStack(spacing: 10) {
                         RackKnobControl(store: store, knob: .chorus, diameter: CodaDesignTokens.EditorSurface.drawerKnobDiameter)
                         RackKnobControl(store: store, knob: .delay, diameter: CodaDesignTokens.EditorSurface.drawerKnobDiameter)
                         RackKnobControl(store: store, knob: .reverb, diameter: CodaDesignTokens.EditorSurface.drawerKnobDiameter)
                     }
-
-                    if store.fxExpanded {
-                        HStack(spacing: 10) {
-                            RackKnobControl(store: store, knob: .chordLevel, diameter: CodaDesignTokens.EditorSurface.drawerKnobDiameter)
-                        }
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(CodaDesignTokens.ProcreateChrome.surfaceElevated.opacity(0.45),
+                            in: RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 0.75)
+                )
             }
-
-            Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
+            .fixedSize(horizontal: false, vertical: true)
 
             // Per-layer / track mixer strip
             VStack(alignment: .leading, spacing: 10) {
                 sectionLabel("TRACK MIXER")
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         ForEach([MusicLayer.bass, .chords, .melody], id: \.self) { layer in
                             baseLayerMixerChannel(layer)
                         }
@@ -190,6 +185,13 @@ struct BottomSynthRackView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+            .padding(14)
+            .background(CodaDesignTokens.ProcreateChrome.surfaceElevated.opacity(0.35),
+                        in: RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 0.75)
+            )
 
             if let error = store.audioError, !error.isEmpty {
                 Text("Audio: \(error)")
@@ -198,15 +200,15 @@ struct BottomSynthRackView: View {
                     .accessibilityIdentifier("drawer.audioError")
             }
         }
-        .padding(18)
+        .padding(16)
     }
 
     private func presetCard(_ title: String, index: UInt8) -> some View {
         let selected = store.activeLayerPreset == index
         return Button { store.setPreset(index) } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Circle()
-                    .fill(selected ? store.activeTrackColor : CodaDesignTokens.Colors.mutedInk.opacity(0.25))
+                    .fill(selected ? store.activeTrackColor : CodaDesignTokens.Colors.mutedInk.opacity(0.28))
                     .frame(width: 6, height: 6)
                 Text(title)
                     .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
@@ -215,8 +217,13 @@ struct BottomSynthRackView: View {
             .foregroundStyle(selected ? CodaDesignTokens.Colors.primaryInk : CodaDesignTokens.Colors.mutedInk)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 6)
-            .background(.white.opacity(selected ? 0.13 : 0.045),
+            .background(selected ? store.activeTrackColor.opacity(0.16) : Color.white.opacity(0.04),
                         in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card))
+            .overlay(
+                RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                    .stroke(selected ? store.activeTrackColor.opacity(0.55) : Color.white.opacity(0.06),
+                            lineWidth: selected ? 1 : 0.65)
+            )
         }
         .accessibilityIdentifier("drawer.preset.\(index)")
         .accessibilityValue(selected ? "selected" : "")
@@ -260,12 +267,10 @@ struct BottomSynthRackView: View {
                 }
             }
 
-            Slider(value: Binding(
-                get: { level },
-                set: { store.setLayerLevel($0, for: layer) }
-            ), in: 0...1)
-            .tint(layer.accentColor)
-            .frame(width: 110)
+            StudioFader(value: level, tint: layer.accentColor) {
+                store.setLayerLevel($0, for: layer)
+            }
+            .frame(width: 116)
 
             Text("\(Int((level * 100).rounded()))%")
                 .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
@@ -274,6 +279,10 @@ struct BottomSynthRackView: View {
         .padding(10)
         .background(.white.opacity(active ? 0.08 : 0.035),
                     in: RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card))
+        .overlay(
+            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                .stroke(active ? layer.accentColor.opacity(0.45) : Color.white.opacity(0.06), lineWidth: 0.75)
+        )
     }
 
     private func extraLayerMixerChannel(_ extra: ExtraLayerTrack) -> some View {
@@ -313,16 +322,12 @@ struct BottomSynthRackView: View {
                 }
             }
 
-            Slider(value: Binding(
-                get: { Double(extra.layerControls.level) },
-                set: { newVal in
-                    var updated = extra.layerControls
-                    updated.level = Float(newVal)
-                    store.setExtraLayerControls(updated, for: extra.id)
-                }
-            ), in: 0...1)
-            .tint(extra.kind.accentColor)
-            .frame(width: 110)
+            StudioFader(value: Double(extra.layerControls.level), tint: extra.kind.accentColor) { newVal in
+                var updated = extra.layerControls
+                updated.level = Float(newVal)
+                store.setExtraLayerControls(updated, for: extra.id)
+            }
+            .frame(width: 116)
 
             Text("\(Int((Double(extra.layerControls.level) * 100).rounded()))%")
                 .font(CodaDesignTokens.Typography.font(size: 10, weight: .semibold))
@@ -521,6 +526,41 @@ struct BottomSynthRackView: View {
     }
 }
 
+/// Sleek studio fader control replacing bulky native sliders in the Track Mixer.
+private struct StudioFader: View {
+    let value: Double
+    let tint: Color
+    let onChange: (Double) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let clamped = min(1, max(0, value))
+            let width = max(1, geo.size.width)
+            let thumbX = clamped * width
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 4)
+                Capsule()
+                    .fill(tint.opacity(0.85))
+                    .frame(width: max(4, thumbX), height: 4)
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(Color(red: 232.0 / 255, green: 234.0 / 255, blue: 240.0 / 255))
+                    .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(Color.black.opacity(0.35), lineWidth: 0.5))
+                    .frame(width: 9, height: 15)
+                    .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                    .offset(x: min(max(0, thumbX - 4.5), max(0, width - 9)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { gesture in
+                onChange(min(1, max(0, Double(gesture.location.x / width))))
+            })
+        }
+        .frame(height: 18)
+    }
+}
+
 /// Shared rotary knob control used by the Bottom Synth Rack (and compatible with `KnobFramesKey`).
 struct RackKnobControl: View {
     @Bindable var store: CodaEditorStore
@@ -529,23 +569,44 @@ struct RackKnobControl: View {
     @State private var dragStart: Double?
 
     private var value: Double { store.value(for: knob) }
+    private var pointerAngle: Angle { .degrees(-135 + value * 270) }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 5) {
             ZStack {
+                // Recessed studio dial cap
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [CodaDesignTokens.ProcreateChrome.surfaceControl.opacity(0.92),
+                                 CodaDesignTokens.ProcreateChrome.surfaceDeep],
+                        startPoint: .top, endPoint: .bottom
+                    ))
+                    .padding(5)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.09), lineWidth: 0.75)
+                            .padding(5)
+                    )
+                // Track & active value arc
                 Circle().trim(from: 0.125, to: 0.875)
-                    .stroke(.white.opacity(0.10), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .stroke(.white.opacity(0.10), style: StrokeStyle(lineWidth: 2.8, lineCap: .round))
                     .rotationEffect(.degrees(90))
                 Circle().trim(from: 0.125, to: 0.125 + 0.75 * value)
-                    .stroke(store.activeTrackColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .stroke(store.activeTrackColor, style: StrokeStyle(lineWidth: 2.8, lineCap: .round))
                     .rotationEffect(.degrees(90))
-                Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.75))
-                    .frame(width: 6, height: 6)
+                // Rotating tactile pointer needle
+                Capsule()
+                    .fill(CodaDesignTokens.Colors.primaryInk.opacity(0.92))
+                    .frame(width: 2, height: max(6, diameter * 0.22))
+                    .offset(y: -diameter * 0.17)
+                    .rotationEffect(pointerAngle)
+                Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.55))
+                    .frame(width: 4.5, height: 4.5)
                     .accessibilityLabel("Center dot")
                     .accessibilityIdentifier("drawer.knob.dot.\(knob.rawValue)")
             }
             .frame(width: diameter, height: diameter)
-            .background(.white.opacity(0.04), in: Circle())
+            .background(CodaDesignTokens.ProcreateChrome.surfaceDeep.opacity(0.65), in: Circle())
             .background {
                 GeometryReader { geometry in
                     Color.clear.preference(key: KnobFramesKey.self,
@@ -570,7 +631,7 @@ struct RackKnobControl: View {
                     .font(CodaDesignTokens.Typography.font(size: CodaDesignTokens.Typography.chipAndReadoutSize, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
                     .fixedSize()
-                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .padding(.horizontal, 5).padding(.vertical, 1.5)
                     .background(.white.opacity(0.08), in: Capsule())
                     .accessibilityIdentifier("drawer.knob.readout.\(knob.rawValue)")
             }

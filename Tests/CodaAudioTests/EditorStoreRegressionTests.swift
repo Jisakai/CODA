@@ -503,7 +503,7 @@ final class EditorStoreRegressionTests: XCTestCase {
         assertRenderedRadialClearsChrome(store)
         store.closeRadial()
         store.beginPatternEditing()
-        store.openSqueeze(at: CGPoint(x: 100, y: store.patternFrame.midY))
+        store.openSqueeze(at: CGPoint(x: 100, y: store.rollFrame.midY))
         XCTAssertEqual(store.radialRings().first?.1, ["Draw/Erase", "Razor", "Select", "Copy", "Paste", "Pattern"])
         XCTAssertEqual(store.radialRings().count, 1)
         assertRenderedRadialClearsChrome(store)
@@ -516,18 +516,20 @@ final class EditorStoreRegressionTests: XCTestCase {
         let session = try XCTUnwrap(store.session)
         let original = session.editor.progression
         store.openSqueeze(at: CGPoint(x: 60, y: 92))
-        store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+        store.pencilTouchEnded(at: try point(store, ring: .outer, slot: CodaEditorStore.radialOuterAllSlotIndex))
         for (family, ring) in [(ChordFamily.major, RadialRing.major), (.minor, .minor), (.odd, .odd)] {
             let total = session.vocabulary.ring(family).count
-            let pages = RadialPage.count(total: total)
+            let initialState = try XCTUnwrap(store.radial)
+            let cap = store.radialPageCapacity(for: ring, state: initialState)
+            let pages = RadialPage.count(total: total, capacity: cap)
             for page in 0..<pages {
                 let state = try XCTUnwrap(store.radial)
                 let band = try XCTUnwrap(store.radialRings().first { $0.0 == ring })
-                let visible = RadialPage.indices(total: total, page: page).count
+                let visible = RadialPage.indices(total: total, page: page, capacity: cap).count
                 XCTAssertEqual(state.pages[ring, default: 0], page)
-                XCTAssertEqual(band.1.count, visible + (total > RadialPage.capacity ? 1 : 0))
+                XCTAssertEqual(band.1.count, visible + (total > cap ? 1 : 0))
                 assertRenderedRadialClearsChrome(store)
-                if total > RadialPage.capacity {
+                if total > cap {
                     let layout = RadialRingLayout(count: band.1.count, radius: band.2,
                         thickness: band.3, direction: state.placement.direction)
                     store.pencilTouchEnded(at: layout.buttonCenter(slot: band.1.count - 1,
@@ -551,7 +553,7 @@ final class EditorStoreRegressionTests: XCTestCase {
             store.openSqueeze(at: tip)
             XCTAssertEqual(store.radial?.anchor, tip)
             for mode in [RadialMode.primary, .all] {
-                if mode == .all { store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3)) }
+                if mode == .all { store.pencilTouchEnded(at: try point(store, ring: .outer, slot: CodaEditorStore.radialOuterAllSlotIndex)) }
                 let state = try XCTUnwrap(store.radial)
                 assertRenderedRadialClearsChrome(store)
                 for (_, labels, radius, thickness) in store.radialRings() {
@@ -559,7 +561,7 @@ final class EditorStoreRegressionTests: XCTestCase {
                         thickness: thickness, direction: state.placement.direction)
                     let bounds = layout.paintedBounds(center: state.center, scale: state.placement.scale)
                     XCTAssertTrue(CGRect(origin: .zero, size: store.rootSize).contains(bounds))
-                    XCTAssertLessThanOrEqual(labels.count, 4)
+                    XCTAssertLessThanOrEqual(labels.count, 9)
                 }
             }
             let location = try point(store, ring: .major, slot: 0)
@@ -586,7 +588,7 @@ final class EditorStoreRegressionTests: XCTestCase {
                 store.openSqueeze(at: tip)
                 XCTAssertEqual(store.radial?.anchor, tip)
                 assertRenderedRadialClearsChrome(store)
-                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: 3))
+                store.pencilTouchEnded(at: try point(store, ring: .outer, slot: CodaEditorStore.radialOuterAllSlotIndex))
                 XCTAssertEqual(store.radial?.mode, .all)
                 assertRenderedRadialClearsChrome(store)
                 let state = try XCTUnwrap(store.radial)
@@ -1428,7 +1430,7 @@ final class EditorStoreRegressionTests: XCTestCase {
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
         try session.play()
-        store.openSqueeze(at: CGPoint(x: 400, y: store.patternFrame.midY))
+        store.openSqueeze(at: CGPoint(x: 400, y: store.rollFrame.midY))
         XCTAssertEqual(store.radialRings().first?.1, ["Draw/Erase", "Razor", "Select", "Copy", "Paste", "Pattern"])
         let option = try point(store, ring: .inner, slot: 5)
         store.pencilHover(at: option, rollAngle: nil)
@@ -1438,7 +1440,7 @@ final class EditorStoreRegressionTests: XCTestCase {
         let retained = session.patterns
         let chordContent = session.editor.progression
         XCTAssertEqual(retained.regions.first?.slots.compactMap { $0 }.count, 6)
-        store.openSqueeze(at: CGPoint(x: 400, y: store.patternFrame.midY))
+        store.openSqueeze(at: CGPoint(x: 400, y: store.rollFrame.midY))
         XCTAssertEqual(store.radialRings().first?.1, ["Draw/Erase", "Razor", "Select", "Copy", "Paste", "Pattern"])
         let closingOption = try point(store, ring: .inner, slot: 5)
         store.pencilHover(at: closingOption, rollAngle: nil)
@@ -1842,5 +1844,34 @@ final class EditorStoreRegressionTests: XCTestCase {
         XCTAssertFalse(store.pencilFeedbackIsCompletion)
         store.visualDetent = 0
         XCTAssertEqual(store.pencilFeedbackSerial, 1, "Flash expiry is not a new haptic event")
+    }
+
+    func testPresetSelectionWorksIndependentlyOnBassAndMelodyLayers() {
+        let store = CodaEditorStore(audio: SilentEditorAudio())
+        store.setActiveLayer(.chords)
+        store.setPreset(0)
+        XCTAssertEqual(store.activeLayerPreset, 0)
+
+        store.setActiveLayer(.bass)
+        store.setPreset(2)
+        XCTAssertEqual(store.activeLayerPreset, 2)
+        store.setValue(0.31, for: .cutoff)
+        XCTAssertEqual(store.value(for: .cutoff), 0.31, accuracy: 1e-4)
+
+        store.setActiveLayer(.melody)
+        store.setPreset(1)
+        XCTAssertEqual(store.activeLayerPreset, 1)
+        store.setValue(0.77, for: .cutoff)
+        XCTAssertEqual(store.value(for: .cutoff), 0.77, accuracy: 1e-4)
+
+        // Switching back preserves each layer's own preset & cutoff
+        store.setActiveLayer(.chords)
+        XCTAssertEqual(store.activeLayerPreset, 0)
+        store.setActiveLayer(.bass)
+        XCTAssertEqual(store.activeLayerPreset, 2)
+        XCTAssertEqual(store.value(for: .cutoff), 0.31, accuracy: 1e-4)
+        store.setActiveLayer(.melody)
+        XCTAssertEqual(store.activeLayerPreset, 1)
+        XCTAssertEqual(store.value(for: .cutoff), 0.77, accuracy: 1e-4)
     }
 }
