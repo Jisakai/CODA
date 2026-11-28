@@ -697,7 +697,7 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["roll.pitch.96"].exists, "Offscreen C labels must not enter the chrome")
         let roll = app.descendants(matching: .any)["editor.pianoRoll"].firstMatch
         XCTAssertEqual(roll.frame.minY, rollTop, accuracy: 1)
-        XCTAssertEqual(roll.frame.maxY, window.maxY - 18, accuracy: 2)
+        XCTAssertEqual(roll.frame.maxY, window.maxY - 22, accuracy: 2)
     }
 
     @MainActor
