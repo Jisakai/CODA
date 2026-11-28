@@ -40,7 +40,7 @@ def partition():
 
 def unit_inventory():
     inventory = Counter()
-    for directory in ('CodaMusicTests', 'CodaInteractionTests', 'CodaAudioTests'):
+    for directory in ('CodaMusicTests', 'CodaInteractionTests', 'CodaAudioTests', 'CodaSidekickTests'):
         for path in (ROOT / 'Tests' / directory).rglob('*.swift'):
             text = path.read_text()
             classes = list(re.finditer(r'(?m)^\s*(?:final\s+)?class\s+(\w+)\s*:', text))

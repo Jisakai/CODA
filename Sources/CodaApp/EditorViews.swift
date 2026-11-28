@@ -1761,28 +1761,30 @@ private struct RadialMenuView: View {
                             : CodaDesignTokens.EditorSurface.radialPillOpacity))
                             .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
                             .position(center)
+                        let slotAccessibilityLabel: String = {
+                            if store.isPatternSqueezeMenu { return labels[slot] }
+                            if labels[slot].hasPrefix("More ") { return labels[slot] }
+                            if ring == .outer && slot == 3 { return "All chord qualities" }
+                            if let tool = store.radialTool(ring: ring, slot: slot) { return tool.title }
+                            return labels[slot]
+                        }()
                         ZStack {
                             if store.isPatternSqueezeMenu {
                                 Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot).symbol)
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .bold))
-                                    .accessibilityLabel(labels[slot])
                             } else if labels[slot].hasPrefix("More ") {
                                 Image(systemName: "arrow.right.circle.fill")
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .black))
-                                    .accessibilityLabel(labels[slot])
                             } else if ring == .outer && slot == 3 {
                                 Image(systemName: "square.grid.2x2.fill")
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .black))
-                                    .accessibilityLabel("All chord qualities")
                             } else if let tool = store.radialTool(ring: ring, slot: slot) {
                                 Image(systemName: tool.symbol)
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize,
                                                   weight: CodaDesignTokens.EditorSurface.toolIconWeight))
-                                    .accessibilityLabel(tool.title)
                             } else {
                                 Text(labels[slot])
                                     .font(CodaDesignTokens.Typography.font(size: 12, weight: .bold))
-                                    .accessibilityLabel(labels[slot])
                             }
                         }
                             .foregroundStyle(!enabled
@@ -1795,7 +1797,8 @@ private struct RadialMenuView: View {
                             .frame(width: layout.buttonDiameter * placement.scale,
                                    height: layout.buttonDiameter * placement.scale)
                             .position(point)
-                            .accessibilityElement(children: .combine)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(slotAccessibilityLabel)
                             .accessibilityIdentifier("radial.option.\(String(describing: ring)).\(slot)")
                             .accessibilityValue(enabled ? "available" : "unavailable")
                     }
@@ -1966,10 +1969,9 @@ private struct PatternOverlayView: View {
 
 private struct PatternControlsView: View {
     @Bindable var store: CodaEditorStore
-    // SwiftUI resets the entire draft on successful lift AND cancellation.
-    @GestureState private var swingDrag: PatternSwingDrag? = nil
+    @State private var swingPreview: Double? = nil
 
-    private var swingValue: Double { swingDrag?.preview ?? store.currentPatternSettings.swing }
+    private var swingValue: Double { swingPreview ?? store.currentPatternSettings.swing }
 
     var body: some View {
         HStack(spacing: CodaDesignTokens.Geometry.topBarControlGap) {
@@ -1986,30 +1988,10 @@ private struct PatternControlsView: View {
                 Text("Swing").font(CodaDesignTokens.Typography.font(size: 8, weight: .medium))
             }
             .frame(width: 44, height: 44)
-            .background(Color.white.opacity(0.001))
-            .contentShape(Rectangle())
-            .highPriorityGesture(DragGesture(minimumDistance: 0)
-                .updating($swingDrag) { value, drag, _ in
-                    var next = drag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
-                    next.update(verticalTranslation: Double(value.translation.height))
-                    drag = next
-                    if store.uiDiagnosticsEnabled {
-                        store.recordUIEvent("pattern.swing.changed translationY=\(value.translation.height) start=\(next.startValue) draft=\(next.preview)")
-                    }
-                }.onEnded { value in
-                    // GestureState may already have reset. Preview never writes settings,
-                    // so the committed setting is still the baseline in that case.
-                    let retainedDrag = swingDrag
-                    let drag = retainedDrag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
-                    let final = drag.valueToCommit(verticalTranslation: Double(value.translation.height))
-                    if let final { store.updatePatternSettings(swing: final) }
-                    if store.uiDiagnosticsEnabled {
-                        store.recordUIEvent("pattern.swing.ended dy=\(value.translation.height) start=\(drag.startValue) retained=\(retainedDrag != nil) requested=\(String(describing: final)) committed=\(store.currentPatternSettings.swing)")
-                    }
-                })
-            .onChange(of: swingDrag == nil) { _, inactive in
-                if inactive { store.recordUIEvent("pattern.swing.reset committed=\(store.currentPatternSettings.swing)") }
+            .overlay {
+                SwingDragSurface(store: store, preview: $swingPreview)
             }
+            .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Swing")
             .accessibilityValue("\(Int(swingValue * 100)) percent")
@@ -2039,5 +2021,93 @@ private struct PatternControlsView: View {
         .accessibilityIdentifier("pattern.controls")
         .onAppear { store.recordUIEvent("pattern.controls.appear") }
         .onDisappear { store.recordUIEvent("pattern.controls.disappear") }
+    }
+}
+
+private struct SwingDragSurface: UIViewRepresentable {
+    let store: CodaEditorStore
+    @Binding var preview: Double?
+
+    func makeUIView(context: Context) -> SwingDragTouchView {
+        let view = SwingDragTouchView()
+        view.store = store
+        view.onPreviewChange = { preview = $0 }
+        return view
+    }
+
+    func updateUIView(_ uiView: SwingDragTouchView, context: Context) {
+        uiView.store = store
+        uiView.onPreviewChange = { preview = $0 }
+    }
+}
+
+@MainActor
+private final class SwingDragTouchView: UIView {
+    var store: CodaEditorStore?
+    var onPreviewChange: ((Double?) -> Void)?
+    private var activeTouch: UITouch?
+    private var startY: CGFloat = 0
+    private var drag: PatternSwingDrag?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isMultipleTouchEnabled = false
+        isUserInteractionEnabled = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard activeTouch == nil,
+              let touch = touches.first(where: { $0.type == .direct }),
+              let store else { return }
+        activeTouch = touch
+        startY = touch.location(in: window ?? self).y
+        let next = PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+        drag = next
+        onPreviewChange?(next.preview)
+        if store.uiDiagnosticsEnabled {
+            store.recordUIEvent("pattern.swing.began y=\(startY) start=\(next.startValue)")
+        }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch),
+              var current = drag, let store else { return }
+        let dy = Double(touch.location(in: window ?? self).y - startY)
+        current.update(verticalTranslation: dy)
+        drag = current
+        onPreviewChange?(current.preview)
+        if store.uiDiagnosticsEnabled {
+            store.recordUIEvent("pattern.swing.changed translationY=\(dy) start=\(current.startValue) draft=\(current.preview)")
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch),
+              let store else { return }
+        let dy = Double(touch.location(in: window ?? self).y - startY)
+        let current = drag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
+        let final = current.valueToCommit(verticalTranslation: dy)
+        activeTouch = nil
+        drag = nil
+        onPreviewChange?(nil)
+        if let final { store.updatePatternSettings(swing: final) }
+        if store.uiDiagnosticsEnabled {
+            store.recordUIEvent("pattern.swing.ended dy=\(dy) start=\(current.startValue) requested=\(String(describing: final)) committed=\(store.currentPatternSettings.swing)")
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        activeTouch = nil
+        drag = nil
+        onPreviewChange?(nil)
+        if let store, store.uiDiagnosticsEnabled {
+            store.recordUIEvent("pattern.swing.reset committed=\(store.currentPatternSettings.swing)")
+        }
     }
 }

@@ -318,6 +318,7 @@ final class CodaLaunchTests: XCTestCase {
             XCTAssertTrue(synth.contains(control.frame))
         }
         app.buttons["synthRack.close"].tap()
+        XCTAssertTrue(rackElement.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["editor.bottomSynthRack"].exists)
     }
 
