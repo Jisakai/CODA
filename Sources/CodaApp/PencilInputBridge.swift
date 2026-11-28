@@ -224,6 +224,7 @@ struct PencilInputBridge: UIViewRepresentable {
             let point = recognizer.location(in: rootView)
             switch recognizer.state {
             case .began:
+                canvasFeedback?.prepare()
                 store.pencilTouchBegan(at: point)
                 if let angle = recognizer.latestRollAngle { store.pencilHover(at: point, rollAngle: angle) }
             case .changed:
@@ -241,7 +242,11 @@ struct PencilInputBridge: UIViewRepresentable {
         @objc private func handlePencilHover(_ recognizer: UIHoverGestureRecognizer) {
             guard let rootView else { return }
             switch recognizer.state {
-            case .began, .changed:
+            case .began:
+                canvasFeedback?.prepare()
+                store.pencilHover(at: recognizer.location(in: rootView), rollAngle: Double(recognizer.rollAngle))
+                emitDetentIfNeeded()
+            case .changed:
                 store.pencilHover(at: recognizer.location(in: rootView), rollAngle: Double(recognizer.rollAngle))
                 emitDetentIfNeeded()
             case .ended, .cancelled, .failed:
@@ -295,7 +300,7 @@ struct PencilInputBridge: UIViewRepresentable {
             let now = ProcessInfo.processInfo.systemUptime
             guard now - lastHapticTime >= CodaDesignTokens.Input.hapticMinimumInterval else { return }
             lastHapticTime = now
-            guard let point = store.transientPoint else { return }
+            guard let point = store.transientPoint ?? store.lastPencilLocation else { return }
             // Official DocC documents these canvas events, not a Pencil
             // intensity setter. Default/end-point emphasis also remains visual.
             if store.pencilFeedbackIsCompletion {

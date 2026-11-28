@@ -1078,8 +1078,7 @@ extension CodaEditorStore {
             return
         }
         guard let previous = chordRollAngle else { chordRollAngle = angle; return }
-        var degrees = (angle - previous) * 180 / .pi
-        while degrees > 180 { degrees -= 360 }; while degrees < -180 { degrees += 360 }
+        let degrees = Self.clockwiseBarrelDeltaDegrees(from: previous, to: angle)
         chordRollAngle = angle
         chordRollFraction += chordRollAccumulator.consume(degrees: degrees) * 360 / 24
         let detents = Int(chordRollFraction.rounded(.towardZero))
@@ -1096,11 +1095,12 @@ extension CodaEditorStore {
                 abs(candidates[lhs].reduce(0, +) - base.pitches.reduce(0, +)) < abs(candidates[rhs].reduce(0, +) - base.pitches.reduce(0, +))
             } ?? 0
             let index = min(candidates.count - 1, max(0, current + detents))
+            guard index != current else { return }
             let pitches = candidates[index]
             chordRollPreview = try ChordRollEditor.voicing(base, pitches: pitches)
             try session.audition(pitches: pitches)
             radialPreview = "Voicing \(index + 1) / \(candidates.count)"
-            triggerVisualDetent(at: point, intensity: 0.45, isCompletion: false)
+            triggerVisualDetent(at: point, intensity: 0.65, isCompletion: false)
         } catch { inlineError = String(describing: error) }
     }
 
@@ -1128,8 +1128,7 @@ extension CodaEditorStore {
             return
         }
         guard let previous = melodyNudgeAngle else { melodyNudgeAngle = angle; return }
-        var degrees = (angle - previous) * 180 / .pi
-        while degrees > 180 { degrees -= 360 }; while degrees < -180 { degrees += 360 }
+        let degrees = Self.clockwiseBarrelDeltaDegrees(from: previous, to: angle)
         melodyNudgeAngle = angle
         melodyNudgeFraction += melodyNudgeAccumulator.consume(degrees: degrees) * 360 / 18
         let detents = Int(melodyNudgeFraction.rounded(.towardZero))
@@ -1137,12 +1136,13 @@ extension CodaEditorStore {
         melodyNudgeFraction -= Double(detents)
         let currentNudge = melodyNudgePreview?.nudgeTicks ?? base.nudgeTicks
         let nextNudge = max(-120, min(120, currentNudge + detents * 5))
+        guard nextNudge != currentNudge else { return }
         do {
             melodyNudgePreview = try MelodyNote(id: base.id, startTick: base.startTick, durationTicks: base.durationTicks,
                 pitch: base.pitch, velocity: base.velocity, slide: base.slide, nudgeTicks: nextNudge)
             let sign = nextNudge > 0 ? "+" : ""
             radialPreview = "Nudge \(sign)\(nextNudge)t"
-            triggerVisualDetent(at: point, intensity: 0.45, isCompletion: false)
+            triggerVisualDetent(at: point, intensity: 0.55, isCompletion: false)
         } catch { inlineError = String(describing: error) }
     }
 

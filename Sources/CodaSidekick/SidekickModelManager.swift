@@ -22,7 +22,7 @@ public enum SidekickModelState: Equatable, Sendable {
 }
 
 public struct SidekickModelConfig: Sendable {
-    public static let repoID = "mlx-community/Qwen3-4B-4bit"
+    public static let repoID = "mlx-community/Qwen3-4B-Instruct-2507-gabliterated-4bit"
     public static let estimatedDownloadBytes: Int64 = 2_280_000_000 // ~2.28 GB verified HF size
     public static let minimumAvailableMemoryBytes: UInt64 = 3_200_000_000 // Conservative headroom check
     public static let idleUnloadSeconds: TimeInterval = 300 // Unload weights after 5 min idle

@@ -624,6 +624,8 @@ public enum RollDetentTracker {
     public static func crossed(from oldValue: Double, to newValue: Double,
                                spacing: Double = 0.05) -> Int {
         guard oldValue.isFinite, newValue.isFinite, spacing > 0 else { return 0 }
-        return abs(Int(floor(newValue / spacing)) - Int(floor(oldValue / spacing)))
+        let oldBucket = Int(floor((oldValue + 1e-9) / spacing))
+        let newBucket = Int(floor((newValue + 1e-9) / spacing))
+        return abs(newBucket - oldBucket)
     }
 }

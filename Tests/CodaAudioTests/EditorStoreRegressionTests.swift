@@ -1625,7 +1625,8 @@ final class EditorStoreRegressionTests: XCTestCase {
         let cutoff = store.value(for: .cutoff)
         let reverb = store.value(for: .reverb)
         store.pencilHover(at: at, rollAngle: 0)
-        store.pencilHover(at: at, rollAngle: .pi / 2)
+        // UIKit rollAngle decreases on clockwise Apple Pencil rotation.
+        store.pencilHover(at: at, rollAngle: -.pi / 2)
         XCTAssertGreaterThan(store.value(for: .reverb), reverb)
         XCTAssertEqual(store.value(for: .cutoff), cutoff)
         store.openSqueeze(at: at)
@@ -1653,25 +1654,26 @@ final class EditorStoreRegressionTests: XCTestCase {
         store.setValue(0.4, for: .cutoff)
         let initial = store.value(for: .cutoff)
 
-        store.pencilHover(at: at, rollAngle: 350 * .pi / 180)
-        for angle in [355.0, 359] {
+        // UIKit rollAngle decreases on clockwise rotation; test wrap across 0°/360°.
+        store.pencilHover(at: at, rollAngle: 10 * .pi / 180)
+        for angle in [5.0, 1] {
             store.pencilHover(at: at, rollAngle: angle * .pi / 180)
             XCTAssertEqual(store.value(for: .cutoff), initial, accuracy: 1e-6)
         }
-        // Crossing 360 degrees preserves direction and pays the dead zone once.
-        store.pencilHover(at: at, rollAngle: 3 * .pi / 180)
+        // Crossing 0/360 degrees clockwise preserves direction and pays the dead zone once.
+        store.pencilHover(at: at, rollAngle: 357 * .pi / 180)
         let excess = 13 - CodaDesignTokens.Input.barrelDeadZoneDegrees
         XCTAssertEqual(store.value(for: .cutoff), initial + excess / 360, accuracy: 1e-6)
-        for angle in [4.0, 5, 6] {
+        for (step, angle) in [356.0, 355, 354].enumerated() {
             store.pencilHover(at: at, rollAngle: angle * .pi / 180)
-            XCTAssertEqual(store.value(for: .cutoff), initial + (excess + angle - 3) / 360, accuracy: 1e-6)
+            XCTAssertEqual(store.value(for: .cutoff), initial + (excess + Double(step + 1)) / 360, accuracy: 1e-6)
         }
         for invalid in [Double.nan, .infinity, -.infinity] {
             store.pencilHover(at: at, rollAngle: invalid)
             XCTAssertEqual(store.value(for: .cutoff), initial + (excess + 3) / 360, accuracy: 1e-6)
         }
-        // Reverse across the same wrap without rearming the jitter allowance.
-        store.pencilHover(at: at, rollAngle: 359 * .pi / 180)
+        // Reverse counter-clockwise across the same wrap without rearming the jitter allowance.
+        store.pencilHover(at: at, rollAngle: 1 * .pi / 180)
         XCTAssertEqual(store.value(for: .cutoff), initial + (excess - 4) / 360, accuracy: 1e-6)
     }
 
@@ -1694,7 +1696,7 @@ final class EditorStoreRegressionTests: XCTestCase {
             let initial = store.value(for: .cutoff)
             if reset == "touchCancellation" { store.pencilTouchBegan(at: at) }
             store.pencilHover(at: at, rollAngle: 0)
-            store.pencilHover(at: at, rollAngle: .pi / 6)
+            store.pencilHover(at: at, rollAngle: -.pi / 6)
             let engaged = store.value(for: .cutoff)
             XCTAssertEqual(engaged, initial + excess / 360, accuracy: 1e-6, reset)
             switch reset {
@@ -1706,18 +1708,18 @@ final class EditorStoreRegressionTests: XCTestCase {
                 let otherInitial = store.value(for: .resonance)
                 store.pencilHover(at: other, rollAngle: .pi / 2)
                 XCTAssertEqual(store.value(for: .resonance), otherInitial, accuracy: 1e-6)
-                store.pencilHover(at: other, rollAngle: 2 * .pi / 3)
+                store.pencilHover(at: other, rollAngle: .pi / 3)
                 XCTAssertEqual(store.value(for: .resonance), otherInitial + excess / 360, accuracy: 1e-6)
             }
             // A distant new baseline must neither jump nor inherit activation.
-            for angle in [-150.0, -143, -139] {
+            for angle in [150.0, 143, 139] {
                 store.pencilHover(at: at, rollAngle: angle * .pi / 180)
                 XCTAssertEqual(store.value(for: .cutoff), engaged, accuracy: 1e-6, reset)
             }
-            store.pencilHover(at: at, rollAngle: -137 * .pi / 180)
+            store.pencilHover(at: at, rollAngle: 137 * .pi / 180)
             let resumed = engaged + (13 - CodaDesignTokens.Input.barrelDeadZoneDegrees) / 360
             XCTAssertEqual(store.value(for: .cutoff), resumed, accuracy: 1e-6, reset)
-            store.pencilHover(at: at, rollAngle: -136 * .pi / 180)
+            store.pencilHover(at: at, rollAngle: 136 * .pi / 180)
             XCTAssertEqual(store.value(for: .cutoff), resumed + 1.0 / 360, accuracy: 1e-6, reset)
         }
     }
@@ -1836,18 +1838,51 @@ final class EditorStoreRegressionTests: XCTestCase {
         let store = try makeStore()
         defer { store.session?.suspend() }
         store.setValue(0, for: .cutoff)
-        store.setValue(1, for: .cutoff)
+        store.setValue(0.2, for: .cutoff)
         XCTAssertEqual(store.pencilFeedbackSerial, 0)
         store.rollKnob(.cutoff, angle: 0, at: CGPoint(x: 1200, y: 400))
+        // Clockwise roll (rollAngle decreasing) increases cutoff across 5% detents.
         store.rollKnob(.cutoff, angle: -.pi / 2, at: CGPoint(x: 1200, y: 400))
         XCTAssertEqual(store.pencilFeedbackSerial, 1)
         XCTAssertFalse(store.pencilFeedbackIsCompletion)
+        XCTAssertNotNil(store.transientPoint)
         store.visualDetent = 0
         XCTAssertEqual(store.pencilFeedbackSerial, 1, "Flash expiry is not a new haptic event")
     }
 
-    func testPresetSelectionWorksIndependentlyOnBassAndMelodyLayers() {
-        let store = CodaEditorStore(audio: SilentEditorAudio())
+    @MainActor
+    func testBarrelRollClockwiseFiresFivePercentAndVoicingHaptics() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        let knobPoint = CGPoint(x: 640, y: 800)
+        store.setValue(0.22, for: .cutoff)
+        let before = store.pencilFeedbackSerial
+        store.rollKnob(.cutoff, angle: 0, at: knobPoint)
+        // Clockwise roll by 42 degrees -> 30 deg past 12 deg dead zone = +0.0833 -> crosses 0.25 and 0.30.
+        store.rollKnob(.cutoff, angle: -42 * .pi / 180, at: knobPoint)
+        XCTAssertGreaterThan(store.value(for: .cutoff), 0.29)
+        XCTAssertGreaterThan(store.pencilFeedbackSerial, before)
+        XCTAssertEqual(store.transientPoint, knobPoint)
+
+        // Counter-clockwise roll decreases the knob value.
+        let peak = store.value(for: .cutoff)
+        store.rollKnob(.cutoff, angle: 0, at: knobPoint)
+        XCTAssertLessThan(store.value(for: .cutoff), peak)
+
+        // Voicing barrel roll clockwise advances voicing and fires Pencil haptic feedback.
+        let region = try XCTUnwrap(store.regions.first)
+        let stripPoint = CGPoint(x: CodaDesignTokens.Geometry.pitchGutterWidth + 40, y: store.stripTop + 20)
+        let beforeVoicing = store.pencilFeedbackSerial
+        store.rollChordVoicing(region, angle: 0, at: stripPoint)
+        store.rollChordVoicing(region, angle: -.pi / 2, at: stripPoint)
+        XCTAssertGreaterThan(store.pencilFeedbackSerial, beforeVoicing)
+        XCTAssertNotNil(store.chordRollPreview)
+    }
+
+    @MainActor
+    func testPresetSelectionWorksIndependentlyOnBassAndMelodyLayers() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
         store.setActiveLayer(.chords)
         store.setPreset(0)
         XCTAssertEqual(store.activeLayerPreset, 0)

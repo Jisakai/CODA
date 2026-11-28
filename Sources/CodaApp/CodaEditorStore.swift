@@ -731,22 +731,35 @@ struct HoveredRollNote: Equatable {
         knobResetSelected = false
     }
 
+    /// Converts consecutive UIKit Pencil `rollAngle` samples (radians, where
+    /// clockwise rotation decreases `rollAngle`) into clockwise-positive degrees.
+    static func clockwiseBarrelDeltaDegrees(from previous: Double, to current: Double) -> Double {
+        var delta = (previous - current) * 180 / .pi
+        while delta > 180 { delta -= 360 }
+        while delta < -180 { delta += 360 }
+        return delta
+    }
+
     func rollKnob(_ knob: EditorKnob, angle: Double, at point: CGPoint) {
         guard angle.isFinite else { return }
         let previous = rollAngles[knob] ?? angle
         rollAngles[knob] = angle
-        var delta = (angle - previous) * 180 / .pi
-        if delta > 180 { delta -= 360 }
-        if delta < -180 { delta += 360 }
+        let delta = Self.clockwiseBarrelDeltaDegrees(from: previous, to: angle)
         var accumulator = rollAccumulators[knob] ?? BarrelRollAccumulator(
             deadZoneDegrees: CodaDesignTokens.Input.barrelDeadZoneDegrees)
         let adjustment = accumulator.consume(degrees: delta)
         rollAccumulators[knob] = accumulator
         guard adjustment != 0 else { return }
         lastPencilLocation = point
+        let oldValue = value(for: knob)
         let detentBefore = visualDetent
-        setValue(value(for: knob) + adjustment, for: knob)
-        if visualDetent != detentBefore {
+        setValue(oldValue + adjustment, for: knob)
+        let newValue = value(for: knob)
+        let crossedFivePercent = RollDetentTracker.crossed(
+            from: oldValue, to: newValue,
+            spacing: CodaDesignTokens.Input.knobDetentSpacing) > 0
+        if visualDetent != detentBefore || crossedFivePercent {
+            transientPoint = point
             pencilFeedbackSerial += 1
             pencilFeedbackIsCompletion = false
         }
@@ -1311,11 +1324,22 @@ struct HoveredRollNote: Equatable {
                     finishMelodyNudgeRoll()
                     let prev = cutoffRollAngle ?? rollAngle
                     cutoffRollAngle = rollAngle
-                    var delta = (rollAngle - prev) * 180 / .pi
-                    if delta > 180 { delta -= 360 }
-                    if delta < -180 { delta += 360 }
+                    let delta = Self.clockwiseBarrelDeltaDegrees(from: prev, to: rollAngle)
                     let adj = cutoffRollAccumulator.consume(degrees: delta)
-                    if adj != 0 { setValue(value(for: .cutoff) + adj, for: .cutoff) }
+                    if adj != 0 {
+                        let oldValue = value(for: .cutoff)
+                        let detentBefore = visualDetent
+                        setValue(oldValue + adj, for: .cutoff)
+                        let newValue = value(for: .cutoff)
+                        let crossedFivePercent = RollDetentTracker.crossed(
+                            from: oldValue, to: newValue,
+                            spacing: CodaDesignTokens.Input.knobDetentSpacing) > 0
+                        if visualDetent != detentBefore || crossedFivePercent {
+                            transientPoint = point
+                            pencilFeedbackSerial += 1
+                            pencilFeedbackIsCompletion = false
+                        }
+                    }
                 case .voicingAndNudge:
                     if let region = region(at: point) {
                         finishMelodyNudgeRoll()
