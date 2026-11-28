@@ -207,7 +207,7 @@ final class PerformanceCycleSource {
         let windowEndTick = window.end * MusicDefaults.ticksPerStep
         var nextExtraInstance: UInt64 = 10_000_000
         for track in activeExtra {
-            guard track.dspSlot >= Int(CODA_LAYER_COUNT), track.dspSlot < Int(CODA_MAX_TRACKS) else { continue }
+            guard track.dspSlot >= Int(CODA_LAYER_COUNT.rawValue), track.dspSlot < Int(CODA_MAX_TRACKS) else { continue }
             for note in track.notes {
                 guard note.endTick > windowStartTick, note.startTick < windowEndTick else { continue }
                 let clippedStart = max(note.startTick, windowStartTick) - windowStartTick

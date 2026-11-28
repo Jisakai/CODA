@@ -344,7 +344,7 @@ public final class MusicSession {
     @discardableResult
     public func addExtraLayer(kind: MusicLayer, name: String? = nil) -> ExtraLayerTrack? {
         let usedSlots = Set(extraLayers.map(\.dspSlot))
-        guard let freeSlot = (Int(CODA_LAYER_COUNT)..<Int(CODA_MAX_TRACKS)).first(where: { !usedSlots.contains($0) }) else {
+        guard let freeSlot = (Int(CODA_LAYER_COUNT.rawValue)..<Int(CODA_MAX_TRACKS)).first(where: { !usedSlots.contains($0) }) else {
             return nil
         }
         let sameKindCount = extraLayers.filter { $0.kind == kind }.count + 2
