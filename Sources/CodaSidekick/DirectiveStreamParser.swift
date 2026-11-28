@@ -64,7 +64,7 @@ public struct SidekickDirective: Codable, Hashable, Sendable {
     }
 
     public func toSteeringBias(validating vocabulary: ChordVocabulary) -> HarmonicSteeringBias {
-        let validQualities = harmonicBias.preferredQualities.filter { vocabulary.quality($0) != nil }
+        let validQualities = harmonicBias.preferredQualities.filter { (try? vocabulary.quality($0)) != nil }
         return HarmonicSteeringBias(
             tensionLevel: harmonicBias.tensionLevel,
             preferredQualities: validQualities,
