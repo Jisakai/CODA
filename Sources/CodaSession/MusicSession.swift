@@ -1267,10 +1267,18 @@ public final class MusicSession {
     /// replacement renderer. Internal so the next UI cannot use it as export.
     func renderOffline(frames: UInt32, pumping: Bool = true) throws -> Double {
         if pumping { pump() }
-        var energy = 0.0
-        try audio.renderOffline(frames: frames, energy: &energy)
-        if pumping { pump() }
-        return energy
+        var totalEnergy = 0.0
+        var remaining = frames
+        let chunkLimit: UInt32 = pumping ? 48_000 : frames
+        while remaining > 0 {
+            let chunk = min(remaining, max(1, chunkLimit))
+            var chunkEnergy = 0.0
+            try audio.renderOffline(frames: chunk, energy: &chunkEnergy)
+            totalEnergy += chunkEnergy
+            remaining -= chunk
+            if pumping { pump() }
+        }
+        return totalEnergy
     }
 
     // Internal observation of the real serialized producer for deterministic

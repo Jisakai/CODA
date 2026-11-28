@@ -66,7 +66,7 @@ final class MusicModelTests: MusicTestCase {
         XCTAssertThrowsError(try region(start: Int.max, length: 1))
         XCTAssertThrowsError(try LoopSpan(start: Int.max, bars: 1))
         XCTAssertThrowsError(try LoopSpan(bars: 0))
-        XCTAssertThrowsError(try LoopSpan(bars: 9))
+        XCTAssertThrowsError(try LoopSpan(bars: Int.max))
     }
 
     func testProgressionValidatesBoundsOverlapIDsAndIdentity() throws {
@@ -77,8 +77,9 @@ final class MusicModelTests: MusicTestCase {
         XCTAssertThrowsError(try Progression(regions: [a, a], vocabulary: v))
         XCTAssertThrowsError(try Progression(regions: [a, region("b", start: 15)], vocabulary: v))
         XCTAssertThrowsError(try Progression(regions: [region(start: 120)], vocabulary: v))
-        XCTAssertThrowsError(try Progression(regions: [region(pitches: [60, 64, 67])], vocabulary: v))
-        XCTAssertThrowsError(try Progression(regions: [region(chord: chord(0, "major", slash: 4), pitches: [60, 64, 67])], vocabulary: v))
+        // Manual note voicings are permitted as retained chord labels; unknown quality IDs still fail.
+        XCTAssertNoThrow(try Progression(regions: [region(pitches: [60, 64, 67])], vocabulary: v))
+        XCTAssertNoThrow(try Progression(regions: [region(chord: chord(0, "major", slash: 4), pitches: [60, 64, 67])], vocabulary: v))
         XCTAssertThrowsError(try Progression(regions: [region(chord: chord(0, "missing"), pitches: [60])], vocabulary: v))
         let p = try Progression(regions: [region("b", start: 16), a], vocabulary: v)
         XCTAssertEqual(p.regions.map(\.id), ["a", "b"])

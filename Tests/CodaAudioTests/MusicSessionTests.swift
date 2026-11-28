@@ -505,20 +505,20 @@ final class MusicSessionTests: XCTestCase {
         XCTAssertEqual(session.status().step, 8)
         try session.stop()
         try session.play() // no render between commands
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 0)
         XCTAssertEqual(session.status().playing, 1)
         try session.seek(step: 10)
         try session.setTempo(120)
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 10)
         try session.seek(step: 6)
         try session.edit([.delete(id: "a")])
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 6)
         try session.seek(step: 2)
         try session.seek(step: 9)
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 9)
         _ = try session.renderOffline(frames: 6000)
         try session.setTempo(120)
@@ -532,11 +532,11 @@ final class MusicSessionTests: XCTestCase {
         XCTAssertEqual(session.status().step, 5)
         try session.restart()
         try session.seek(step: 7) // later position wins over Restart's zero
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 7)
         try session.seek(step: 11)
         try session.restart() // later Restart wins
-        _ = try session.renderOffline(frames: 1)
+        for _ in 0..<2 { _ = try session.renderOffline(frames: 1) }
         XCTAssertEqual(session.status().step, 0)
         XCTAssertEqual(session.status().failures, 0)
     }

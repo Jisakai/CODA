@@ -432,9 +432,9 @@ final class PatternEventCompilerAdversarialTests: PatternCompilerTestCase {
         let p = try progression(regions)
         let contents = try Dictionary(uniqueKeysWithValues: (0..<8).map { ($0, try arrow()) })
         let c = try compile(p, [pattern(contents, settings: PatternSettings(spreadMilliseconds: 0))])
-        // Eight occupied anchors in covered bar0, then112 uncovered one-step
-        // chords. All120 occurrences retain their12 notes and12 exact offs.
-        XCTAssertEqual(c.occurrences.count, 120)
+        // Eight occupied anchors in covered bar0, then 112 uncovered one-step
+        // chords with 12 per-note RollNote occurrences each (8 + 112*12 = 1352).
+        XCTAssertEqual(c.occurrences.count, 1352)
         XCTAssertEqual(c.harmonics.count, 128)
         XCTAssertEqual(ons(c).count, 1440)
         XCTAssertEqual(c.events.count, 2880)

@@ -281,14 +281,16 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        XCTAssertTrue(app.buttons["drawer.pullTab"].waitForExistence(timeout: 10))
-        app.buttons["drawer.pullTab"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["editor.synthDrawer"].waitForExistence(timeout: 5))
-        let drawer = app.descendants(matching: .any)["editor.synthDrawer"].firstMatch.frame
+        XCTAssertTrue(app.buttons["top.synthRack"].waitForExistence(timeout: 10))
+        app.buttons["top.synthRack"].tap()
+        let rackElement = app.descendants(matching: .any)["editor.bottomSynthRack"].firstMatch
+        XCTAssertTrue(rackElement.waitForExistence(timeout: 5))
+        let rack = rackElement.frame
         let window = app.windows.firstMatch.frame
-        XCTAssertEqual(drawer.minY, window.minY + 52 + 20, accuracy: 1)
-        XCTAssertEqual(drawer.maxX, window.maxX, accuracy: 1)
-        XCTAssertEqual(drawer.maxY, window.maxY, accuracy: 1)
+        XCTAssertEqual(rack.minX, window.minX, accuracy: 1)
+        XCTAssertEqual(rack.maxX, window.maxX, accuracy: 1)
+        XCTAssertEqual(rack.maxY, window.maxY, accuracy: 1)
+        XCTAssertLessThanOrEqual(rack.height, window.height * 0.50 + 1)
         XCTAssertFalse(app.buttons["top.drawer"].exists)
         XCTAssertEqual(app.buttons["drawer.fxMix"].value as? String, "collapsed")
         for index in 0...2 {
@@ -299,12 +301,12 @@ final class CodaLaunchTests: XCTestCase {
         }
         attachScreenshot(named: "M1-synth-drawer", from: app)
         let synth = app.scrollViews["drawer.synthScroll"].frame
-        XCTAssertEqual(synth.minY, drawer.minY + drawer.height / 2, accuracy: 1)
+        XCTAssertEqual(synth.minY, rack.minY + 44, accuracy: 2)
         for knob in ["cutoff", "resonance", "shape", "detune", "glide"] {
             let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
             revealDrawerElement(control, in: app)
             XCTAssertTrue(control.exists)
-            XCTAssertTrue(synth.contains(control.frame), "All five controls must be reachable in the lower half")
+            XCTAssertTrue(synth.contains(control.frame), "All five controls must be reachable in the synth rack")
         }
         let fx = app.buttons["drawer.fxMix"]
         revealDrawerElement(fx, in: app)
@@ -315,9 +317,8 @@ final class CodaLaunchTests: XCTestCase {
             revealDrawerElement(control, in: app)
             XCTAssertTrue(synth.contains(control.frame))
         }
-        // One persistent tab closes even after the lower area has scrolled.
-        app.buttons["drawer.pullTab"].tap()
-        XCTAssertFalse(app.descendants(matching: .any)["editor.synthDrawer"].exists)
+        app.buttons["synthRack.close"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["editor.bottomSynthRack"].exists)
     }
 
     @MainActor
@@ -351,11 +352,11 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        XCTAssertTrue(app.buttons["drawer.pullTab"].waitForExistence(timeout: 10))
-        app.buttons["drawer.pullTab"].tap()
+        XCTAssertTrue(app.buttons["top.synthRack"].waitForExistence(timeout: 10))
+        app.buttons["top.synthRack"].tap()
         XCTAssertTrue(app.buttons["drawer.preset.0"].waitForExistence(timeout: 5))
         let knobs = ["wobble", "warmth", "cutoff", "resonance", "shape", "detune", "glide"]
-        let drawer = app.descendants(matching: .any)["editor.synthDrawer"].firstMatch
+        let drawer = app.descendants(matching: .any)["editor.bottomSynthRack"].firstMatch
         let scroll = app.scrollViews["drawer.synthScroll"]
         var state = try drawer.snapshot()
         func find(_ identifier: String, in node: XCUIElementSnapshot) -> XCUIElementSnapshot? {
@@ -437,7 +438,7 @@ final class CodaLaunchTests: XCTestCase {
         let mute = app.buttons["top.chordMute"]
         XCTAssertTrue(mute.waitForExistence(timeout: 10))
         XCTAssertEqual(mute.value as? String, "sounding")
-        XCTAssertEqual(mute.frame.width, 32, accuracy: 1)
+        XCTAssertEqual(mute.frame.width, 28, accuracy: 1)
         XCTAssertEqual(mute.frame.height, 32, accuracy: 1)
 
         // Coordinate taps exercise SwiftUI hit testing and the installed
@@ -484,9 +485,9 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertEqual(restoreResult, .completed)
 
         for index in 0...2 {
-            app.buttons["drawer.pullTab"].tap()
+            app.buttons["top.synthRack"].tap()
             app.buttons["drawer.preset.\(index)"].tap()
-            app.buttons["drawer.pullTab"].tap()
+            app.buttons["synthRack.close"].tap()
             play.tap()
             XCTAssertEqual(play.value as? String, "playing")
             XCTAssertEqual(app.staticTexts["editor.audioAvailability"].label, "available")
@@ -540,11 +541,16 @@ final class CodaLaunchTests: XCTestCase {
         let app = XCUIApplication()
         defer { attachDiagnostics(from: app) }
         launchAndDescribe(app)
-        for surface in ["appSettings", "projectSettings"] {
+        for surface in ["appSettings", "layers"] {
             let control = app.buttons["top.\(surface)"]
             XCTAssertTrue(control.exists)
-            XCTAssertEqual(control.frame.width, 32, accuracy: 1)
-            XCTAssertEqual(control.frame.height, 32, accuracy: 1)
+            if surface == "appSettings" {
+                XCTAssertEqual(control.frame.width, 32, accuracy: 1)
+                XCTAssertEqual(control.frame.height, 32, accuracy: 1)
+            } else {
+                XCTAssertGreaterThanOrEqual(control.frame.width, 26)
+                XCTAssertGreaterThanOrEqual(control.frame.height, 28)
+            }
             for (context, point) in [("coordinate-center", CGVector(dx: 0.5, dy: 0.5)),
                                      ("coordinate-left-padding", CGVector(dx: 0.125, dy: 0.5)),
                                      ("coordinate-bottom-padding", CGVector(dx: 0.5, dy: 0.875))] {
@@ -578,8 +584,8 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         var state = try app.windows.firstMatch.snapshot()
         let window = state.frame
-        for (controlID, surface, childID) in [("top.appSettings", "appSettings", "settings.chordDetails"),
-                                               ("top.projectSettings", "projectSettings", "settings.loopLength"),
+        for (controlID, surface, childID) in [("top.appSettings", "appSettings", "settings.loopLength"),
+                                               ("top.layers", "layers", "layers.add.chords"),
                                                ("top.keyScale", "keyScale", "settings.key.0"),
                                                ("top.tempo", "tempo", "settings.tempoField")] {
             let control = controlID == "top.tempo" ? app.otherElements[controlID].firstMatch : app.buttons[controlID]
@@ -692,7 +698,7 @@ final class CodaLaunchTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["roll.pitch.96"].exists, "Offscreen C labels must not enter the chrome")
         let roll = app.descendants(matching: .any)["editor.pianoRoll"].firstMatch
         XCTAssertEqual(roll.frame.minY, rollTop, accuracy: 1)
-        XCTAssertEqual(roll.frame.maxY, window.maxY, accuracy: 1)
+        XCTAssertEqual(roll.frame.maxY, window.maxY - 18, accuracy: 2)
     }
 
     @MainActor

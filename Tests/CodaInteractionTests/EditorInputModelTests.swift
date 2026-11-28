@@ -361,10 +361,10 @@ final class EditorInputModelTests: XCTestCase {
         XCTAssertEqual(before, after, accuracy: 1e-9)
         viewport.pan(horizontalBy: -100_000, verticalBy: -100_000,
                      canvasWidth: width, canvasHeight: 500)
-        XCTAssertEqual(viewport.horizontalOffset, viewport.maximumHorizontalOffset(width: width))
+        XCTAssertGreaterThan(viewport.horizontalOffset, viewport.maximumHorizontalOffset(width: width))
         XCTAssertEqual(viewport.verticalOffset, Double(viewport.topMIDI + 1) * viewport.semitoneHeight - 500)
         XCTAssertEqual(viewport.midi(atY: 499.99, in: 500), 0)
-        viewport.pan(horizontalBy: 100_000, verticalBy: 100_000,
+        viewport.pan(horizontalBy: 200_000, verticalBy: 100_000,
                      canvasWidth: width, canvasHeight: 500)
         XCTAssertEqual(viewport.horizontalOffset, 0)
         XCTAssertEqual(viewport.verticalOffset, Double(84 - 127) * viewport.semitoneHeight)

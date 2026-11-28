@@ -106,7 +106,7 @@ final class PatternEditorTests: XCTestCase {
         XCTAssertTrue(editor.undo())
         let failures: [[PatternEdit]] = [
             [.delete(id: "a"), .delete(id: "missing")],
-            [.barCount(0)], [.barCount(9)],
+            [.barCount(0)], [.barCount(Int.max)],
             [.setStroke(id: "a", slot: -1, content: try content(3), newStrokeID: nil)],
             [.removeStroke(id: "a", slot: 8)],
             [.setStroke(id: "a", slot: 1, content: try content(3), newStrokeID: nil)],

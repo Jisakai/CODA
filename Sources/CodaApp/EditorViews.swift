@@ -377,16 +377,6 @@ private struct EditorTopBar: View {
         .accessibilityLabel("Toggle AI Sidekick")
         .accessibilityIdentifier("top.sidekick")
 
-        if store.patternEditing {
-            PatternControlsView(store: store)
-                .onGeometryChange(for: CGRect.self) {
-                    $0.frame(in: .named("editor.root"))
-                } action: {
-                    store.recordPatternControlsFrame($0)
-                }
-                .onDisappear { store.recordPatternControlsFrame(.zero) }
-        }
-
         // Hidden AX readouts preserved for CI UI tests
         HStack(spacing: 0) {
             Text("Font registration")
@@ -419,6 +409,16 @@ private struct EditorTopBar: View {
                     .accessibilityIdentifier("editor.uiDiagnostics")
                     .accessibilityValue(store.uiDiagnosticReport)
             }
+        }
+
+        if store.patternEditing {
+            PatternControlsView(store: store)
+                .onGeometryChange(for: CGRect.self) {
+                    $0.frame(in: .named("editor.root"))
+                } action: {
+                    store.recordPatternControlsFrame($0)
+                }
+                .onDisappear { store.recordPatternControlsFrame(.zero) }
         }
     }
 
@@ -1760,7 +1760,7 @@ private struct RadialMenuView: View {
                             : CodaDesignTokens.EditorSurface.radialPillOpacity))
                             .frame(width: (radius + thickness / 2) * 2, height: (radius + thickness / 2) * 2)
                             .position(center)
-                        Group {
+                        ZStack {
                             if store.isPatternSqueezeMenu {
                                 Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot).symbol)
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .bold))
@@ -1794,6 +1794,7 @@ private struct RadialMenuView: View {
                             .frame(width: layout.buttonDiameter * placement.scale,
                                    height: layout.buttonDiameter * placement.scale)
                             .position(point)
+                            .accessibilityElement(children: .combine)
                             .accessibilityIdentifier("radial.option.\(String(describing: ring)).\(slot)")
                             .accessibilityValue(enabled ? "available" : "unavailable")
                     }
@@ -1984,8 +1985,9 @@ private struct PatternControlsView: View {
                 Text("Swing").font(CodaDesignTokens.Typography.font(size: 8, weight: .medium))
             }
             .frame(width: 44, height: 44)
+            .background(Color.white.opacity(0.001))
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
+            .highPriorityGesture(DragGesture(minimumDistance: 0)
                 .updating($swingDrag) { value, drag, _ in
                     var next = drag ?? PatternSwingDrag(startValue: store.currentPatternSettings.swing)
                     next.update(verticalTranslation: Double(value.translation.height))

@@ -55,16 +55,17 @@ final class PatternModelTests: XCTestCase {
     }
 
     func testBarRangesRejectOverflowAndInvalidBounds() throws {
-        for (start, length) in [(-1, 1), (0, 0), (0, -1), (8, 1), (0, 9),
+        let maxBars = Int.max / MusicDefaults.stepsPerBar / MusicDefaults.ticksPerStep
+        for (start, length) in [(-1, 1), (0, 0), (0, -1), (maxBars, 1), (0, maxBars + 1),
                                 (Int.max, 1), (1, Int.max), (Int.min, Int.min)] {
             XCTAssertThrowsError(try PatternBarRange(start: start, length: length))
         }
         XCTAssertEqual(try PatternBarRange(start: 0, length: 8).end, 8)
         XCTAssertEqual(try PatternBarRange(start: 7, length: 1).end, 8)
-        for count in [Int.min, -1, 0, 9, Int.max] {
+        for count in [Int.min, -1, 0, maxBars + 1, Int.max] {
             XCTAssertThrowsError(try PatternArrangement(barCount: count))
         }
-        for count in 1...8 { XCTAssertEqual(try PatternArrangement(barCount: count).barCount, count) }
+        for count in 1...16 { XCTAssertEqual(try PatternArrangement(barCount: count).barCount, count) }
     }
 
     func testRegionsRequireEightSlotsAndNonemptyUniqueIDsInSeparateNamespaces() throws {
@@ -117,7 +118,7 @@ final class PatternModelTests: XCTestCase {
         XCTAssertEqual(range.end, 4)
         XCTAssertNoThrow(try PatternDefaults.defaultScope.resolve(loop: loop, barCount: 4))
         XCTAssertThrowsError(try PatternDefaults.defaultScope.resolve(loop: loop, barCount: 3))
-        for count in [0, 9, Int.max] {
+        for count in [0, Int.max] {
             XCTAssertThrowsError(try PatternDefaults.defaultScope.resolve(loop: loop, barCount: count))
         }
         XCTAssertEqual(try PatternDefaults.defaultScope.resolve(loop: LoopSpan(start: 112, bars: 1), barCount: 8),

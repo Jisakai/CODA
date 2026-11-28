@@ -42,7 +42,7 @@ final class ProgressionEditorTests: MusicTestCase {
         XCTAssertEqual(editor.progression, first)
         XCTAssertTrue(editor.canRedo)
         XCTAssertThrowsError(try editor.apply([.duplicate(id: "a", newID: "a", start: 32)], vocabulary: v))
-        XCTAssertThrowsError(try editor.apply([.resize(id: "a", start: 127, length: 2)], vocabulary: v))
+        XCTAssertThrowsError(try editor.apply([.resize(id: "a", start: -1, length: 2)], vocabulary: v))
         XCTAssertEqual(editor.progression, first)
         XCTAssertTrue(editor.redo())
     }

@@ -1566,7 +1566,8 @@ final class CodaEditorStore {
     }
 
     func knob(at point: CGPoint) -> EditorKnob? {
-        guard (synthRackOpen || drawerOpen), !chromeHidden else { return nil }
+        guard (synthRackOpen || (drawerOpen && fxExpanded)), !chromeHidden else { return nil }
+        if !synthRackOpen && point.y < synthTop { return nil }
         return EditorKnob.allCases.first { knob in
             guard let frame = knobFrames[knob], !frame.isEmpty, frame.contains(point) else { return false }
             let radius = min(frame.width, frame.height) / 2
