@@ -92,8 +92,11 @@ struct BottomSynthRackView: View {
                 Image(systemName: "chevron.down.circle.fill")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.mutedInk)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.06), in: Circle())
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Close synth rack")
             .accessibilityIdentifier("synthRack.close")
         }

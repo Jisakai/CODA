@@ -1769,6 +1769,7 @@ private struct RadialMenuView: View {
                             return labels[slot]
                         }()
                         ZStack {
+                            Color.white.opacity(0.001)
                             if store.isPatternSqueezeMenu {
                                 Image(systemName: ProcreateIcons.rollRadialSymbol(for: slot).symbol)
                                     .font(.system(size: CodaDesignTokens.EditorSurface.toolIconSize, weight: .bold))
@@ -1796,11 +1797,12 @@ private struct RadialMenuView: View {
                             .lineLimit(1).minimumScaleFactor(0.85)
                             .frame(width: layout.buttonDiameter * placement.scale,
                                    height: layout.buttonDiameter * placement.scale)
-                            .position(point)
+                            .contentShape(Rectangle())
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(slotAccessibilityLabel)
                             .accessibilityIdentifier("radial.option.\(String(describing: ring)).\(slot)")
                             .accessibilityValue(enabled ? "available" : "unavailable")
+                            .position(point)
                     }
                 }
                 Circle().fill(CodaDesignTokens.Colors.primaryInk.opacity(0.6))
