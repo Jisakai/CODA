@@ -1004,7 +1004,7 @@ public final class MusicSession {
     }
 
     /// Encodes interleaved stereo Float32 samples into a standard 24-bit PCM RIFF WAVE container.
-    public static func encodeWAV24Stereo(interleavedFloatData: Data, sampleRate: Int) -> Data {
+    nonisolated public static func encodeWAV24Stereo(interleavedFloatData: Data, sampleRate: Int) -> Data {
         let sampleCount = interleavedFloatData.count / MemoryLayout<Float>.size
         let numChannels: UInt16 = 2
         let bitsPerSample: UInt16 = 24

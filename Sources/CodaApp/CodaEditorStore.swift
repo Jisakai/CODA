@@ -504,7 +504,7 @@ struct HoveredRollNote: Equatable {
         let width = Double(contentWidth)
         let stepWidth = viewport.stepWidth(in: width)
         guard width > 0, stepWidth > 0 else { return }
-        let rawStep = viewport.firstVisibleStep + localX / stepWidth
+        let rawStep = (localX + viewport.horizontalOffset) / stepWidth
         var step = Int(rawStep.rounded())
         // Magnetically snap to exact bar starts when within 10pt of a bar line so
         // dragging to bar 3 lands dead-on step 32 rather than 3 ± 1/16.
