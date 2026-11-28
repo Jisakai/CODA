@@ -70,13 +70,13 @@ public final class SidekickEngine {
     public var isTyping: Bool = false
 
     private let modelManager: SidekickModelManager
-    private let predictor: any SteerableChordSuggestionProvider
+    private let predictor: (any SteerableChordSuggestionProvider)?
     private let solver: VoiceLeadingSolver
     private var activeStreamTask: Task<Void, Never>?
 
     public init(
         modelManager: SidekickModelManager = SidekickModelManager(),
-        predictor: any SteerableChordSuggestionProvider,
+        predictor: (any SteerableChordSuggestionProvider)? = nil,
         solver: VoiceLeadingSolver = VoiceLeadingSolver()
     ) {
         self.modelManager = modelManager
@@ -122,6 +122,7 @@ public final class SidekickEngine {
 
     public func send(
         prompt: String,
+        key: MusicalKey,
         progression: Progression,
         tempo: Double,
         vocabulary: ChordVocabulary
@@ -136,7 +137,7 @@ public final class SidekickEngine {
         isStreaming = true
 
         let instructions = PersonaPrompt.systemInstructions(
-            key: progression.key,
+            key: key,
             tempo: tempo,
             regions: progression.regions,
             vocabulary: vocabulary
@@ -202,12 +203,12 @@ public final class SidekickEngine {
                let parsed = Self.parseSeedChord(directive.seedChords[index], vocabulary: vocabulary) {
                 chosenChord = parsed
             } else {
-                let ranked = predictor.steeredSuggestions(
+                let ranked = (try? predictor?.steeredSuggestions(
                     in: progression,
                     at: startStep,
                     bias: bias,
                     limit: 3
-                )
+                )) ?? []
                 guard let best = ranked.first else { continue }
                 chosenChord = best.chord
             }
@@ -284,7 +285,7 @@ public final class SidekickEngine {
         let slashBass = bassPart.flatMap { parsePitchClassPrefix($0)?.0 }
 
         if let exact = vocabulary.qualities.first(where: { $0.symbol.caseInsensitiveCompare(suffix) == .orderedSame || $0.id.caseInsensitiveCompare(suffix) == .orderedSame }) {
-            return Chord(rootPitchClass: rootPC, qualityID: exact.id, slashBassPitchClass: slashBass)
+            return try? Chord(root: rootPC, qualityID: exact.id, slashBass: slashBass)
         }
         return nil
     }

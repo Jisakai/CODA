@@ -274,9 +274,9 @@ final class CodaEditorStore {
         self.session = session
         self.startupError = startupError
         self.uiDiagnosticsEnabled = uiDiagnosticsEnabled
-        self.sidekick = SidekickEngine()
+        self.sidekick = SidekickEngine(predictor: session?.predictor)
         self.chorusAmount = Double(session?.mixerControls.chorus_amount ?? 0.16)
-        self.autosaveRecoveryDocument = projectHub.loadAutosave()
+        self.autosaveRecoveryDocument = projectHub.loadAutosaveRecovery()
         projectHub.refreshIndex()
     }
 
@@ -2036,14 +2036,13 @@ extension CodaEditorStore {
 
     func sendSidekickPrompt(_ text: String) {
         guard let session else { return }
-        let context = SidekickSessionContext(
+        sidekick.send(
+            prompt: text,
             key: key,
+            progression: session.progression,
             tempo: tempo,
-            loopBars: max(1, loop.length / MusicDefaults.stepsPerBar),
-            regions: regions,
             vocabulary: session.vocabulary
         )
-        sidekick.send(text, context: context)
     }
 
     // MARK: Project Actions (Unified Wrench Settings -> Project Tab)
@@ -2221,7 +2220,7 @@ extension CodaEditorStore {
         autosaveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            try? self.projectHub.saveAutosave(self.makeCurrentProjectDocument())
+            self.projectHub.writeAutosave(self.makeCurrentProjectDocument())
         }
         autosaveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
@@ -2230,7 +2229,7 @@ extension CodaEditorStore {
     func saveCurrentProject() {
         do {
             let doc = makeCurrentProjectDocument()
-            try projectHub.save(doc)
+            _ = try projectHub.save(doc)
             knobReadout = "Saved \(doc.name)"
             inlineError = nil
         } catch { setError(error) }
@@ -2246,12 +2245,12 @@ extension CodaEditorStore {
     }
 
     func createNewProject(name: String? = nil) {
-        let count = projectHub.summaries.count + 1
+        let count = projectHub.projects.count + 1
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let title = trimmed.isEmpty ? "Sketch \(count)" : trimmed
         let doc = CodaProjectDocument(id: UUID().uuidString, name: title)
         applyProjectDocument(doc)
-        try? projectHub.save(doc)
+        _ = try? projectHub.save(doc)
         projectHubOpen = false
     }
 
@@ -2280,9 +2279,10 @@ extension CodaEditorStore {
     }
 
     func exportMIDIURL(projectID: String? = nil) -> URL? {
+        guard let session else { return nil }
         do {
             let doc = try projectID.map { try projectHub.load(id: $0) } ?? makeCurrentProjectDocument()
-            let data = StandardMIDIWriter.export(document: doc)
+            let data = try MIDIExporter.export(document: doc, vocabulary: session.vocabulary)
             let safeName = doc.name.replacingOccurrences(of: "/", with: "-")
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName).mid")
             try data.write(to: url, options: .atomic)
@@ -2315,7 +2315,7 @@ extension CodaEditorStore {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let doc = try decoder.decode(CodaProjectDocument.self, from: data)
-            try projectHub.save(doc)
+            _ = try projectHub.save(doc)
             applyProjectDocument(doc)
             projectHubOpen = false
             knobReadout = "Imported \(doc.name)"
@@ -2359,11 +2359,9 @@ extension CodaEditorStore {
 
     func importSoundFont(from url: URL) {
         do {
-            let item = try pluginHost.importSoundFont(from: url)
+            let item = try pluginHost.importSoundFont(from: url, for: activeLayer)
             if let extraID = activeExtraLayerID {
                 setExtraLayerPlugin(item.name, for: extraID)
-            } else {
-                pluginHost.assignSoundFont(item.id, to: activeLayer)
             }
             knobReadout = "Loaded \(item.name)"
             inlineError = nil

@@ -71,7 +71,7 @@ static void test_performance_admission() {
     }
     require(inspect(d).delivered==0&&held_performance(d)==0,"invalid admission leaves render untouched");
     // Invalid future events must not change ordering/count admission.
-    auto badLayer=good;badLayer.layer=CODA_LAYER_COUNT;
+    auto badLayer=good;badLayer.layer=CODA_MAX_TRACKS;
     require(!coda_dsp_push_performance_event(d,&badLayer),"reject out-of-range layer");
     for(int i=0;i<CODA_DSP_MAX_EVENTS_PER_SAMPLE;i++)if(i%2)push_performance(d,good);else event(d,24000,1,CODA_EVENT_ON,61);
     require(!coda_dsp_push_performance_event(d,&good),"mixed limit+1 same sample rejected");

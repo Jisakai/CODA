@@ -320,7 +320,7 @@ static void multiLayerTransport() {
     fillUnisonWindow(p->initial_cycle,0,2); // sustain into next window
     // Out-of-range layer must be rejected.
     auto badLayer=std::make_unique<CodaPerformancePlan>(*p);
-    badLayer->initial_cycle.events[0].layer=CODA_LAYER_COUNT;
+    badLayer->initial_cycle.events[0].layer=CODA_MAX_TRACKS;
     uint64_t g=0;
     check(coda_transport_publish_performance(o.t,badLayer.get(),&g)==-1,"out-of-range layer rejected");
     // Same-layer duplicate pitch must still be rejected.
@@ -361,7 +361,7 @@ static void multiLayerTransport() {
     // 3. Per-layer audition (Bass & Melody) with validation and zero allocations.
     const uint8_t bassPitch[]={40};
     const uint8_t melPitch[]={72};
-    check(coda_transport_audition_layer(o.t,CODA_LAYER_COUNT,bassPitch,1,512)==-1,"invalid audition layer rejected");
+    check(coda_transport_audition_layer(o.t,CODA_MAX_TRACKS,bassPitch,1,512)==-1,"invalid audition layer rejected");
     // Unmute Bass only and audition Bass layer.
     m.layers[CODA_LAYER_CHORDS].muted=1;
     m.layers[CODA_LAYER_BASS].muted=0;

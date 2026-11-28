@@ -1571,12 +1571,14 @@ private struct EditorSettingsPopover: View {
                 .font(CodaDesignTokens.Typography.font(size: 10, weight: .black))
                 .foregroundStyle(CodaDesignTokens.Colors.sidekick)
             HStack {
-                Text(store.sidekick.modelManager.statusText)
+                Text(sidekickModelStatusText)
                     .font(CodaDesignTokens.Typography.font(size: 11, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
                 Spacer()
-                if !store.sidekick.modelManager.isReady {
-                    Button { store.sidekick.modelManager.startDownload() } label: {
+                if case .ready = store.sidekick.modelState {
+                    EmptyView()
+                } else {
+                    Button { store.sidekick.startModelDownload() } label: {
                         Text("Download 2.3 GB")
                             .font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
                             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -1590,6 +1592,17 @@ private struct EditorSettingsPopover: View {
                 Text(error).font(CodaDesignTokens.Typography.font(size: 10, weight: .bold))
                     .foregroundStyle(CodaDesignTokens.Colors.danger)
             }
+        }
+    }
+
+    private var sidekickModelStatusText: String {
+        switch store.sidekick.modelState {
+        case .notDownloaded: return "Not downloaded (2.3 GB)"
+        case .downloading(let progress): return "Downloading \(Int(progress * 100))%"
+        case .ready, .loaded: return "Ready on device"
+        case .unloadedIdle: return "Cached on device (idle)"
+        case .offlineUnavailable(let message): return "Offline: \(message)"
+        case .memoryConstrained(let message): return "Low RAM: \(message)"
         }
     }
 
