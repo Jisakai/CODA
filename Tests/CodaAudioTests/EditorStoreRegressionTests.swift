@@ -905,11 +905,16 @@ final class EditorStoreRegressionTests: XCTestCase {
         let session = try XCTUnwrap(store.session)
         defer { session.suspend() }
         let before = session.editor.progression
+        // Owner override: dragging a chord body or left edge moves it left/right in one undoable step.
         let body = CGPoint(x: 100, y: 100)
         store.pencilTouchBegan(at: body)
         store.pencilTouchMoved(to: CGPoint(x: 400, y: 100))
         store.pencilTouchEnded(at: CGPoint(x: 400, y: 100))
-        XCTAssertEqual(session.editor.progression, before)
+        XCTAssertGreaterThan(store.regions.first?.start ?? 0, 0)
+        XCTAssertEqual(store.regions.first?.length, 16)
+        try session.undo()
+        XCTAssertEqual(session.editor.progression, before, "One undo must restore the whole move drag")
+
         let width = Double(store.contentWidth)
         let edge = CGPoint(x: 56 + store.viewport.x(forStep: 15.8, in: width), y: 100)
         store.pencilTouchBegan(at: edge)

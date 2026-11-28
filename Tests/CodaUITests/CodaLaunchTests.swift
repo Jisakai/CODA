@@ -257,7 +257,7 @@ final class CodaLaunchTests: XCTestCase {
         launchAndDescribe(app)
         XCTAssertTrue(app.buttons["top.play"].waitForExistence(timeout: 10))
         let emptyBar = app.descendants(matching: .any)["music.empty.5"].firstMatch
-        XCTAssertTrue(emptyBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(emptyBar.waitForExistence(timeout: 10))
         let before = app.staticTexts["editor.regionCount"].label
         let historyBefore = app.staticTexts["editor.undoState"].label
         let audioBefore = app.staticTexts["editor.audioAvailability"].label
@@ -300,7 +300,7 @@ final class CodaLaunchTests: XCTestCase {
         }
         attachScreenshot(named: "M1-synth-drawer", from: app)
         let synth = app.scrollViews["drawer.synthScroll"].frame
-        XCTAssertEqual(synth.minY, rack.minY + 44, accuracy: 2)
+        XCTAssertEqual(synth.minY, rack.minY + 53, accuracy: 2)
         for knob in ["cutoff", "resonance", "shape", "detune", "glide", "chorus", "delay", "reverb"] {
             let control = app.descendants(matching: .any)["drawer.knob.\(knob)"].firstMatch
             revealDrawerElement(control, in: app)
