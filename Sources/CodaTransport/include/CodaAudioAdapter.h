@@ -24,5 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (CodaTransportStatus)transportStatus;
 /* Bounded actual AVAudioEngine manual rendering; no hardware or timer. */
 - (BOOL)renderOfflineFrames:(uint32_t)frames energy:(double *)energy error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(renderOffline(frames:energy:));
+/* Renders stereo interleaved Float32 PCM frames offline for WAV bounce. */
+- (nullable NSData *)renderOfflineStereoFloatFrames:(uint32_t)frames error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NAME(renderOfflineStereoFloat(frames:));
 @end
 NS_ASSUME_NONNULL_END

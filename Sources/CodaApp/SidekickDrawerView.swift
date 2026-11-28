@@ -44,7 +44,7 @@ struct SidekickDrawerView: View {
                 .padding(.bottom, 14)
         }
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
-        .buttonStyle(.plain)
+        .buttonStyle(CodaTactileButtonStyle())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sidekick.drawer")
     }

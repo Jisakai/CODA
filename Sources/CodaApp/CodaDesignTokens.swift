@@ -96,6 +96,25 @@ enum CodaDesignTokens {
         static let fade: Double = 0.12
         static let radial: Double = 0.10
         static let drawerDuration: Double = 0.22
+
+        /// Apple Fluid Interfaces springs (emilkowalski/skills/apple-design §4):
+        /// - Critically damped (`dampingFraction: 1.0`) for default UI, popovers, and tabs.
+        /// - Slight momentum settle (`dampingFraction: 0.84`) for drawers and sheets.
+        static let uiSpring: Animation = .spring(response: 0.34, dampingFraction: 1.0)
+        static let sheetSpring: Animation = .spring(response: 0.32, dampingFraction: 0.84)
+        static let snappySpring: Animation = .spring(response: 0.24, dampingFraction: 0.92)
+        static let pressSpring: Animation = .interactiveSpring(response: 0.16, dampingFraction: 0.88)
+
+        /// Apple WWDC 2018 exponential-decay momentum projection (apple-design §6).
+        static func project(velocity: CGFloat, decelerationRate: CGFloat = 0.996) -> CGFloat {
+            (velocity / 1000.0) * decelerationRate / (1.0 - decelerationRate)
+        }
+
+        /// Apple progressive rubber-banding resistance at soft boundaries (apple-design §9).
+        static func rubberband(overshoot: CGFloat, dimension: CGFloat, constant: CGFloat = 0.55) -> CGFloat {
+            guard dimension > 0 else { return 0 }
+            return (overshoot * dimension * constant) / (dimension + constant * abs(overshoot))
+        }
     }
 
     enum Input {
@@ -188,5 +207,70 @@ enum CodaDesignTokens {
         static func monoFont(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
             .system(size: size, weight: weight, design: .monospaced)
         }
+    }
+}
+
+/// Apple Fluid Interfaces tactile button style (emilkowalski/skills/apple-design §1, §4):
+/// Responds on pointer-down with subtle 0.965 compression and springs back smoothly on release.
+struct CodaTactileButtonStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.965
+    var pressedOpacity: Double = 0.88
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? pressedScale : 1.0)
+            .opacity(configuration.isPressed ? pressedOpacity : 1.0)
+            .animation(CodaDesignTokens.Motion.pressSpring, value: configuration.isPressed)
+    }
+}
+
+/// Layered dark-studio glass surface inspired by Apple HIG & Procreate:
+/// Continuous squircle corners, top specular hairline rim, and deep ambient shadow.
+struct CodaStudioCardSurface: ViewModifier {
+    var cornerRadius: CGFloat = CodaDesignTokens.ProcreateChrome.cardCornerRadius
+    var fill: Color = CodaDesignTokens.ProcreateChrome.surfaceElevated
+    var elevated: Bool = false
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(
+                shape.fill(fill)
+                    .overlay(
+                        shape.fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(elevated ? 0.065 : 0.04), .clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    )
+            )
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(elevated ? 0.16 : 0.11), Color.white.opacity(0.03)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: CodaDesignTokens.ProcreateChrome.bevelLineWidth
+                )
+            )
+            .shadow(
+                color: elevated ? CodaDesignTokens.ProcreateChrome.shadowColor : .black.opacity(0.22),
+                radius: elevated ? CodaDesignTokens.ProcreateChrome.shadowRadius : 8,
+                x: 0,
+                y: elevated ? CodaDesignTokens.ProcreateChrome.shadowY : 3
+            )
+    }
+}
+
+extension View {
+    func codaStudioCard(
+        cornerRadius: CGFloat = CodaDesignTokens.ProcreateChrome.cardCornerRadius,
+        fill: Color = CodaDesignTokens.ProcreateChrome.surfaceElevated,
+        elevated: Bool = false
+    ) -> some View {
+        modifier(CodaStudioCardSurface(cornerRadius: cornerRadius, fill: fill, elevated: elevated))
     }
 }

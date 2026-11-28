@@ -960,6 +960,99 @@ public final class MusicSession {
         )
     }
 
+    /// Bounces a saved project document offline through the real CodaDSP audio engine into a 24-bit stereo RIFF WAV.
+    public static func exportWAV(document: CodaProjectDocument, vocabulary: ChordVocabulary, tailSeconds: Double = 1.5) throws -> Data {
+        let offlineSession = try MusicSession(vocabulary: vocabulary, offline: true)
+        defer { offlineSession.audio.close() }
+        try offlineSession.loadProjectDocument(document)
+        return try offlineSession.exportWAV(includeMutedLayers: false, tailSeconds: tailSeconds)
+    }
+
+    /// Bounces the current session offline through the real CodaDSP audio engine into a 24-bit stereo RIFF WAV.
+    public func exportWAV(includeMutedLayers: Bool = false, tailSeconds: Double = 1.5) throws -> Data {
+        let doc = makeProjectDocument()
+        let offlineSession = try MusicSession(vocabulary: vocabulary, offline: true)
+        defer { offlineSession.audio.close() }
+        try offlineSession.loadProjectDocument(doc)
+        var exportMixer = mixerControls
+        if includeMutedLayers {
+            exportMixer.chords.muted = 0
+            exportMixer.bass.muted = 0
+            exportMixer.melody.muted = 0
+        }
+        offlineSession.applyMixerControls(exportMixer)
+        let activeSteps = max(MusicDefaults.stepsPerBar, looping ? loop.length : editor.progression.totalSteps)
+        let sr = max(44100.0, offlineSession.audio.sampleRate)
+        let secondsPerStep = 60.0 / max(20.0, tempo) / 4.0
+        let totalSeconds = Double(activeSteps) * secondsPerStep + max(0.0, tailSeconds)
+        let totalFrames = max(512, Int((totalSeconds * sr).rounded(.up)))
+        try offlineSession.play()
+        offlineSession.pump()
+
+        var interleaved = Data()
+        interleaved.reserveCapacity(totalFrames * 2 * MemoryLayout<Float>.size)
+        let chunkFrames: UInt32 = 4096
+        var remaining = UInt32(totalFrames)
+        while remaining > 0 {
+            let chunk = min(chunkFrames, remaining)
+            let chunkData = try offlineSession.audio.renderOfflineStereoFloat(frames: chunk)
+            interleaved.append(chunkData)
+            offlineSession.pump()
+            remaining -= chunk
+        }
+        return Self.encodeWAV24Stereo(interleavedFloatData: interleaved, sampleRate: Int(sr.rounded()))
+    }
+
+    /// Encodes interleaved stereo Float32 samples into a standard 24-bit PCM RIFF WAVE container.
+    public static func encodeWAV24Stereo(interleavedFloatData: Data, sampleRate: Int) -> Data {
+        let sampleCount = interleavedFloatData.count / MemoryLayout<Float>.size
+        let numChannels: UInt16 = 2
+        let bitsPerSample: UInt16 = 24
+        let bytesPerSample = Int(bitsPerSample / 8)
+        let dataByteCount = UInt32(sampleCount * bytesPerSample)
+        let byteRate = UInt32(sampleRate * Int(numChannels) * bytesPerSample)
+        let blockAlign = UInt16(Int(numChannels) * bytesPerSample)
+        let riffSize = UInt32(36) + dataByteCount
+
+        var wav = Data()
+        wav.reserveCapacity(44 + Int(dataByteCount))
+        func appendLE<T: FixedWidthInteger>(_ value: T) {
+            var le = value.littleEndian
+            withUnsafeBytes(of: &le) { wav.append(contentsOf: $0) }
+        }
+
+        wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        appendLE(riffSize)
+        wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+        wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        appendLE(UInt32(16))                             // PCM fmt chunk size
+        appendLE(UInt16(1))                              // AudioFormat = 1 (PCM)
+        appendLE(numChannels)
+        appendLE(UInt32(sampleRate))
+        appendLE(byteRate)
+        appendLE(blockAlign)
+        appendLE(bitsPerSample)
+        wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        appendLE(dataByteCount)
+
+        interleavedFloatData.withUnsafeBytes { raw in
+            let floats = raw.bindMemory(to: Float.self)
+            var bytes = [UInt8](repeating: 0, count: sampleCount * 3)
+            let scale: Double = 8_388_607.0 // 2^23 - 1
+            for i in 0..<sampleCount {
+                let clamped = max(-1.0, min(1.0, Double(floats[i])))
+                let int24 = Int32((clamped * scale).rounded())
+                let u = UInt32(bitPattern: int24)
+                let base = i * 3
+                bytes[base] = UInt8(u & 0xFF)
+                bytes[base + 1] = UInt8((u >> 8) & 0xFF)
+                bytes[base + 2] = UInt8((u >> 16) & 0xFF)
+            }
+            wav.append(contentsOf: bytes)
+        }
+        return wav
+    }
+
     // MARK: - Unified Undo / Redo
 
     public func undo() throws { try moveHistory(undoing: true) }

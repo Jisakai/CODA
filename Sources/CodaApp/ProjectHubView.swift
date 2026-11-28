@@ -375,6 +375,9 @@ struct ProjectHubView: View {
                 cardAction(symbol: "plus.square.on.square", label: "Duplicate") {
                     store.duplicateProject(id: project.id)
                 }
+                cardAction(symbol: "waveform", label: "Export WAV") {
+                    store.exportWAVForProject(id: project.id)
+                }
                 cardAction(symbol: "music.note.list", label: "Export MIDI") {
                     store.exportMIDIForProject(id: project.id)
                 }
@@ -388,13 +391,16 @@ struct ProjectHubView: View {
             }
         }
         .padding(12)
-        .background(CodaDesignTokens.ProcreateChrome.surfaceElevated,
-                    in: RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius)
-                .stroke(isSelected ? CodaDesignTokens.Colors.chord : CodaDesignTokens.ProcreateChrome.bevelSubtle,
-                        lineWidth: isSelected ? 1.5 : 0.5)
+        .codaStudioCard(
+            cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius,
+            fill: CodaDesignTokens.ProcreateChrome.surfaceElevated,
+            elevated: isSelected
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: CodaDesignTokens.ProcreateChrome.cardCornerRadius, style: .continuous)
+                .stroke(isSelected ? CodaDesignTokens.Colors.chord : Color.clear, lineWidth: 1.5)
+        )
+        .buttonStyle(CodaTactileButtonStyle())
         .accessibilityIdentifier("hub.project.\(project.id)")
     }
 

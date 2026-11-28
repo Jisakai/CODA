@@ -171,4 +171,34 @@ NSError *adapterError(NSString *text) {
     }
     return YES;
 }
+- (nullable NSData *)renderOfflineStereoFloatFrames:(uint32_t)frames error:(NSError **)error {
+    std::lock_guard<std::mutex> lock(_producer);
+    constexpr uint32_t maxExportFrames=48000*300; // up to 5 minutes per chunk
+    if(!_engine || !_offline || !frames || frames>maxExportFrames) {
+        if(error) *error=adapterError(@"Invalid offline stereo export request"); return nil;
+    }
+    AVAudioPCMBuffer *buffer=[[AVAudioPCMBuffer alloc] initWithPCMFormat:_engine.manualRenderingFormat frameCapacity:manualBlock];
+    const uint32_t channels=_engine.manualRenderingFormat.channelCount;
+    NSMutableData *out=[NSMutableData dataWithLength:(NSUInteger)frames * 2u * sizeof(float)];
+    float *dst=(float *)out.mutableBytes;
+    for(uint32_t at=0;at<frames;) {
+        const auto n=std::min(manualBlock,frames-at);
+        if([_engine renderOffline:n toBuffer:buffer error:error]!=AVAudioEngineManualRenderingStatusSuccess) {
+            if(error && !*error) *error=adapterError(@"Manual render did not succeed"); return nil;
+        }
+        if(buffer.frameLength!=n) {if(error) *error=adapterError(@"Short manual render"); return nil;}
+        const float *left=buffer.floatChannelData[0];
+        const float *right=(channels>1 && buffer.floatChannelData[1]) ? buffer.floatChannelData[1] : left;
+        for(uint32_t i=0;i<n;++i) {
+            const float l=left[i], r=right[i];
+            if(!std::isfinite(l) || !std::isfinite(r)) {
+                if(error) *error=adapterError(@"Nonfinite audio during WAV export"); return nil;
+            }
+            dst[(at+i)*2]=l;
+            dst[(at+i)*2+1]=r;
+        }
+        at+=n;
+    }
+    return out;
+}
 @end

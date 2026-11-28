@@ -33,8 +33,12 @@
     - `DSP-verification.txt`: `dsp_tests` + `four-bar` passed (Pluck/Currents/Wobble).
     - 6 UI verification screenshots present in `ui-screenshots/`.
 
+  - **Post-`69f010c` hands-on polish + Pencil Pro barrel roll/haptics + M5 Qwen3-4B model ID & live download progress (`33cd689` → `db4c2b0` → `ea10038` → `8a648f8` → `c018db9`):**
+    - All 6 build & test jobs (`native + archive`, `simulator (unit)`, `simulator (ui-a)`, `simulator (ui-b)`, `simulator (ui-c)`, `simulator_delayed (ui-d)`) PASSED on run [`46129850319`](https://github.com/Jisakai/CODA/actions/runs/46129850319) (`c018db9`). (`publish` only rejected mixed `run_attempt` provenance after `ui-d` was rerun for a runner timeout.)
+    - Downloaded & verified `App.ipa` from `coda-internal-archive` (`C:/Users/jisak/AppData/Local/hermes/cache/scratch/coda-ipa-46129850319/App.ipa`): `1,411,569` bytes, SHA-256 `d0052cf7eace8eca0c3edc8d93acd9b7d6c16c77e24868a73c5a6a20c9e4bd3d`, `Payload/coda.app`, `com.coda.sketchpad`, `arm64`, iPad-only, landscape-only, iOS SDK `27.2`.
+
 ## Completion
 MISSION_COMPLETE=true
 
 ## Last Updated
-2026-11-28 09:14 UTC+03:00 (2026-11-28 06:14 UTC) — Mission complete. Clean single-attempt CI run `46113829427` on `coda/owner-pattern-topbar-four-ui` @ `69f010c312a86f65071d524d9d2dc56b26fca4b8` passed all 7 jobs including `publish`, and `App.ipa` was downloaded and verified locally.
+2026-11-28 13:02 UTC+03:00 (2026-11-28 10:02 UTC) — Verified all 6 build/test lanes green on `coda/owner-pattern-topbar-four-ui` @ `c018db9` (CI run `46129850319`) including live Qwen3-4B download progress, clockwise barrel roll, Apple Pencil Pro haptics, and `mlx-community/Qwen3-4B-Instruct-2507-gabliterated-4bit`. `App.ipa` downloaded and verified locally.

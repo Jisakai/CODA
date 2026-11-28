@@ -50,7 +50,7 @@ struct CodaCanvas: View {
                             .frame(width: store.drawerWidth,
                                    height: max(0, geometry.size.height - store.drawerTop))
                             .offset(x: geometry.size.width - store.drawerWidth, y: store.drawerTop)
-                            .transition(.move(edge: .trailing))
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                             .zIndex(4)
                     }
 
@@ -58,7 +58,7 @@ struct CodaCanvas: View {
                         BottomSynthRackView(store: store)
                             .frame(width: geometry.size.width, height: rackHeight)
                             .offset(x: 0, y: geometry.size.height - rackHeight)
-                            .transition(.move(edge: .bottom))
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                             .zIndex(6)
                     }
                 }
@@ -220,7 +220,7 @@ private struct EditorTopBar: View {
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
         }
         .onPreferenceChange(SettingsFramesKey.self) { store.recordSettingsFrames($0, stage: "topBar.acrylic") }
-        .buttonStyle(.plain)
+        .buttonStyle(CodaTactileButtonStyle())
         // Give the container its own AX node so its identifier does not
         // propagate to (and replace the identifiers of) the controls inside.
         .accessibilityElement(children: .contain)
@@ -232,7 +232,7 @@ private struct EditorTopBar: View {
         // Left cluster: Gallery, Unified Procreate Wrench, Key/Scale, Tempo, 4/4
         Button {
             store.projectHub.refreshIndex()
-            withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
+            withAnimation(CodaDesignTokens.Motion.sheetSpring) {
                 store.projectHubOpen = true
             }
         } label: {
@@ -563,9 +563,20 @@ struct CodaAcrylic: View {
 private struct AcrylicPanel: ViewModifier {
     let store: CodaEditorStore
     func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card, style: .continuous)
         content.background { CodaAcrylic(store: store) }
-            .clipShape(RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card))
-            .shadow(color: .black.opacity(0.35), radius: CodaDesignTokens.EditorSurface.elevationRadius,
+            .clipShape(shape)
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.16), Color.white.opacity(0.03)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: CodaDesignTokens.ProcreateChrome.bevelLineWidth
+                )
+            )
+            .shadow(color: .black.opacity(0.42), radius: CodaDesignTokens.EditorSurface.elevationRadius,
                     y: CodaDesignTokens.EditorSurface.elevationOffset)
     }
 }
@@ -802,8 +813,20 @@ private struct ChordStripView: View {
                         if let draft = store.resizeDraft {
                             let x = CGFloat(store.viewport.x(forStep: Double(draft.region.start), in: Double(strip.size.width)))
                             let width = max(8, CGFloat(store.viewport.stepWidth(in: Double(strip.size.width)) * Double(draft.end - draft.region.start)))
-                            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card)
+                            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card, style: .continuous)
                                 .stroke(CodaDesignTokens.Colors.primaryInk.opacity(0.7), lineWidth: 1)
+                                .frame(width: width, height: 92).offset(x: x, y: 6)
+                                .allowsHitTesting(false)
+                        }
+                        if let draft = store.moveChordDraft, draft.didMove {
+                            let x = CGFloat(store.viewport.x(forStep: Double(draft.start), in: Double(strip.size.width)))
+                            let width = max(8, CGFloat(store.viewport.stepWidth(in: Double(strip.size.width)) * Double(draft.region.length)))
+                            RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card, style: .continuous)
+                                .fill(CodaDesignTokens.Colors.chord.opacity(0.18))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CodaDesignTokens.Radii.card, style: .continuous)
+                                        .stroke(CodaDesignTokens.Colors.chord, lineWidth: 1.5)
+                                )
                                 .frame(width: width, height: 92).offset(x: x, y: 6)
                                 .allowsHitTesting(false)
                         }
@@ -1542,6 +1565,10 @@ private struct EditorSettingsPopover: View {
                 store.popup = nil
                 store.projectHubOpen = true
             }
+            wrenchActionButton("Export Audio (.wav 24-bit)", symbol: "waveform") {
+                store.exportWAVForProject()
+            }
+            .accessibilityIdentifier("settings.exportWAV")
             HStack(spacing: 8) {
                 wrenchActionButton("Export MIDI (.mid)", symbol: "music.note.list") {
                     store.exportMIDIForProject()

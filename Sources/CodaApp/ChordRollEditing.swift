@@ -137,11 +137,16 @@ extension CodaEditorStore {
         absoluteNoteFrame(startTick: note.effectiveStartTick, durationTicks: note.durationTicks, pitch: note.pitch)
     }
 
+    private func isRightResizeEdge(_ point: CGPoint, in frame: CGRect) -> Bool {
+        let edgeWidth = min(10.0, frame.width * 0.28)
+        return point.x >= frame.maxX - edgeWidth
+    }
+
     func rollNoteHit(at point: CGPoint) -> (ChordRegion, RollNote, Bool)? {
         for region in visibleRegions.reversed() {
             for note in region.notes.reversed() {
                 let frame = noteFrame(note, in: region)
-                if frame.contains(point) { return (region, note, point.x >= frame.maxX - min(12, frame.width * 0.3)) }
+                if frame.contains(point) { return (region, note, isRightResizeEdge(point, in: frame)) }
             }
         }
         return nil
@@ -150,7 +155,7 @@ extension CodaEditorStore {
     func bassNoteHit(at point: CGPoint) -> (BassNote, Bool)? {
         for note in displayedBassNotes.reversed() {
             let frame = bassNoteFrame(note)
-            if frame.contains(point) { return (note, point.x >= frame.maxX - min(12, frame.width * 0.3)) }
+            if frame.contains(point) { return (note, isRightResizeEdge(point, in: frame)) }
         }
         return nil
     }
@@ -158,7 +163,7 @@ extension CodaEditorStore {
     func melodyNoteHit(at point: CGPoint) -> (MelodyNote, Bool)? {
         for note in displayedMelodyNotes.reversed() {
             let frame = melodyNoteFrame(note)
-            if frame.contains(point) { return (note, point.x >= frame.maxX - min(12, frame.width * 0.3)) }
+            if frame.contains(point) { return (note, isRightResizeEdge(point, in: frame)) }
         }
         return nil
     }
@@ -473,25 +478,100 @@ extension CodaEditorStore {
             case .transform(let selection, let resizing):
                 let selected = draft.original.flatMap { region in region.notes.filter { selection.contains(RollNoteReference(regionID: region.id, noteID: $0.id)) }.map { (region, $0) } }
                 guard !selected.isEmpty else { return }
+                let maxTick = totalSteps * MusicDefaults.ticksPerStep
                 var delta = quantizedDelta(point.x - draft.origin.x)
                 var pitchDelta = Int((Double(draft.origin.y - point.y) / viewport.semitoneHeight).rounded())
                 if resizing {
                     delta = min(selected.map { $0.0.length * MusicDefaults.ticksPerStep - $0.1.endTick }.min() ?? 0,
                         max(selected.map { 1 - $0.1.durationTicks }.max() ?? 0, delta))
                     pitchDelta = 0
-                } else {
-                    delta = min(selected.map { $0.0.length * MusicDefaults.ticksPerStep - $0.1.endTick }.min() ?? 0,
-                        max(-(selected.map { $0.1.startTick }.min() ?? 0), delta))
-                    pitchDelta = min(127 - (selected.map { $0.1.pitch }.max() ?? 127), max(-(selected.map { $0.1.pitch }.min() ?? 0), pitchDelta))
-                }
-                draft.preview = try draft.original.map { region in
-                    let notes = try region.notes.map { note in
-                        guard selection.contains(RollNoteReference(regionID: region.id, noteID: note.id)) else { return note }
-                        return try RollNote(id: note.id, startTick: note.startTick + (resizing ? 0 : delta),
-                            durationTicks: note.durationTicks + (resizing ? delta : 0), pitch: snappedPitch(note.pitch + pitchDelta),
-                            velocity: note.velocity, slide: note.slide)
+                    draft.preview = try draft.original.map { region in
+                        let notes = try region.notes.map { note in
+                            guard selection.contains(RollNoteReference(regionID: region.id, noteID: note.id)) else { return note }
+                            return try RollNote(id: note.id, startTick: note.startTick,
+                                durationTicks: note.durationTicks + delta, pitch: note.pitch,
+                                velocity: note.velocity, slide: note.slide)
+                        }
+                        return try ChordRollEditor.replacing(region, notes: notes, vocabulary: session.vocabulary, detect: false)
                     }
-                    return try ChordRollEditor.replacing(region, notes: notes, vocabulary: session.vocabulary, detect: false)
+                } else {
+                    // Allow dragging chord notes freely left/right across the entire arrangement AND up/down in pitch!
+                    let minAbsStart = selected.map { $0.0.start * MusicDefaults.ticksPerStep + $0.1.startTick }.min() ?? 0
+                    let maxAbsEnd = selected.map { $0.0.start * MusicDefaults.ticksPerStep + $0.1.endTick }.max() ?? maxTick
+                    delta = min(maxTick - maxAbsEnd, max(-minAbsStart, delta))
+                    pitchDelta = min(127 - (selected.map { $0.1.pitch }.max() ?? 127),
+                        max(-(selected.map { $0.1.pitch }.min() ?? 0), pitchDelta))
+
+                    let fitsInsideOriginal = selected.allSatisfy { region, note in
+                        let nextStart = note.startTick + delta
+                        let nextEnd = note.endTick + delta
+                        return nextStart >= 0 && nextEnd <= region.length * MusicDefaults.ticksPerStep
+                    }
+
+                    if fitsInsideOriginal {
+                        draft.preview = try draft.original.map { region in
+                            var kept = region.notes.filter { !selection.contains(RollNoteReference(regionID: region.id, noteID: $0.id)) }
+                            for note in region.notes where selection.contains(RollNoteReference(regionID: region.id, noteID: note.id)) {
+                                let moved = try RollNote(id: note.id, startTick: note.startTick + delta,
+                                    durationTicks: note.durationTicks, pitch: snappedPitch(note.pitch + pitchDelta),
+                                    velocity: note.velocity, slide: note.slide)
+                                kept = try mergeRollNote(moved, into: kept)
+                            }
+                            return try ChordRollEditor.replacing(region, notes: kept, vocabulary: session.vocabulary, detect: false)
+                        }
+                    } else {
+                        // Cross-region or full-length chord note drag: remove from original regions
+                        // and place at the new absolute timeline position.
+                        var nextRegions: [ChordRegion] = []
+                        for region in draft.original {
+                            let remaining = region.notes.filter { !selection.contains(RollNoteReference(regionID: region.id, noteID: $0.id)) }
+                            if !remaining.isEmpty {
+                                nextRegions.append(try ChordRollEditor.replacing(region, notes: remaining, vocabulary: session.vocabulary, detect: false))
+                            }
+                        }
+                        for (origRegion, note) in selected {
+                            let absStart = origRegion.start * MusicDefaults.ticksPerStep + note.startTick + delta
+                            let absEnd = absStart + note.durationTicks
+                            let movedPitch = snappedPitch(note.pitch + pitchDelta)
+                            let startStep = absStart / MusicDefaults.ticksPerStep
+                            let endStep = max(startStep + 1, (absEnd - 1) / MusicDefaults.ticksPerStep + 1)
+                            var cursor = startStep
+                            while cursor < endStep {
+                                if let i = nextRegions.firstIndex(where: { $0.start <= cursor && $0.end > cursor }) {
+                                    let target = nextRegions[i]
+                                    let lo = max(absStart, target.start * MusicDefaults.ticksPerStep)
+                                    let hi = min(absEnd, target.end * MusicDefaults.ticksPerStep)
+                                    if hi > lo {
+                                        let placed = try RollNote(id: cursor == startStep ? note.id : UUID().uuidString,
+                                            startTick: lo - target.start * MusicDefaults.ticksPerStep,
+                                            durationTicks: hi - lo, pitch: movedPitch,
+                                            velocity: note.velocity, slide: note.slide)
+                                        let merged = try mergeRollNote(placed, into: target.notes)
+                                        nextRegions[i] = try ChordRollEditor.replacing(target, notes: merged, vocabulary: session.vocabulary, detect: false)
+                                    }
+                                    cursor = target.end
+                                } else {
+                                    let nextStart = nextRegions.filter { $0.start > cursor }.map(\.start).min() ?? endStep
+                                    let spanEnd = min(endStep, nextStart)
+                                    let lo = max(absStart, cursor * MusicDefaults.ticksPerStep)
+                                    let hi = min(absEnd, spanEnd * MusicDefaults.ticksPerStep)
+                                    if hi > lo, spanEnd > cursor {
+                                        let placed = try RollNote(id: cursor == startStep ? note.id : UUID().uuidString,
+                                            startTick: lo - cursor * MusicDefaults.ticksPerStep,
+                                            durationTicks: hi - lo, pitch: movedPitch,
+                                            velocity: note.velocity, slide: note.slide)
+                                        let created = try ChordRegion(id: UUID().uuidString, chord: origRegion.chord,
+                                            start: cursor, length: spanEnd - cursor, pitches: [], notes: [placed],
+                                            detectionUncertain: origRegion.detectionUncertain)
+                                        nextRegions.append(created)
+                                    }
+                                    cursor = spanEnd
+                                }
+                            }
+                        }
+                        nextRegions.sort { $0.start < $1.start }
+                        draft.preview = nextRegions
+                    }
                 }
             case .marquee:
                 let rect = CGRect(x: min(draft.origin.x, point.x), y: min(draft.origin.y, point.y),

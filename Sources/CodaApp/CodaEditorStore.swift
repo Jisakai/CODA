@@ -99,6 +99,13 @@ struct ResizeDraft {
     var end: Int
 }
 
+struct MoveChordDraft {
+    let region: ChordRegion
+    let originX: CGFloat
+    var start: Int
+    var didMove: Bool = false
+}
+
 struct HoldMenuState {
     let regionID: String?
     let origin: CGPoint
@@ -236,6 +243,7 @@ struct HoveredRollNote: Equatable {
     var holdMenu: HoldMenuState?
     var knobReset: KnobResetState?
     var resizeDraft: ResizeDraft?
+    var moveChordDraft: MoveChordDraft?
     var inlineError: String?
     var radialPreview: String?
     var knobReadout: String?
@@ -363,8 +371,18 @@ struct HoveredRollNote: Equatable {
     }
     // The side surface covers the strip and roll, below the shared transport.
     var drawerTop: CGFloat { stripTop }
+    var synthRackHeight: CGFloat { min(rootSize.height * 0.50, 460) }
+    var synthRackTop: CGFloat { max(stripTop, rootSize.height - synthRackHeight) }
     var synthTop: CGFloat {
         drawerTop + (rootSize.height - drawerTop) * CodaDesignTokens.EditorSurface.drawerReservedFraction
+    }
+
+    func isPointInSynthRack(_ point: CGPoint) -> Bool {
+        synthRackOpen && !chromeHidden && point.y >= synthRackTop
+    }
+
+    func isPointInSidekickDrawer(_ point: CGPoint) -> Bool {
+        drawerOpen && !chromeHidden && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop
     }
 
     func setRootSize(_ size: CGSize) {
@@ -470,7 +488,7 @@ struct HoveredRollNote: Equatable {
     }
 
     func openDrawer(_ open: Bool? = nil) {
-        withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
+        withAnimation(CodaDesignTokens.Motion.sheetSpring) {
             drawerOpen = open ?? !drawerOpen
         }
     }
@@ -482,8 +500,24 @@ struct HoveredRollNote: Equatable {
     }
 
     func scrub(toX x: CGFloat) {
-        guard let step = viewport.step(atX: Double(x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth)) else { return }
-        do { try session?.seek(step: min(totalSteps - 1, max(0, step))); playheadStep = step; inlineError = nil }
+        let localX = Double(x - CodaDesignTokens.Geometry.pitchGutterWidth)
+        let width = Double(contentWidth)
+        let stepWidth = viewport.stepWidth(in: width)
+        guard width > 0, stepWidth > 0 else { return }
+        let rawStep = viewport.firstVisibleStep + localX / stepWidth
+        var step = Int(rawStep.rounded())
+        // Magnetically snap to exact bar starts when within 10pt of a bar line so
+        // dragging to bar 3 lands dead-on step 32 rather than 3 ± 1/16.
+        if gridSnap {
+            let stepsPerBar = MusicDefaults.stepsPerBar
+            let nearestBarStep = max(0, Int((rawStep / Double(stepsPerBar)).rounded()) * stepsPerBar)
+            let barX = viewport.x(forStep: Double(nearestBarStep), in: width)
+            if abs(localX - barX) <= 10.0 {
+                step = nearestBarStep
+            }
+        }
+        let clamped = min(max(0, totalSteps - 1), max(0, step))
+        do { try session?.seek(step: clamped); playheadStep = clamped; inlineError = nil }
         catch { setError(error) }
     }
 
@@ -1174,6 +1208,9 @@ struct HoveredRollNote: Equatable {
             resizeDraft = ResizeDraft(region: region, end: region.end)
         }
         if case .region(let id, false) = hit {
+            if let region = regions.first(where: { $0.id == id }) {
+                moveChordDraft = MoveChordDraft(region: region, originX: point.x, start: region.start)
+            }
             scheduleHold(for: id, at: point)
         }
         if case .roll = hit { beginRollGesture(at: point) }
@@ -1212,6 +1249,28 @@ struct HoveredRollNote: Equatable {
                 resizeDraft = draft
                 hoveredRegionID = draft.region.id
             }
+        } else if var draft = moveChordDraft, touchMoved {
+            let stepWidth = max(1.0, viewport.stepWidth(in: Double(contentWidth)))
+            let rawDelta = Double(point.x - draft.originX) / stepWidth
+            let quantum = gridSnap ? 1.0 : 1.0
+            let deltaSteps = Int((rawDelta / quantum).rounded() * quantum)
+            let maxStart = max(0, totalSteps - draft.region.length)
+            let candidate = min(maxStart, max(0, draft.region.start + deltaSteps))
+            if validMove(region: draft.region, start: candidate) {
+                draft.start = candidate
+            } else {
+                // Clamp cleanly against adjacent chords in the drag direction
+                let others = regions.filter { $0.id != draft.region.id }
+                let prevEnd = others.filter { $0.end <= draft.region.start }.map(\.end).max() ?? 0
+                let nextStart = others.filter { $0.start >= draft.region.end }.map(\.start).min() ?? totalSteps
+                let clamped = min(max(prevEnd, candidate), max(prevEnd, nextStart - draft.region.length))
+                if validMove(region: draft.region, start: clamped) {
+                    draft.start = clamped
+                }
+            }
+            draft.didMove = true
+            moveChordDraft = draft
+            hoveredRegionID = draft.region.id
         } else {
             hoveredRegionID = region(at: point)?.id
         }
@@ -1224,7 +1283,7 @@ struct HoveredRollNote: Equatable {
         touchLast = point
         holdWork?.cancel(); holdWork = nil
         if chordRollPreview != nil {
-            finishChordVoicingRoll(); resizeDraft = nil; clearTouch(); return
+            finishChordVoicingRoll(); resizeDraft = nil; moveChordDraft = nil; clearTouch(); return
         }
         if patternGestureWasActive {
             if patternControlExcludes(point) {
@@ -1272,6 +1331,24 @@ struct HoveredRollNote: Equatable {
             clearTouch()
             return
         }
+        if let draft = moveChordDraft {
+            moveChordDraft = nil
+            if draft.didMove {
+                if draft.start != draft.region.start {
+                    if validMove(region: draft.region, start: draft.start) {
+                        performMusicAction(.resize) {
+                            guard let session = self.session else { return }
+                            try session.edit([.resize(id: draft.region.id, start: draft.start,
+                                                      length: draft.region.length)])
+                        }
+                    } else {
+                        setError("That chord move overlaps another chord or leaves the canvas.")
+                    }
+                }
+                clearTouch()
+                return
+            }
+        }
         if touchStart != nil && !touchMoved && !holdTriggered { performPencilTap(at: point) }
         clearTouch()
     }
@@ -1282,6 +1359,7 @@ struct HoveredRollNote: Equatable {
         cancelRadialPreview()
         holdWork?.cancel(); holdWork = nil
         resizeDraft = nil
+        moveChordDraft = nil
         holdMenu = nil
         radial = nil
         patternSqueezeMenu = false
@@ -1293,11 +1371,18 @@ struct HoveredRollNote: Equatable {
     }
 
     func pencilHover(at point: CGPoint, rollAngle: Double?) {
-        guard popup == nil else { return }
+        guard popup == nil, !projectHubOpen else { return }
         lastPencilLocation = point
-        hoveredRegionID = region(at: point)?.id
-        hoveredStep = viewport.step(atX: Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth))
-        updateHoveredRollNote(at: point)
+        let overOverlay = isPointInSynthRack(point) || isPointInSidekickDrawer(point)
+        if overOverlay {
+            hoveredRegionID = nil
+            hoveredStep = nil
+            hoveredRollNote = nil
+        } else {
+            hoveredRegionID = region(at: point)?.id
+            hoveredStep = viewport.step(atX: Double(point.x - CodaDesignTokens.Geometry.pitchGutterWidth), in: Double(contentWidth))
+            updateHoveredRollNote(at: point)
+        }
         updateRadialHover(at: point)
         if let reset = knobReset {
             let distance = hypot(point.x - reset.center.x, point.y - reset.center.y)
@@ -1314,7 +1399,7 @@ struct HoveredRollNote: Equatable {
             activeRollKnob = nil
             rollAngles.removeAll(keepingCapacity: true)
             rollAccumulators.removeAll(keepingCapacity: true)
-            if let rollAngle, radial == nil, holdMenu == nil, resizeDraft == nil, !patternEditing {
+            if !overOverlay, let rollAngle, radial == nil, holdMenu == nil, resizeDraft == nil, !patternEditing {
                 switch gestureSettings.barrelRoll {
                 case .off:
                     finishChordVoicingRoll()
@@ -1390,7 +1475,7 @@ struct HoveredRollNote: Equatable {
             openKnobReset(knob, at: point)
             return
         }
-        guard !(drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop) else { return }
+        guard !projectHubOpen, !isPointInSynthRack(point), !isPointInSidekickDrawer(point) else { return }
         guard !patternControlExcludes(point) else { return }
         let initialPlacement = RadialPlacement(origin: point, direction: RadialGeometry.defaultDirection)
         if rollFrame.contains(point), gestureSettings.pencilSqueeze == .radialPalette {
@@ -1480,10 +1565,12 @@ struct HoveredRollNote: Equatable {
             return
         }
         if drawerOpen && start.x >= rootSize.width - drawerWidth { return }
+        if projectHubOpen || isPointInSynthRack(start) { return }
         if start.y >= rollTop { panCanvas(by: translation) }
     }
 
     func routeFingerPinch(scale: CGFloat, at point: CGPoint) {
+        guard !projectHubOpen, !isPointInSynthRack(point), !isPointInSidekickDrawer(point) else { return }
         guard scale.isFinite, scale > 0 else { return }
         zoomCanvas(to: scale, atX: point.x)
         viewport.setVerticalScale(viewport.semitoneHeight * Double(scale),
@@ -1492,7 +1579,8 @@ struct HoveredRollNote: Equatable {
     }
 
     func beginFingerNavigation(at point: CGPoint) -> Bool {
-        guard popup == nil, !(patternEditing && patternControlsFrame.contains(point)) else { return false }
+        guard popup == nil, !projectHubOpen, !(patternEditing && patternControlsFrame.contains(point)) else { return false }
+        if isPointInSynthRack(point) { return false }
         fingerPanConsumed = false
         let atEdge = point.x >= rootSize.width - CodaDesignTokens.Input.navigationEdgeWidth
         return point.y >= (atEdge ? drawerTop : rollTop) && (!(drawerOpen && point.x >= rootSize.width - drawerWidth)
@@ -1796,9 +1884,20 @@ struct HoveredRollNote: Equatable {
         } catch { return false }
     }
 
+    private func validMove(region: ChordRegion, start: Int) -> Bool {
+        guard let session, start >= 0, start + region.length <= totalSteps else { return false }
+        do {
+            var candidate = session.editor
+            try candidate.apply([.resize(id: region.id, start: start,
+                length: region.length)], vocabulary: session.vocabulary)
+            return true
+        } catch { return false }
+    }
+
     private func scheduleHold(for id: String, at point: CGPoint) {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.popup == nil, self.hasActivePencilTouch, !self.touchMoved else { return }
+            self.moveChordDraft = nil
             self.holdTriggered = true
             self.holdMenu = HoldMenuState(regionID: id, origin: point, selectedIndex: nil)
         }
@@ -1819,10 +1918,12 @@ struct HoveredRollNote: Equatable {
     }
 
     private func pencilTarget(at point: CGPoint) -> PencilTarget? {
+        if projectHubOpen { return nil }
         if holdMenu != nil { return .holdCommand(0) }
         if radial != nil { return .radial(.inner, slot: 0) }
         if let knob = knob(at: point) { return .knob(knob) }
-        if drawerOpen && point.x >= rootSize.width - drawerWidth && point.y >= drawerTop { return nil }
+        if isPointInSynthRack(point) { return nil }
+        if isPointInSidekickDrawer(point) { return nil }
         if point.y >= stripTop, point.y < rollTop, let hit = stripHit(at: point) {
             switch hit {
             case .region(let id, let edge): return .region(id, resizeEdge: edge)
@@ -2140,7 +2241,7 @@ struct HoveredRollNote: Equatable {
 // MARK: - Procreate Overhaul: Bottom Synth Rack, Multi-Layers, Gestures, Sidekick & Project Hub
 extension CodaEditorStore {
     func toggleSynthRack(_ open: Bool? = nil) {
-        withAnimation(.easeOut(duration: CodaDesignTokens.Motion.drawerDuration)) {
+        withAnimation(CodaDesignTokens.Motion.sheetSpring) {
             synthRackOpen = open ?? !synthRackOpen
         }
     }
@@ -2588,6 +2689,21 @@ extension CodaEditorStore {
         }
     }
 
+    func exportWAVURL(projectID: String? = nil) -> URL? {
+        guard let session else { return nil }
+        do {
+            let doc = try projectID.map { try projectHub.load(id: $0) } ?? makeCurrentProjectDocument()
+            let data = try MusicSession.exportWAV(document: doc, vocabulary: session.vocabulary)
+            let safeName = doc.name.replacingOccurrences(of: "/", with: "-")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(safeName).wav")
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            setError(error)
+            return nil
+        }
+    }
+
     func exportProjectJSONURL(projectID: String? = nil) -> URL? {
         do {
             let doc = try projectID.map { try projectHub.load(id: $0) } ?? makeCurrentProjectDocument()
@@ -2629,6 +2745,16 @@ extension CodaEditorStore {
 
     func exportMIDIForProject(id: String? = nil) {
         guard let url = exportMIDIURL(projectID: id) else { return }
+        presentShareSheet(for: url)
+    }
+
+    func exportWAVForProject(id: String? = nil) {
+        knobReadout = "Exporting WAV…"
+        guard let url = exportWAVURL(projectID: id) else {
+            knobReadout = nil
+            return
+        }
+        knobReadout = "Exported WAV"
         presentShareSheet(for: url)
     }
 

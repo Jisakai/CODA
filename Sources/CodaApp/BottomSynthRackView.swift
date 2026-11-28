@@ -20,14 +20,56 @@ enum SynthRackTab: String, CaseIterable, Identifiable {
 /// FL-style Bottom VST Synth & Plugin Rack rising up to 50% of screen height.
 struct BottomSynthRackView: View {
     @Bindable var store: CodaEditorStore
+    @State private var dragOffsetY: CGFloat = 0
 
     var body: some View {
+        let rackShape = UnevenRoundedRectangle(
+            topLeadingRadius: 16,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 16,
+            style: .continuous
+        )
         VStack(spacing: 0) {
+            // Tactile Apple Fluid Interfaces drag handle for swipe-to-dismiss
+            Capsule()
+                .fill(Color.white.opacity(0.22))
+                .frame(width: 38, height: 4)
+                .padding(.top, 7)
+                .padding(.bottom, 2)
+
             rackHeader
                 .padding(.horizontal, 18)
-                .frame(height: 44)
+                .frame(height: 40)
                 .background(Color.clear)
                 .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 6)
+                        .onChanged { value in
+                            let dy = value.translation.height
+                            if dy < 0 {
+                                // Progressive Apple rubber-banding when pulling past top edge
+                                dragOffsetY = -CodaDesignTokens.Motion.rubberband(
+                                    overshoot: -dy,
+                                    dimension: max(120, store.synthRackHeight)
+                                )
+                            } else {
+                                dragOffsetY = dy
+                            }
+                        }
+                        .onEnded { value in
+                            let velocityY = value.predictedEndTranslation.height - value.translation.height
+                            let projected = value.translation.height + CodaDesignTokens.Motion.project(velocity: velocityY * 3.0)
+                            if projected > 110 || value.translation.height > 95 {
+                                dragOffsetY = 0
+                                store.toggleSynthRack(false)
+                            } else {
+                                withAnimation(CodaDesignTokens.Motion.sheetSpring) {
+                                    dragOffsetY = 0
+                                }
+                            }
+                        }
+                )
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(CodaDesignTokens.ProcreateChrome.divider).frame(height: 0.5)
                 }
@@ -49,9 +91,21 @@ struct BottomSynthRackView: View {
         }
         .foregroundStyle(CodaDesignTokens.Colors.primaryInk)
         .background { CodaAcrylic(store: store) }
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14))
-        .shadow(color: CodaDesignTokens.ProcreateChrome.shadowColor, radius: 22, y: -6)
-        .buttonStyle(.plain)
+        .clipShape(rackShape)
+        .overlay(
+            rackShape.strokeBorder(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.18), Color.white.opacity(0.03)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: CodaDesignTokens.ProcreateChrome.bevelLineWidth
+            )
+            .allowsHitTesting(false)
+        )
+        .shadow(color: CodaDesignTokens.ProcreateChrome.shadowColor, radius: 24, y: -8)
+        .offset(y: dragOffsetY)
+        .buttonStyle(CodaTactileButtonStyle())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.bottomSynthRack")
     }

@@ -1916,4 +1916,99 @@ final class EditorStoreRegressionTests: XCTestCase {
         XCTAssertEqual(store.activeLayerPreset, 1)
         XCTAssertEqual(store.value(for: .cutoff), 0.77, accuracy: 1e-4)
     }
+
+    @MainActor
+    func testPencilInsideBottomSynthRackDoesNotPlaceRollNotes() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.setActiveLayer(.melody)
+        store.toggleSynthRack(true)
+        let beforeCount = store.melodyNotes.count
+        let rackPoint = CGPoint(x: 320, y: store.synthRackTop + 90)
+        XCTAssertFalse(store.acceptsPencilLocation(rackPoint),
+                       "Non-knob clicks inside BottomSynthRackView must not hit the roll behind it")
+        store.pencilTouchBegan(at: rackPoint)
+        store.pencilTouchEnded(at: rackPoint)
+        XCTAssertEqual(store.melodyNotes.count, beforeCount,
+                       "Clicking inside BottomSynthRackView must not insert melody notes behind the drawer")
+
+        // Registered synth knobs inside the rack remain Pencil-interactive
+        store.knobFrames[.cutoff] = CGRect(x: 200, y: store.synthRackTop + 120, width: 52, height: 52)
+        XCTAssertTrue(store.acceptsPencilLocation(CGPoint(x: 226, y: store.synthRackTop + 146)),
+                      "Synth rack knobs must still accept Pencil touches & barrel roll")
+    }
+
+    @MainActor
+    func testChordDragLeftRightMovesRegionWithoutResize() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        guard let first = store.regions.first else { return XCTFail("Expected seeded chord") }
+        let originalLength = first.length
+        // Delete second chord so there is room to drag the first chord right
+        if store.regions.count > 1 {
+            try store.session?.edit([.delete(id: store.regions[1].id)])
+        }
+        let stepWidth = CGFloat(store.viewport.stepWidth(in: Double(store.contentWidth)))
+        let leftEdgePoint = CGPoint(
+            x: CodaDesignTokens.Geometry.pitchGutterWidth + CGFloat(store.viewport.x(forStep: Double(first.start), in: Double(store.contentWidth))) + 8,
+            y: store.stripTop + 50
+        )
+        let targetPoint = CGPoint(x: leftEdgePoint.x + stepWidth * 4, y: leftEdgePoint.y)
+        store.pencilTouchBegan(at: leftEdgePoint)
+        store.pencilTouchMoved(to: targetPoint)
+        store.pencilTouchEnded(at: targetPoint)
+        let moved = try XCTUnwrap(store.regions.first(where: { $0.id == first.id }))
+        XCTAssertEqual(moved.start, first.start + 4, "Dragging chord left edge/body right must move its start step")
+        XCTAssertEqual(moved.length, originalLength, "Moving a chord must preserve its length")
+    }
+
+    @MainActor
+    func testTimelineScrubSnapsCleanlyToExactBarStart() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.gridSnap = true
+        let bar3Step = 32
+        let bar3X = CodaDesignTokens.Geometry.pitchGutterWidth + CGFloat(store.viewport.x(forStep: Double(bar3Step), in: Double(store.contentWidth)))
+        // Scrubbing slightly before or after bar 3's line must land dead-on step 32
+        store.scrub(toX: bar3X - 4)
+        XCTAssertEqual(store.playheadStep, bar3Step)
+        store.scrub(toX: bar3X + 4)
+        XCTAssertEqual(store.playheadStep, bar3Step)
+    }
+
+    @MainActor
+    func testFullLengthChordNoteDragsLeftRightAndUpDown() throws {
+        let store = try makeStore()
+        defer { store.session?.suspend() }
+        store.setActiveLayer(.chords)
+        // Clear second region so bar 2 is free to drag a full-length bar-1 chord note into
+        if store.regions.count > 1 {
+            try store.session?.edit([.delete(id: store.regions[1].id)])
+        }
+        let region = try XCTUnwrap(store.regions.first)
+        let note = try XCTUnwrap(region.notes.first)
+        let frame = store.noteFrame(note, in: region)
+        let leftSide = CGPoint(x: frame.minX + 6, y: frame.midY)
+        let stepWidth = CGFloat(store.viewport.stepWidth(in: Double(store.contentWidth)))
+        let dragged = CGPoint(x: leftSide.x + stepWidth * 4, y: leftSide.y - CGFloat(store.viewport.semitoneHeight * 2))
+        store.pencilTouchBegan(at: leftSide)
+        store.pencilTouchMoved(to: dragged)
+        store.pencilTouchEnded(at: dragged)
+        let allNotes = store.regions.flatMap { r in r.notes.map { (r.start * MusicDefaults.ticksPerStep + $0.startTick, $0.pitch) } }
+        XCTAssertTrue(allNotes.contains(where: { $0.0 == (region.start + 4) * MusicDefaults.ticksPerStep && $0.1 == note.pitch + 2 }),
+                      "Dragging a full-length chord note from its left edge must move it horizontally AND vertically")
+    }
+
+    func testOfflineWAVExportProducesValid24BitStereoRIFF() throws {
+        let wav = MusicSession.encodeWAV24Stereo(interleavedFloatData: [0.0, 0.0, 0.25, -0.25, 0.5, -0.5, 0.0, 0.0], sampleRate: 48_000)
+        XCTAssertGreaterThan(wav.count, 44)
+        XCTAssertEqual(String(data: wav.subdata(in: 0..<4), encoding: .ascii), "RIFF")
+        XCTAssertEqual(String(data: wav.subdata(in: 8..<12), encoding: .ascii), "WAVE")
+        XCTAssertEqual(String(data: wav.subdata(in: 12..<16), encoding: .ascii), "fmt ")
+        XCTAssertEqual(String(data: wav.subdata(in: 36..<40), encoding: .ascii), "data")
+        let channels = wav.subdata(in: 22..<24).withUnsafeBytes { $0.load(as: UInt16.self) }
+        let bitsPerSample = wav.subdata(in: 34..<36).withUnsafeBytes { $0.load(as: UInt16.self) }
+        XCTAssertEqual(channels, 2)
+        XCTAssertEqual(bitsPerSample, 24)
+    }
 }
